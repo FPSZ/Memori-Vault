@@ -1,0 +1,13 @@
+[package]
+name = "memori-vault"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Memori-Vault 文件监听与异步防抖模块"
+
+[dependencies]
+notify.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+thiserror.workspace = true
+tracing.workspace = true

@@ -1,0 +1,17 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Runtime data
+.memori.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

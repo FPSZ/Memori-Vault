@@ -1,0 +1,21 @@
+[package]
+name = "memori-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Memori-Vault 核心调度引擎"
+
+[dependencies]
+tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "macros", "signal", "fs"] }
+thiserror.workspace = true
+tracing.workspace = true
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
+memori-vault = { path = "../memori-vault" }
+memori-parser = { path = "../memori-parser" }
+memori-storage = { path = "../memori-storage" }
+
+[dev-dependencies]
+tracing-subscriber = "0.3.20"

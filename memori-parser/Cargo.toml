@@ -1,0 +1,10 @@
+[package]
+name = "memori-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Memori-Vault 解析模块占位骨架"
+
+[dependencies]
+thiserror.workspace = true

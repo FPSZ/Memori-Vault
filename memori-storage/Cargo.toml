@@ -1,0 +1,16 @@
+[package]
+name = "memori-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Memori-Vault 向量存储层"
+
+[dependencies]
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+memori-parser = { path = "../memori-parser" }
+rusqlite = { version = "0.37.0", features = ["bundled"] }
+bincode = "1.3.3"
+serde = { version = "1.0.228", features = ["derive"] }
