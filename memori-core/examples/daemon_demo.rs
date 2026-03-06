@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 use memori_core::MemoriEngine;
+use memori_parser::DocumentChunk;
 
 /// 运行方式：
 /// cargo run -p memori-core --example daemon_demo -- <可选监听目录>
@@ -58,15 +59,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
 
-                println!("\nTop-{} 相关片段：", results.len());
-                for (index, (chunk, score)) in results.iter().enumerate() {
-                    println!("------------------------------------------------------------");
-                    println!("#{}  相似度: {:.4}", index + 1, score);
-                    println!("来源: {}", chunk.file_path.display());
-                    println!("块序号: {}", chunk.chunk_index);
-                    println!("内容:\n{}", chunk.content);
+                let text_context = build_text_context(&results);
+                let graph_context = match engine.get_graph_context_for_results(&results).await {
+                    Ok(context) => context,
+                    Err(err) => {
+                        println!(
+                            "\n[warn] 图谱上下文加载失败，将仅使用文本上下文回答: {}\n",
+                            err
+                        );
+                        String::new()
+                    }
+                };
+
+                match engine
+                    .generate_answer(query, &text_context, &graph_context)
+                    .await
+                {
+                    Ok(answer) => {
+                        println!("\n最终回答：\n{}\n", answer);
+                    }
+                    Err(err) => {
+                        println!(
+                            "\n[warn] 大模型答案生成失败，回退为向量检索结果展示: {}\n",
+                            err
+                        );
+                    }
                 }
-                println!("------------------------------------------------------------\n");
+
+                print_references(&results);
             }
             Err(err) => {
                 println!("\n检索失败: {}\n", err);
@@ -78,4 +98,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Memori-Vault 已安全退出。");
 
     Ok(())
+}
+
+fn build_text_context(results: &[(DocumentChunk, f32)]) -> String {
+    let mut sections = Vec::with_capacity(results.len());
+    for (idx, (chunk, score)) in results.iter().enumerate() {
+        sections.push(format!(
+            "片段#{}\n来源: {}\n块序号: {}\n相似度: {:.4}\n内容:\n{}",
+            idx + 1,
+            chunk.file_path.display(),
+            chunk.chunk_index,
+            score,
+            chunk.content
+        ));
+    }
+    sections.join("\n\n")
+}
+
+fn print_references(results: &[(DocumentChunk, f32)]) {
+    println!("参考来源：");
+    for (index, (chunk, score)) in results.iter().enumerate() {
+        println!("------------------------------------------------------------");
+        println!("#{}  相似度: {:.4}", index + 1, score);
+        println!("来源: {}", chunk.file_path.display());
+        println!("块序号: {}", chunk.chunk_index);
+        println!("内容:\n{}", chunk.content);
+    }
+    println!("------------------------------------------------------------\n");
 }

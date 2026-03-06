@@ -1,10 +1,13 @@
 mod graph_extractor;
+mod llm_generator;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use graph_extractor::{GraphData, extract_entities};
-use memori_parser::{DocumentChunk, ParserStub, parse_and_chunk};
+use llm_generator::generate_answer as generate_llm_answer;
+pub use memori_parser::DocumentChunk;
+use memori_parser::{ParserStub, parse_and_chunk};
 use memori_storage::{SqliteStore, StorageError, VectorStore};
 use memori_vault::{
     MemoriVaultConfig, MemoriVaultError, MemoriVaultHandle, WatchEvent, WatchEventKind,
@@ -18,6 +21,14 @@ use tracing::{debug, error, info, warn};
 const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434";
 const DEFAULT_OLLAMA_EMBED_MODEL: &str = "nomic-embed-text";
 const DEFAULT_DB_FILE_NAME: &str = ".memori.db";
+
+/// 前端/CLI 可消费的 Vault 统计信息。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VaultStats {
+    pub document_count: u64,
+    pub chunk_count: u64,
+    pub graph_node_count: u64,
+}
 
 /// 全局共享状态。
 /// 当前持有 parser 占位、SQLite 持久化存储与本地 Ollama 客户端。
@@ -151,6 +162,18 @@ pub enum EngineError {
         source: serde_json::Error,
     },
 
+    #[error("答案生成请求失败: {0}")]
+    AnswerGenerateRequest(#[source] reqwest::Error),
+
+    #[error("答案生成接口返回非成功状态: {status}, body: {body}")]
+    AnswerGenerateHttpStatus { status: u16, body: String },
+
+    #[error("答案生成响应反序列化失败: {0}")]
+    AnswerGenerateDeserialize(#[source] reqwest::Error),
+
+    #[error("答案生成响应为空")]
+    AnswerGenerateEmpty,
+
     #[error("获取当前工作目录失败: {0}")]
     CurrentDir(#[source] std::io::Error),
 
@@ -234,6 +257,69 @@ impl MemoriEngine {
         Ok(results)
     }
 
+    /// 根据检索结果对应的 chunk_id，拉取 1-hop 图谱上下文。
+    pub async fn get_graph_context_for_results(
+        &self,
+        results: &[(DocumentChunk, f32)],
+    ) -> Result<String, EngineError> {
+        if results.is_empty() {
+            return Ok(String::new());
+        }
+
+        let mut chunk_ids = Vec::new();
+        for (chunk, _score) in results {
+            match self
+                .state
+                .vector_store
+                .resolve_chunk_id(&chunk.file_path, chunk.chunk_index)
+                .await?
+            {
+                Some(chunk_id) => chunk_ids.push(chunk_id),
+                None => {
+                    warn!(
+                        path = %chunk.file_path.display(),
+                        chunk_index = chunk.chunk_index,
+                        "未能从检索结果反查 chunk_id，已跳过该条图谱上下文"
+                    );
+                }
+            }
+        }
+
+        chunk_ids.sort_unstable();
+        chunk_ids.dedup();
+
+        let graph_context = self
+            .state
+            .vector_store
+            .get_graph_context_for_chunks(&chunk_ids)
+            .await?;
+
+        Ok(graph_context)
+    }
+
+    /// 生成最终答案：融合向量文本上下文与图谱上下文。
+    pub async fn generate_answer(
+        &self,
+        question: &str,
+        text_context: &str,
+        graph_context: &str,
+    ) -> Result<String, EngineError> {
+        generate_answer_with_context(question, text_context, graph_context).await
+    }
+
+    /// 返回当前 Vault 的核心规模统计。
+    pub async fn get_vault_stats(&self) -> Result<VaultStats, EngineError> {
+        let document_count = self.state.vector_store.count_documents().await?;
+        let chunk_count = self.state.vector_store.count_chunks().await?;
+        let graph_node_count = self.state.vector_store.count_nodes().await?;
+
+        Ok(VaultStats {
+            document_count,
+            chunk_count,
+            graph_node_count,
+        })
+    }
+
     /// 启动异步守护任务，持续消费文件事件并触发解析、向量化与图谱提取流程。
     pub fn start_daemon(&mut self) -> Result<(), EngineError> {
         if self.daemon_task.is_some() {
@@ -301,6 +387,15 @@ impl MemoriEngine {
 
         Ok(())
     }
+}
+
+/// 提供给外部壳层（如 Tauri IPC）的答案合成入口。
+pub async fn generate_answer_with_context(
+    question: &str,
+    text_context: &str,
+    graph_context: &str,
+) -> Result<String, EngineError> {
+    generate_llm_answer(question, text_context, graph_context).await
 }
 
 async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {

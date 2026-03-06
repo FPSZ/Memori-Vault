@@ -1,9 +1,10 @@
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use memori_parser::DocumentChunk;
-use rusqlite::{Connection, ErrorCode, OptionalExtension, params};
+use rusqlite::{Connection, ErrorCode, OptionalExtension, params, params_from_iter};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -73,6 +74,11 @@ impl InMemoryStore {
     /// 用于调试/测试的记录总数。
     pub async fn len(&self) -> usize {
         self.records.read().await.len()
+    }
+
+    /// 与 `len` 成对提供，满足 clippy `len_without_is_empty` 约束。
+    pub async fn is_empty(&self) -> bool {
+        self.records.read().await.is_empty()
     }
 }
 
@@ -315,10 +321,180 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// 根据检索到的 chunk_id 列表生成 1-hop 图谱上下文。
+    pub async fn get_graph_context_for_chunks(
+        &self,
+        chunk_ids: &[i64],
+    ) -> Result<String, StorageError> {
+        if chunk_ids.is_empty() {
+            return Ok(String::new());
+        }
+
+        let conn_guard = self.lock_conn()?;
+
+        // 1) 先由 chunk_id 找到所有关联节点
+        let chunk_placeholders = make_placeholders(chunk_ids.len());
+        let node_id_query = format!(
+            "SELECT DISTINCT node_id FROM chunk_nodes WHERE chunk_id IN ({})",
+            chunk_placeholders
+        );
+        let mut node_id_stmt = conn_guard
+            .prepare(&node_id_query)
+            .map_err(map_sqlite_error)?;
+        let node_id_rows = node_id_stmt
+            .query_map(params_from_iter(chunk_ids.iter()), |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(map_sqlite_error)?;
+
+        let mut node_ids = Vec::new();
+        for row in node_id_rows {
+            node_ids.push(row.map_err(map_sqlite_error)?);
+        }
+        if node_ids.is_empty() {
+            return Ok(String::new());
+        }
+
+        let mut unique_node_ids = Vec::new();
+        let mut seen = HashSet::new();
+        for node_id in node_ids {
+            if seen.insert(node_id.clone()) {
+                unique_node_ids.push(node_id);
+            }
+        }
+
+        // 2) 加载节点元数据，用于输出可读关系文本
+        let node_placeholders = make_placeholders(unique_node_ids.len());
+        let node_meta_query = format!(
+            "SELECT id, name, label, COALESCE(description, '')
+             FROM nodes
+             WHERE id IN ({})",
+            node_placeholders
+        );
+        let mut node_meta_stmt = conn_guard
+            .prepare(&node_meta_query)
+            .map_err(map_sqlite_error)?;
+        let node_meta_rows = node_meta_stmt
+            .query_map(params_from_iter(unique_node_ids.iter()), |row| {
+                let id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let label: String = row.get(2)?;
+                let description: String = row.get(3)?;
+                Ok((id, name, label, description))
+            })
+            .map_err(map_sqlite_error)?;
+
+        let mut node_meta = HashMap::new();
+        for row in node_meta_rows {
+            let (id, name, label, description) = row.map_err(map_sqlite_error)?;
+            node_meta.insert(id, (name, label, description));
+        }
+
+        // 3) 查询 1-hop 边：source 或 target 命中节点集合即可
+        let edge_placeholders = make_placeholders(unique_node_ids.len());
+        let edge_query = format!(
+            "SELECT id, source_node, target_node, relation
+             FROM edges
+             WHERE source_node IN ({0}) OR target_node IN ({0})",
+            edge_placeholders
+        );
+        let mut edge_stmt = conn_guard.prepare(&edge_query).map_err(map_sqlite_error)?;
+        let edge_params: Vec<&str> = unique_node_ids
+            .iter()
+            .chain(unique_node_ids.iter())
+            .map(String::as_str)
+            .collect();
+        let edge_rows = edge_stmt
+            .query_map(params_from_iter(edge_params), |row| {
+                let id: String = row.get(0)?;
+                let source_node: String = row.get(1)?;
+                let target_node: String = row.get(2)?;
+                let relation: String = row.get(3)?;
+                Ok((id, source_node, target_node, relation))
+            })
+            .map_err(map_sqlite_error)?;
+
+        let mut edge_lines = Vec::new();
+        for row in edge_rows {
+            let (_id, source_node, target_node, relation) = row.map_err(map_sqlite_error)?;
+
+            let source_name = node_meta
+                .get(&source_node)
+                .map(|(name, _, _)| name.clone())
+                .unwrap_or(source_node);
+            let target_name = node_meta
+                .get(&target_node)
+                .map(|(name, _, _)| name.clone())
+                .unwrap_or(target_node);
+
+            edge_lines.push(format!(
+                "[{}] - ({}) -> [{}]",
+                source_name, relation, target_name
+            ));
+        }
+        edge_lines.sort();
+        edge_lines.dedup();
+
+        // 如果暂无边，回退到节点摘要，给上层 LLM 一个可用图谱上下文。
+        if edge_lines.is_empty() {
+            let mut node_lines = Vec::new();
+            for node_id in unique_node_ids {
+                if let Some((name, label, description)) = node_meta.get(&node_id) {
+                    if description.trim().is_empty() {
+                        node_lines.push(format!("[{}] ({})", name, label));
+                    } else {
+                        node_lines.push(format!("[{}] ({}) - {}", name, label, description));
+                    }
+                }
+            }
+            node_lines.sort();
+            node_lines.dedup();
+            return Ok(node_lines.join("\n"));
+        }
+
+        Ok(edge_lines.join("\n"))
+    }
+
     fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, StorageError> {
         self.conn
             .lock()
             .map_err(|_| StorageError::LockPoisoned("sqlite connection"))
+    }
+
+    /// 统计 documents 表总行数。
+    pub async fn count_documents(&self) -> Result<u64, StorageError> {
+        let conn_guard = self.lock_conn()?;
+        let count: i64 = conn_guard
+            .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))
+            .map_err(map_sqlite_error)?;
+        u64::try_from(count).map_err(|_| StorageError::NegativeCount {
+            table: "documents",
+            count,
+        })
+    }
+
+    /// 统计 chunks 表总行数。
+    pub async fn count_chunks(&self) -> Result<u64, StorageError> {
+        let conn_guard = self.lock_conn()?;
+        let count: i64 = conn_guard
+            .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))
+            .map_err(map_sqlite_error)?;
+        u64::try_from(count).map_err(|_| StorageError::NegativeCount {
+            table: "chunks",
+            count,
+        })
+    }
+
+    /// 统计 nodes 表总行数。
+    pub async fn count_nodes(&self) -> Result<u64, StorageError> {
+        let conn_guard = self.lock_conn()?;
+        let count: i64 = conn_guard
+            .query_row("SELECT COUNT(*) FROM nodes", [], |row| row.get(0))
+            .map_err(map_sqlite_error)?;
+        u64::try_from(count).map_err(|_| StorageError::NegativeCount {
+            table: "nodes",
+            count,
+        })
     }
 }
 
@@ -569,6 +745,12 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
+fn make_placeholders(count: usize) -> String {
+    std::iter::repeat_n("?", count)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn map_sqlite_error(err: rusqlite::Error) -> StorageError {
     match &err {
         rusqlite::Error::SqliteFailure(inner, _) => match inner.code {
@@ -625,4 +807,7 @@ pub enum StorageError {
 
     #[error("IO 操作失败: {0}")]
     Io(#[source] std::io::Error),
+
+    #[error("统计结果异常，表 {table} 出现负数计数: {count}")]
+    NegativeCount { table: &'static str, count: i64 },
 }

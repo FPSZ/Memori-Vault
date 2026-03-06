@@ -15,3 +15,11 @@
 Thumbs.db
 .vscode/
 .idea/
+
+# UI (Vite/React)
+ui/node_modules/
+ui/dist/
+
+# Plan
+plan.md
+UI.md
