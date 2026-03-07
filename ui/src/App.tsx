@@ -439,7 +439,7 @@ export default function App() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 12 }}
                   transition={{ duration: 0.24, ease: "easeOut" }}
-                  className="mx-auto h-full w-full max-w-4xl overflow-y-auto pt-36"
+                  className="no-scrollbar mx-auto h-full w-full max-w-4xl overflow-y-auto pt-36"
                 >
                   {loading && (
                     <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#11161d] px-5 py-4 text-sm text-[#9aa4af]">

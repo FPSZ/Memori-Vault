@@ -7,6 +7,8 @@ use tauri::{Manager, State};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
+const DEFAULT_RETRIEVE_TOP_K: usize = 20;
+
 struct DesktopState {
     engine: Arc<Mutex<Option<MemoriEngine>>>,
     init_error: Arc<Mutex<Option<String>>>,
@@ -29,7 +31,7 @@ async fn ask_vault(query: String, state: State<'_, DesktopState>) -> Result<Stri
     };
 
     let results = engine
-        .search(&query, 3)
+        .search(&query, DEFAULT_RETRIEVE_TOP_K)
         .await
         .map_err(|err| err.to_string())?;
     if results.is_empty() {
