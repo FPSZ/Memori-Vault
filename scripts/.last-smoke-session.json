@@ -1,10 +1,10 @@
 {
-  "watchRoot": "D:\\AI\\memori-smoke",
-  "desktopPid": 42308,
-  "uiPid": null,
-  "startedAt": "2026-03-07T12:23:02",
-  "repoRoot": "D:\\Create\\tools\\Memori‑Vault",
   "dbPath": "D:\\Create\\tools\\Memori‑Vault\\.memori.db",
+  "watchRoot": "D:\\AI\\memori-smoke",
+  "uiHost": "127.0.0.1",
+  "startedAt": "2026-03-07T12:38:11",
   "uiPort": 1420,
-  "uiHost": "127.0.0.1"
+  "desktopPid": 46772,
+  "uiPid": null,
+  "repoRoot": "D:\\Create\\tools\\Memori‑Vault"
 }

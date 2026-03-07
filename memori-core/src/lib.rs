@@ -3,6 +3,7 @@ mod llm_generator;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use graph_extractor::{GraphData, extract_entities};
 use llm_generator::generate_answer as generate_llm_answer;
@@ -221,6 +222,7 @@ pub struct MemoriEngine {
     event_rx: Option<mpsc::Receiver<WatchEvent>>,
     daemon_task: Option<JoinHandle<Result<(), EngineError>>>,
     memori_vault_handle: Option<MemoriVaultHandle>,
+    watch_root: Option<PathBuf>,
 }
 
 impl MemoriEngine {
@@ -231,6 +233,7 @@ impl MemoriEngine {
             event_rx: Some(event_rx),
             daemon_task: None,
             memori_vault_handle: None,
+            watch_root: None,
         }
     }
 
@@ -242,6 +245,7 @@ impl MemoriEngine {
 
     /// 通过配置引导引擎。
     pub fn bootstrap_with_config(config: MemoriVaultConfig) -> Result<Self, EngineError> {
+        let watch_root = config.root.clone();
         let (event_tx, event_rx) = create_event_channel();
         let memori_vault_handle = spawn_memori_vault(config, event_tx)?;
         let db_path = resolve_db_path()?;
@@ -249,6 +253,7 @@ impl MemoriEngine {
         let state = Arc::new(AppState::new(db_path)?);
         let mut engine = Self::new(state, event_rx);
         engine.memori_vault_handle = Some(memori_vault_handle);
+        engine.watch_root = Some(watch_root);
         Ok(engine)
     }
 
@@ -353,6 +358,7 @@ impl MemoriEngine {
             .take()
             .ok_or(EngineError::EventChannelUnavailable)?;
         let state = Arc::clone(&self.state);
+        let watch_root = self.watch_root.clone();
 
         let task = tokio::spawn(async move {
             info!("memori-core daemon started");
@@ -372,9 +378,28 @@ impl MemoriEngine {
                 }
             }
 
+            if let Some(root) = watch_root {
+                let existing_files = collect_supported_text_files_recursively(root.clone()).await;
+                info!(
+                    root = %root.display(),
+                    file_count = existing_files.len(),
+                    "启动时递归扫描完成，准备回灌子目录中的历史文档"
+                );
+
+                for path in existing_files {
+                    let event = WatchEvent {
+                        kind: WatchEventKind::Modified,
+                        path,
+                        old_path: None,
+                        observed_at: SystemTime::now(),
+                    };
+                    process_file_event(&state, &event).await;
+                }
+            }
+
             while let Some(event) = event_rx.recv().await {
                 match event.kind {
-                    WatchEventKind::Created | WatchEventKind::Modified => {
+                    WatchEventKind::Created | WatchEventKind::Modified | WatchEventKind::Renamed => {
                         process_file_event(&state, &event).await;
                     }
                     _ => {
@@ -574,4 +599,71 @@ async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {
             edge_count
         );
     }
+}
+
+async fn collect_supported_text_files_recursively(root: PathBuf) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut stack = vec![root];
+
+    while let Some(dir) = stack.pop() {
+        let mut read_dir = match tokio::fs::read_dir(&dir).await {
+            Ok(reader) => reader,
+            Err(err) => {
+                warn!(
+                    path = %dir.display(),
+                    error = %err,
+                    "递归扫描目录失败，已跳过该目录"
+                );
+                continue;
+            }
+        };
+
+        loop {
+            let next = match read_dir.next_entry().await {
+                Ok(entry) => entry,
+                Err(err) => {
+                    warn!(
+                        path = %dir.display(),
+                        error = %err,
+                        "读取目录项失败，已跳过剩余目录项"
+                    );
+                    break;
+                }
+            };
+
+            let Some(entry) = next else {
+                break;
+            };
+
+            let path = entry.path();
+            match entry.file_type().await {
+                Ok(file_type) if file_type.is_dir() => {
+                    stack.push(path);
+                }
+                Ok(file_type) if file_type.is_file() => {
+                    if is_supported_text_file(&path) {
+                        files.push(path);
+                    }
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    warn!(
+                        path = %path.display(),
+                        error = %err,
+                        "读取文件类型失败，已跳过该路径"
+                    );
+                }
+            }
+        }
+    }
+
+    files.sort();
+    files
+}
+
+fn is_supported_text_file(path: &std::path::Path) -> bool {
+    let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("txt")
 }
