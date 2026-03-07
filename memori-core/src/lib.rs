@@ -19,8 +19,9 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434";
-const DEFAULT_OLLAMA_EMBED_MODEL: &str = "nomic-embed-text";
+const DEFAULT_OLLAMA_EMBED_MODEL: &str = "nomic-embed-text:latest";
 const DEFAULT_DB_FILE_NAME: &str = ".memori.db";
+const MEMORI_DB_PATH_ENV: &str = "MEMORI_DB_PATH";
 
 /// 前端/CLI 可消费的 Vault 统计信息。
 #[derive(Debug, Clone, serde::Serialize)]
@@ -60,7 +61,11 @@ pub struct OllamaEmbeddingClient {
 
 impl Default for OllamaEmbeddingClient {
     fn default() -> Self {
-        Self::new(DEFAULT_OLLAMA_BASE_URL, DEFAULT_OLLAMA_EMBED_MODEL)
+        let base_url = std::env::var("MEMORI_OLLAMA_BASE_URL")
+            .unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string());
+        let model = std::env::var("MEMORI_EMBED_MODEL")
+            .unwrap_or_else(|_| DEFAULT_OLLAMA_EMBED_MODEL.to_string());
+        Self::new(base_url, model)
     }
 }
 
@@ -74,13 +79,33 @@ impl OllamaEmbeddingClient {
     }
 
     pub async fn embed_text(&self, prompt: &str) -> Result<Vec<f32>, OllamaClientError> {
+        match self.embed_text_with_model(&self.model, prompt).await {
+            // Ollama 常见 tag 省略场景：`nomic-embed-text` 实际只有 `nomic-embed-text:latest`
+            // 若命中 404 not found 且当前 model 无 tag，则自动回退一次。
+            Err(OllamaClientError::HttpStatus { status, body })
+                if status == 404
+                    && body.contains("not found")
+                    && !self.model.contains(':') =>
+            {
+                let fallback_model = format!("{}:latest", self.model);
+                self.embed_text_with_model(&fallback_model, prompt).await
+            }
+            other => other,
+        }
+    }
+
+    async fn embed_text_with_model(
+        &self,
+        model: &str,
+        prompt: &str,
+    ) -> Result<Vec<f32>, OllamaClientError> {
         let url = format!("{}/api/embeddings", self.base_url.trim_end_matches('/'));
 
         let response = self
             .http
             .post(url)
             .json(&OllamaEmbeddingRequest {
-                model: &self.model,
+                model,
                 prompt,
             })
             .send()
@@ -219,10 +244,7 @@ impl MemoriEngine {
     pub fn bootstrap_with_config(config: MemoriVaultConfig) -> Result<Self, EngineError> {
         let (event_tx, event_rx) = create_event_channel();
         let memori_vault_handle = spawn_memori_vault(config, event_tx)?;
-
-        let db_path = std::env::current_dir()
-            .map_err(EngineError::CurrentDir)?
-            .join(DEFAULT_DB_FILE_NAME);
+        let db_path = resolve_db_path()?;
 
         let state = Arc::new(AppState::new(db_path)?);
         let mut engine = Self::new(state, event_rx);
@@ -387,6 +409,19 @@ impl MemoriEngine {
 
         Ok(())
     }
+}
+
+fn resolve_db_path() -> Result<PathBuf, EngineError> {
+    if let Ok(path) = std::env::var(MEMORI_DB_PATH_ENV) {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+
+    Ok(std::env::current_dir()
+        .map_err(EngineError::CurrentDir)?
+        .join(DEFAULT_DB_FILE_NAME))
 }
 
 /// 提供给外部壳层（如 Tauri IPC）的答案合成入口。

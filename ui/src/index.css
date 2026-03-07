@@ -1,0 +1,297 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  background-color: #0d1117;
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  color: #c9d1d9;
+  font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  line-height: 1.5;
+}
+
+.glass-orb {
+  position: relative;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow:
+    inset 0 -8px 14px rgba(88, 166, 255, 0.2),
+    inset 0 10px 14px rgba(255, 255, 255, 0.05),
+    0 0 15px rgba(88, 166, 255, 0.1);
+  background:
+    radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 38%),
+    radial-gradient(circle at 60% 70%, rgba(88, 166, 255, 0.08), rgba(88, 166, 255, 0) 65%),
+    #0d1117;
+}
+
+.glass-orb-light {
+  position: absolute;
+  top: 6%;
+  left: 14%;
+  width: 42%;
+  height: 20%;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.42) 0%,
+    rgba(255, 255, 255, 0.07) 100%
+  );
+  filter: blur(0.4px);
+  pointer-events: none;
+  z-index: 4;
+}
+
+.glass-orb-fluid {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.glass-orb-liquid {
+  position: absolute;
+  left: -35%;
+  width: 170%;
+  height: 170%;
+  top: var(--liquid-top);
+  border-radius: 42%;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(230, 246, 255, 0.28), rgba(230, 246, 255, 0) 48%),
+    linear-gradient(180deg, rgba(121, 191, 255, 0.96) 0%, rgba(44, 132, 255, 0.98) 60%, rgba(23, 91, 220, 0.98) 100%);
+  box-shadow:
+    inset 0 -10px 18px rgba(21, 78, 186, 0.46),
+    inset 0 9px 14px rgba(222, 243, 255, 0.22);
+  transition: top 1s cubic-bezier(0.2, 0.72, 0.2, 1);
+  animation: orb-wave-spin 6.2s linear infinite;
+}
+
+.glass-orb-liquid-back {
+  opacity: 0.58;
+  filter: saturate(0.92);
+  animation-duration: 9.6s;
+  animation-direction: reverse;
+}
+
+.glass-orb-foam {
+  position: absolute;
+  left: 12%;
+  top: 11%;
+  width: 76%;
+  height: 13%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(234, 247, 255, 0.62), rgba(234, 247, 255, 0.12));
+  filter: blur(0.35px);
+  animation: orb-foam-drift 4.2s ease-in-out infinite;
+}
+
+.glass-orb-liquid-body {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(32, 112, 255, 0.7) 0%,
+      rgba(88, 166, 255, 0.94) 48%,
+      rgba(39, 128, 255, 0.75) 100%
+    ),
+    linear-gradient(to top, rgba(31, 111, 235, 0.9), rgba(88, 166, 255, 0.95));
+  transition: height 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow:
+    inset 0 8px 14px rgba(255, 255, 255, 0.22),
+    inset 0 -6px 12px rgba(16, 66, 145, 0.45);
+  border-top-left-radius: 52% 20%;
+  border-top-right-radius: 48% 18%;
+  overflow: visible;
+  z-index: 2;
+}
+
+.glass-orb-meniscus {
+  position: absolute;
+  left: -7%;
+  top: -0.28rem;
+  width: 114%;
+  height: 0.56rem;
+  border-radius: 50%;
+  background: linear-gradient(
+    180deg,
+    rgba(195, 230, 255, 0.62) 0%,
+    rgba(114, 188, 255, 0.28) 45%,
+    rgba(72, 148, 255, 0.12) 100%
+  );
+  box-shadow:
+    0 -1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -2px 4px rgba(19, 77, 174, 0.32);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.glass-orb-glint {
+  position: absolute;
+  width: 140%;
+  height: 100%;
+  border-radius: 48%;
+  background: rgba(230, 245, 255, 0.25);
+  filter: blur(0.35px);
+}
+
+.glass-orb-glint-a {
+  left: -30%;
+  animation: meniscus-flow-a 3.8s ease-in-out infinite;
+}
+
+.glass-orb-glint-b {
+  left: -10%;
+  background: rgba(28, 105, 232, 0.25);
+  animation: meniscus-flow-b 5.4s ease-in-out infinite;
+}
+
+@keyframes meniscus-flow-a {
+  0% {
+    transform: translateX(-12%) translateY(0px) scaleY(0.95);
+  }
+  35% {
+    transform: translateX(0%) translateY(-1px) scaleY(1.06);
+  }
+  70% {
+    transform: translateX(8%) translateY(0px) scaleY(0.98);
+  }
+  100% {
+    transform: translateX(-12%) translateY(0px) scaleY(0.95);
+  }
+}
+
+@keyframes meniscus-flow-b {
+  0% {
+    transform: translateX(10%) translateY(0px) scaleY(1.04);
+  }
+  45% {
+    transform: translateX(2%) translateY(1px) scaleY(0.94);
+  }
+  80% {
+    transform: translateX(-8%) translateY(0px) scaleY(1);
+  }
+  100% {
+    transform: translateX(10%) translateY(0px) scaleY(1.04);
+  }
+}
+
+@keyframes orb-wave-spin {
+  0% {
+    transform: rotate(0deg) translateX(-2%);
+  }
+  50% {
+    transform: rotate(180deg) translateX(2%);
+  }
+  100% {
+    transform: rotate(360deg) translateX(-2%);
+  }
+}
+
+@keyframes orb-foam-drift {
+  0% {
+    transform: translateX(-6%) translateY(0px);
+  }
+  50% {
+    transform: translateX(6%) translateY(-1px);
+  }
+  100% {
+    transform: translateX(-6%) translateY(0px);
+  }
+}
+
+.md-preview > :first-child {
+  margin-top: 0;
+}
+
+.md-preview > :last-child {
+  margin-bottom: 0;
+}
+
+.md-preview h1,
+.md-preview h2,
+.md-preview h3,
+.md-preview h4 {
+  margin: 0.45rem 0 0.35rem;
+  color: #c9d1d9;
+  line-height: 1.35;
+}
+
+.md-preview h1 {
+  font-size: 1rem;
+}
+
+.md-preview h2 {
+  font-size: 0.95rem;
+}
+
+.md-preview h3,
+.md-preview h4 {
+  font-size: 0.9rem;
+}
+
+.md-preview p {
+  margin: 0.32rem 0;
+}
+
+.md-preview ul,
+.md-preview ol {
+  margin: 0.3rem 0 0.3rem 1.05rem;
+  padding: 0;
+}
+
+.md-preview li {
+  margin: 0.14rem 0;
+}
+
+.md-preview code {
+  background: rgba(110, 118, 129, 0.2);
+  color: #c9d1d9;
+  border-radius: 0.28rem;
+  padding: 0.02rem 0.28rem;
+  font-size: 0.86em;
+}
+
+.md-preview pre {
+  margin: 0.35rem 0;
+  overflow-x: auto;
+  border: 1px solid rgba(48, 54, 61, 0.9);
+  border-radius: 0.55rem;
+  background: #11161d;
+  padding: 0.42rem 0.55rem;
+}
+
+.md-preview pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.md-preview a {
+  color: #58a6ff;
+  text-decoration: none;
+}
+
+.md-preview a:hover {
+  text-decoration: underline;
+}

@@ -1,14 +1,15 @@
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 
-use memori_core::{AppState, DocumentChunk, MemoriEngine, VaultStats};
+use memori_core::{DocumentChunk, MemoriEngine, VaultStats};
 use tauri::{Manager, State};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 struct DesktopState {
-    app_state: Arc<AppState>,
-    engine: Arc<Mutex<MemoriEngine>>,
+    engine: Arc<Mutex<Option<MemoriEngine>>>,
+    init_error: Arc<Mutex<Option<String>>>,
 }
 
 #[tauri::command]
@@ -18,13 +19,16 @@ async fn ask_vault(query: String, state: State<'_, DesktopState>) -> Result<Stri
         return Ok("请输入一个非空问题。".to_string());
     }
 
-    // 显式读取 app_state，确保其生命周期被 Tauri 状态托管。
-    let _app_state_ref = Arc::clone(&state.app_state);
+    let engine_guard = state.engine.lock().await;
+    let init_error_guard = state.init_error.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_guard.as_ref() {
+            return Err(format!("引擎初始化失败: {message}"));
+        }
+        return Err("引擎尚在初始化中，请稍后重试。".to_string());
+    };
 
-    let engine = Arc::clone(&state.engine);
-    let engine_guard = engine.lock().await;
-
-    let results = engine_guard
+    let results = engine
         .search(&query, 3)
         .await
         .map_err(|err| err.to_string())?;
@@ -33,7 +37,7 @@ async fn ask_vault(query: String, state: State<'_, DesktopState>) -> Result<Stri
     }
 
     let text_context = build_text_context(&results);
-    let graph_context = match engine_guard.get_graph_context_for_results(&results).await {
+    let graph_context = match engine.get_graph_context_for_results(&results).await {
         Ok(context) => context,
         Err(err) => {
             warn!(error = %err, "图谱上下文构建失败，降级为纯文本上下文回答");
@@ -42,7 +46,7 @@ async fn ask_vault(query: String, state: State<'_, DesktopState>) -> Result<Stri
     };
 
     let references = format_references(&results);
-    match engine_guard
+    match engine
         .generate_answer(&query, &text_context, &graph_context)
         .await
     {
@@ -58,12 +62,79 @@ async fn ask_vault(query: String, state: State<'_, DesktopState>) -> Result<Stri
 
 #[tauri::command]
 async fn get_vault_stats(state: State<'_, DesktopState>) -> Result<VaultStats, String> {
-    let engine = Arc::clone(&state.engine);
-    let engine_guard = engine.lock().await;
-    engine_guard
+    let engine_guard = state.engine.lock().await;
+    let init_error_guard = state.init_error.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_guard.as_ref() {
+            return Err(format!("引擎初始化失败: {message}"));
+        }
+        return Err("引擎尚在初始化中，请稍后重试。".to_string());
+    };
+    engine
         .get_vault_stats()
         .await
         .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn open_source_location(path: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("文件路径为空，无法打开。".to_string());
+    }
+
+    let target = PathBuf::from(trimmed);
+    if !target.exists() {
+        return Err(format!("文件不存在: {}", target.display()));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let status = Command::new("explorer")
+            .arg(format!("/select,{}", target.display()))
+            .status()
+            .map_err(|err| format!("打开文件位置失败: {err}"))?;
+        if !status.success() {
+            return Err("打开文件位置失败: explorer 返回非零状态".to_string());
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("open")
+            .arg("-R")
+            .arg(&target)
+            .status()
+            .map_err(|err| format!("打开文件位置失败: {err}"))?;
+        if !status.success() {
+            return Err("打开文件位置失败: open 返回非零状态".to_string());
+        }
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let open_path = if target.is_file() {
+            target
+                .parent()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."))
+        } else {
+            target
+        };
+        let status = Command::new("xdg-open")
+            .arg(open_path)
+            .status()
+            .map_err(|err| format!("打开文件位置失败: {err}"))?;
+        if !status.success() {
+            return Err("打开文件位置失败: xdg-open 返回非零状态".to_string());
+        }
+        return Ok(());
+    }
+
+    #[allow(unreachable_code)]
+    Err("当前系统暂不支持打开文件位置".to_string())
 }
 
 pub fn run() {
@@ -74,39 +145,50 @@ pub fn run() {
         .try_init();
 
     let watch_root = resolve_watch_root();
-    let engine = match MemoriEngine::bootstrap(watch_root.clone()) {
-        Ok(engine) => engine,
-        Err(err) => {
-            error!(error = %err, "初始化 MemoriEngine 失败");
-            return;
-        }
-    };
-
-    let app_state = engine.state();
-    let shared_engine = Arc::new(Mutex::new(engine));
+    let shared_engine = Arc::new(Mutex::new(None));
     let daemon_engine = Arc::clone(&shared_engine);
+    let init_error = Arc::new(Mutex::new(None));
+    let init_error_worker = Arc::clone(&init_error);
 
     tauri::Builder::default()
         .setup(move |app| {
             let daemon_watch_root = watch_root.clone();
             tauri::async_runtime::spawn(async move {
-                let mut guard = daemon_engine.lock().await;
-                match guard.start_daemon() {
-                    Ok(()) => info!(
-                        watch_root = %daemon_watch_root.display(),
-                        "memori-desktop daemon started in setup hook"
-                    ),
-                    Err(err) => error!(error = %err, "memori-desktop daemon start failed"),
+                match MemoriEngine::bootstrap(daemon_watch_root.clone()) {
+                    Ok(mut engine) => match engine.start_daemon() {
+                        Ok(()) => {
+                            let mut guard = daemon_engine.lock().await;
+                            *guard = Some(engine);
+                            info!(
+                                watch_root = %daemon_watch_root.display(),
+                                "memori-desktop daemon started in setup hook"
+                            );
+                        }
+                        Err(err) => {
+                            let mut init_err_guard = init_error_worker.lock().await;
+                            *init_err_guard = Some(err.to_string());
+                            error!(error = %err, "memori-desktop daemon start failed");
+                        }
+                    },
+                    Err(err) => {
+                        let mut init_err_guard = init_error_worker.lock().await;
+                        *init_err_guard = Some(err.to_string());
+                        error!(error = %err, "memori-desktop engine bootstrap failed");
+                    }
                 }
             });
 
             app.manage(DesktopState {
-                app_state: Arc::clone(&app_state),
                 engine: Arc::clone(&shared_engine),
+                init_error: Arc::clone(&init_error),
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![ask_vault, get_vault_stats])
+        .invoke_handler(tauri::generate_handler![
+            ask_vault,
+            get_vault_stats,
+            open_source_location
+        ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|err| {
             error!(error = %err, "tauri runtime exited with error");

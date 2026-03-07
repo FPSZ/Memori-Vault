@@ -16,7 +16,9 @@
         "title": "Memori-Vault",
         "width": 1280,
         "height": 820,
-        "resizable": true
+        "resizable": true,
+        "transparent": false,
+        "decorations": false
       }
     ],
     "security": {
