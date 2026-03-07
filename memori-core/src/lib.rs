@@ -84,9 +84,7 @@ impl OllamaEmbeddingClient {
             // Ollama 常见 tag 省略场景：`nomic-embed-text` 实际只有 `nomic-embed-text:latest`
             // 若命中 404 not found 且当前 model 无 tag，则自动回退一次。
             Err(OllamaClientError::HttpStatus { status, body })
-                if status == 404
-                    && body.contains("not found")
-                    && !self.model.contains(':') =>
+                if status == 404 && body.contains("not found") && !self.model.contains(':') =>
             {
                 let fallback_model = format!("{}:latest", self.model);
                 self.embed_text_with_model(&fallback_model, prompt).await
@@ -105,10 +103,7 @@ impl OllamaEmbeddingClient {
         let response = self
             .http
             .post(url)
-            .json(&OllamaEmbeddingRequest {
-                model,
-                prompt,
-            })
+            .json(&OllamaEmbeddingRequest { model, prompt })
             .send()
             .await
             .map_err(OllamaClientError::Request)?;
@@ -399,7 +394,9 @@ impl MemoriEngine {
 
             while let Some(event) = event_rx.recv().await {
                 match event.kind {
-                    WatchEventKind::Created | WatchEventKind::Modified | WatchEventKind::Renamed => {
+                    WatchEventKind::Created
+                    | WatchEventKind::Modified
+                    | WatchEventKind::Renamed => {
                         process_file_event(&state, &event).await;
                     }
                     _ => {
