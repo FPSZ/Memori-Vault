@@ -90,12 +90,28 @@ async fn open_source_location(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        let status = Command::new("explorer")
-            .arg(format!("/select,{}", target.display()))
-            .status()
-            .map_err(|err| format!("打开文件位置失败: {err}"))?;
-        if !status.success() {
-            return Err("打开文件位置失败: explorer 返回非零状态".to_string());
+        let canonical = target.canonicalize().unwrap_or_else(|_| target.clone());
+        let normalized = canonical.to_string_lossy().replace('/', "\\");
+        if canonical.is_file() {
+            // 采用 "/select," 与文件路径分离传参，避免 explorer 对组合字符串解析不稳定。
+            if let Err(first_err) = Command::new("explorer.exe")
+                .arg("/select,")
+                .arg(&normalized)
+                .spawn()
+            {
+                // 回退到传统单参数写法，兼容不同 Windows 版本/壳层行为。
+                Command::new("explorer.exe")
+                    .arg(format!("/select,\"{normalized}\""))
+                    .spawn()
+                    .map_err(|fallback_err| {
+                        format!("打开文件位置失败: {first_err}; fallback: {fallback_err}")
+                    })?;
+            }
+        } else {
+            Command::new("explorer.exe")
+                .arg(&normalized)
+                .spawn()
+                .map_err(|err| format!("打开文件位置失败: {err}"))?;
         }
         return Ok(());
     }
