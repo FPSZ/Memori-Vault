@@ -495,16 +495,10 @@ async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {
     }
 
     let mut embeddings = Vec::with_capacity(chunks.len());
-    let mut graph_batch = Vec::with_capacity(chunks.len());
 
+    // 优先完成 embedding 与向量落盘，避免图谱抽取耗时导致 stats 长时间保持 0。
     for chunk in &chunks {
-        // 在同一个 chunk 维度内并发执行 embedding 和图谱抽取。
-        let (embedding_res, graph_res) = tokio::join!(
-            state.ollama_client.embed_text(&chunk.content),
-            extract_entities(&chunk.content)
-        );
-
-        match embedding_res {
+        match state.ollama_client.embed_text(&chunk.content).await {
             Ok(embedding) => embeddings.push(embedding),
             Err(err) => {
                 error!(
@@ -513,19 +507,6 @@ async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {
                     "无法连接本地大模型，请确保 Ollama 已启动"
                 );
                 return;
-            }
-        }
-
-        match graph_res {
-            Ok(graph_data) => graph_batch.push(graph_data),
-            Err(err) => {
-                warn!(
-                    path = %chunk.file_path.display(),
-                    chunk_index = chunk.chunk_index,
-                    error = %err,
-                    "图谱抽取失败，本 Chunk 跳过关系写入"
-                );
-                graph_batch.push(GraphData::default());
             }
         }
     }
@@ -543,7 +524,20 @@ async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {
         return;
     }
 
-    for (chunk, graph_data) in chunks.iter().zip(graph_batch.into_iter()) {
+    for chunk in &chunks {
+        let graph_data = match extract_entities(&chunk.content).await {
+            Ok(graph_data) => graph_data,
+            Err(err) => {
+                warn!(
+                    path = %chunk.file_path.display(),
+                    chunk_index = chunk.chunk_index,
+                    error = %err,
+                    "图谱抽取失败，本 Chunk 跳过关系写入"
+                );
+                GraphData::default()
+            }
+        };
+
         let chunk_id = match state
             .vector_store
             .resolve_chunk_id(&chunk.file_path, chunk.chunk_index)
