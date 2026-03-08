@@ -83,7 +83,9 @@ jobs:
         with:
           name: bundles-${{ matrix.artifact }}
           if-no-files-found: error
-          path: memori-desktop/target/release/bundle/**/*
+          path: |
+            target/release/bundle/**/*
+            memori-desktop/target/release/bundle/**/*
 
   release:
     name: Draft GitHub Release
