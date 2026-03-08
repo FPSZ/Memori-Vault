@@ -2,6 +2,7 @@
 
 English: current page  
 中文文档: [README.zh-CN.md](./README.zh-CN.md)
+Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md) | [中文贡献指南](./CONTRIBUTING.zh-CN.md)
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-111111?style=flat-square)](./LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/Rust-1.85%2B-111111?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)

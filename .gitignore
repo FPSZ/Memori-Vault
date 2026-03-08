@@ -24,3 +24,6 @@ ui/dist/
 plan.md
 UI.md
 AI.md
+
+# Local scripts only
+scripts/

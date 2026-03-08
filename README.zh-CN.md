@@ -6,6 +6,7 @@
 
 中文文档：当前页  
 English: [README.md](./README.md)
+贡献指南：[CONTRIBUTING.zh-CN.md](./CONTRIBUTING.zh-CN.md) | English: [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## 项目简介
 
