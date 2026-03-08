@@ -83,9 +83,7 @@ jobs:
         with:
           name: bundles-${{ matrix.artifact }}
           if-no-files-found: error
-          path: |
-            target/release/bundle/**/*
-            memori-desktop/target/release/bundle/**/*
+          path: memori-desktop/target/release/bundle/**/*
 
   release:
     name: Draft GitHub Release
@@ -135,5 +133,12 @@ jobs:
             ### Notes
             - Version is read from `memori-desktop/tauri.conf.json`.
             - Assets are attached from GitHub Actions build artifacts.
-          files: release-artifacts/**/*
+          files: |
+            release-artifacts/**/*.msi
+            release-artifacts/**/*-setup.exe
+            release-artifacts/**/*.dmg
+            release-artifacts/**/*.AppImage
+            release-artifacts/**/*.deb
+            release-artifacts/**/*.rpm
+            release-artifacts/**/*.sig
           generate_release_notes: true
