@@ -287,17 +287,17 @@ async fn rank_settings_query(
         }
     }
 
-    if let (Some(start), Some(end)) = (answer.find('['), answer.rfind(']')) {
-        if start < end {
-            let json_slice = &answer[start..=end];
-            if let Ok(parsed) = serde_json::from_str::<Vec<String>>(json_slice) {
-                let matched = parsed
-                    .into_iter()
-                    .filter(|key| candidate_keys.contains(key.trim()))
-                    .collect::<Vec<_>>();
-                if !matched.is_empty() {
-                    return Ok(matched);
-                }
+    if let (Some(start), Some(end)) = (answer.find('['), answer.rfind(']'))
+        && start < end
+    {
+        let json_slice = &answer[start..=end];
+        if let Ok(parsed) = serde_json::from_str::<Vec<String>>(json_slice) {
+            let matched = parsed
+                .into_iter()
+                .filter(|key| candidate_keys.contains(key.trim()))
+                .collect::<Vec<_>>();
+            if !matched.is_empty() {
+                return Ok(matched);
             }
         }
     }
@@ -397,10 +397,10 @@ async fn replace_engine(
         guard.take()
     };
 
-    if let Some(engine) = previous_engine {
-        if let Err(err) = engine.shutdown().await {
-            warn!(error = %err, "关闭旧引擎失败，继续尝试重建");
-        }
+    if let Some(engine) = previous_engine
+        && let Err(err) = engine.shutdown().await
+    {
+        warn!(error = %err, "关闭旧引擎失败，继续尝试重建");
     }
 
     let mut new_engine =
@@ -484,9 +484,7 @@ fn build_answer_question(query: &str, lang: Option<&str>) -> String {
 }
 
 fn normalize_language(lang: Option<&str>) -> Option<&'static str> {
-    let Some(lang) = lang else {
-        return None;
-    };
+    let lang = lang?;
     let lower = lang.trim().to_ascii_lowercase();
     if lower.starts_with("zh") {
         Some("zh-CN")
