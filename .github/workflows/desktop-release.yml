@@ -100,12 +100,7 @@ jobs:
         id: release_meta
         shell: bash
         run: |
-          VERSION="$(python - <<'PY'
-import json
-with open('memori-desktop/tauri.conf.json', 'r', encoding='utf-8') as f:
-    print(json.load(f)['version'])
-PY
-          )"
+          VERSION="$(python -c "import json;print(json.load(open('memori-desktop/tauri.conf.json', encoding='utf-8'))['version'])")"
           if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
           else
