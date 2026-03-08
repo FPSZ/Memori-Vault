@@ -1,0 +1,17 @@
+[package]
+name = "memori-server"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axum = "0.8.6"
+dirs = "6.0.0"
+memori-core = { path = "../memori-core" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tokio.workspace = true
+tower-http = { version = "0.6.8", features = ["cors"] }
+tracing.workspace = true
+tracing-subscriber = "0.3.20"

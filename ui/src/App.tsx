@@ -59,6 +59,7 @@ const AI_LANG_STORAGE_KEY = "memori-ai-language";
 const THEME_MODE_STORAGE_KEY = "memori-theme-mode";
 const FONT_PRESET_STORAGE_KEY = "memori-font-preset";
 const FONT_SCALE_STORAGE_KEY = "memori-font-scale";
+const RETRIEVE_TOP_K_STORAGE_KEY = "memori-retrieve-top-k";
 
 function detectDefaultLanguage(): Language {
   if (typeof navigator === "undefined") {
@@ -106,6 +107,18 @@ function resolveInitialFontScale(): FontScale {
     return saved;
   }
   return "m";
+}
+
+function resolveInitialRetrieveTopK(): number {
+  if (typeof window === "undefined") {
+    return 20;
+  }
+  const saved = window.localStorage.getItem(RETRIEVE_TOP_K_STORAGE_KEY);
+  const parsed = Number.parseInt(saved ?? "", 10);
+  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 50) {
+    return parsed;
+  }
+  return 20;
 }
 
 function isTauriHostAvailable(): boolean {
@@ -273,6 +286,7 @@ export default function App() {
   const [uiThemeMode, setUiThemeMode] = useState<"a" | "b">(() => resolveInitialThemeMode());
   const [fontPreset, setFontPreset] = useState<FontPreset>(() => resolveInitialFontPreset());
   const [fontScale, setFontScale] = useState<FontScale>(() => resolveInitialFontScale());
+  const [retrieveTopK, setRetrieveTopK] = useState<number>(() => resolveInitialRetrieveTopK());
   const [watchRoot, setWatchRoot] = useState("");
   const [isPickingWatchRoot, setIsPickingWatchRoot] = useState(false);
   const [expandedSourceKeys, setExpandedSourceKeys] = useState<Set<string>>(() => new Set());
@@ -312,6 +326,13 @@ export default function App() {
     }
     window.localStorage.setItem(FONT_SCALE_STORAGE_KEY, fontScale);
   }, [fontScale]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(RETRIEVE_TOP_K_STORAGE_KEY, String(retrieveTopK));
+  }, [retrieveTopK]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -440,7 +461,11 @@ export default function App() {
     setExpandedSourceKeys(new Set());
 
     try {
-      const text = await invoke<string>("ask_vault", { query: query.trim(), lang: aiLang });
+      const text = await invoke<string>("ask_vault", {
+        query: query.trim(),
+        lang: aiLang,
+        top_k: retrieveTopK
+      });
       setRawAnswer(text);
     } catch (error) {
       setRawAnswer("");
@@ -803,6 +828,8 @@ export default function App() {
                 watchRoot={watchRoot}
                 isPickingWatchRoot={isPickingWatchRoot}
                 onPickWatchRoot={() => void onPickWatchRoot()}
+                retrieveTopK={retrieveTopK}
+                onRetrieveTopKChange={setRetrieveTopK}
                 fontPreset={fontPreset}
                 onFontPresetChange={setFontPreset}
                 fontScale={fontScale}

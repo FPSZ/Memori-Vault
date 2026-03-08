@@ -4,7 +4,7 @@ members = [
   "memori-parser",
   "memori-storage",
   "memori-core",
-  "memori-desktop",
+  "memori-desktop", "memori-server",
 ]
 resolver = "2"
 

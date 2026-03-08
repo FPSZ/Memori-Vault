@@ -19,6 +19,8 @@ type SettingsModalProps = {
   watchRoot: string;
   isPickingWatchRoot: boolean;
   onPickWatchRoot: () => void;
+  retrieveTopK: number;
+  onRetrieveTopKChange: (value: number) => void;
   fontPreset: FontPreset;
   onFontPresetChange: (preset: FontPreset) => void;
   fontScale: FontScale;
@@ -119,6 +121,8 @@ export function SettingsModal({
   watchRoot,
   isPickingWatchRoot,
   onPickWatchRoot,
+  retrieveTopK,
+  onRetrieveTopKChange,
   fontPreset,
   onFontPresetChange,
   fontScale,
@@ -140,7 +144,14 @@ export function SettingsModal({
         key: "basic" as const,
         label: t("basic"),
         icon: Cpu,
-        keywords: [t("uiLanguage"), t("aiReplyLanguage"), t("watchRoot"), t("autoSyncDaemon"), t("graphRagInfer")]
+        keywords: [
+          t("uiLanguage"),
+          t("aiReplyLanguage"),
+          t("watchRoot"),
+          t("topK"),
+          t("autoSyncDaemon"),
+          t("graphRagInfer")
+        ]
       },
       {
         key: "models" as const,
@@ -341,6 +352,20 @@ export function SettingsModal({
                   }
                 >
                   <LanguageSwitch value={aiLang} onChange={onAiLangChange} />
+                </SettingCard>
+
+                <SettingCard title={t("topK")} description={t("topKDesc")}>
+                  <SelectionChips
+                    value={String(retrieveTopK)}
+                    onChange={(value) => onRetrieveTopKChange(Number(value))}
+                    options={[
+                      { value: "5", label: "5" },
+                      { value: "10", label: "10" },
+                      { value: "20", label: "20" },
+                      { value: "30", label: "30" },
+                      { value: "50", label: "50" }
+                    ]}
+                  />
                 </SettingCard>
 
                 <div className="rounded-lg border border-[#30363d] bg-[#0d1117]/40 px-3 py-3">
