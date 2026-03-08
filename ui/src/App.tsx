@@ -1,6 +1,7 @@
-import { CSSProperties, KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { CSSProperties, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { open } from "@tauri-apps/plugin-dialog";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
@@ -8,14 +9,20 @@ import {
   ChevronUp,
   FolderOpen,
   LoaderCircle,
+  Moon,
   Minus,
+  Sun,
   Search,
+  Settings as SettingsIcon,
   Sparkles,
   Square,
   X
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { FontPreset, FontScale, SettingsModal } from "./components/SettingsModal";
+import { useI18n } from "./i18n";
+import type { Language } from "./i18n";
 
 type VaultStats = {
   documents: number;
@@ -42,7 +49,64 @@ type ParsedResponse = {
   sources: Source[];
 };
 
+type AppSettingsDto = {
+  watch_root: string;
+  language?: string | null;
+};
+
 const TAURI_HOST_MISSING_MESSAGE = "未检测到 Tauri 宿主环境，请使用 cargo tauri dev 启动";
+const AI_LANG_STORAGE_KEY = "memori-ai-language";
+const THEME_MODE_STORAGE_KEY = "memori-theme-mode";
+const FONT_PRESET_STORAGE_KEY = "memori-font-preset";
+const FONT_SCALE_STORAGE_KEY = "memori-font-scale";
+
+function detectDefaultLanguage(): Language {
+  if (typeof navigator === "undefined") {
+    return "en-US";
+  }
+  return navigator.language.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
+}
+
+function resolveInitialAiLanguage(): Language {
+  if (typeof window === "undefined") {
+    return "en-US";
+  }
+  const saved = window.localStorage.getItem(AI_LANG_STORAGE_KEY);
+  if (saved === "zh-CN" || saved === "en-US") {
+    return saved;
+  }
+  return detectDefaultLanguage();
+}
+
+function resolveInitialThemeMode(): "a" | "b" {
+  if (typeof window === "undefined") {
+    return "a";
+  }
+  const saved = window.localStorage.getItem(THEME_MODE_STORAGE_KEY);
+  return saved === "b" ? "b" : "a";
+}
+
+function resolveInitialFontPreset(): FontPreset {
+  if (typeof window === "undefined") {
+    return "system";
+  }
+  const saved = window.localStorage.getItem(FONT_PRESET_STORAGE_KEY);
+  if (saved === "neo" || saved === "mono" || saved === "system") {
+    return saved;
+  }
+  return "system";
+}
+
+function resolveInitialFontScale(): FontScale {
+  if (typeof window === "undefined") {
+    return "m";
+  }
+  const saved = window.localStorage.getItem(FONT_SCALE_STORAGE_KEY);
+  if (saved === "s" || saved === "l" || saved === "m") {
+    return saved;
+  }
+  return "m";
+}
 
 function isTauriHostAvailable(): boolean {
   if (typeof window === "undefined") {
@@ -168,7 +232,7 @@ function isMarkdownFile(path: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(path.trim());
 }
 
-function LiquidOrb({ score }: { score: number }) {
+function LiquidOrb({ score, semanticLabel }: { score: number; semanticLabel: string }) {
   const normalized = clampScore(score);
   const percentage = Math.round(normalized * 100);
   const liquidTop = `${100 - percentage}%`;
@@ -188,21 +252,29 @@ function LiquidOrb({ score }: { score: number }) {
       </div>
 
       <div className="flex flex-col items-start gap-1 leading-none">
-        <span className="text-sm font-mono font-bold text-[#58a6ff] drop-shadow-[0_0_5px_rgba(88,166,255,0.8)]">
+        <span className="text-sm font-mono font-bold text-[var(--accent)]">
           {percentage}%
         </span>
-        <span className="text-[10px] tracking-[0.08em] text-[#8b949e]">语义相关度</span>
+        <span className="text-[10px] tracking-[0.08em] text-[#8b949e]">{semanticLabel}</span>
       </div>
     </div>
   );
 }
 
 export default function App() {
+  const { lang: uiLang, setLang: setUiLang, t } = useI18n();
   const [query, setQuery] = useState("");
   const [rawAnswer, setRawAnswer] = useState("");
   const [loading, setLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [aiLang, setAiLang] = useState<Language>(() => resolveInitialAiLanguage());
+  const [uiThemeMode, setUiThemeMode] = useState<"a" | "b">(() => resolveInitialThemeMode());
+  const [fontPreset, setFontPreset] = useState<FontPreset>(() => resolveInitialFontPreset());
+  const [fontScale, setFontScale] = useState<FontScale>(() => resolveInitialFontScale());
+  const [watchRoot, setWatchRoot] = useState("");
+  const [isPickingWatchRoot, setIsPickingWatchRoot] = useState(false);
   const [expandedSourceKeys, setExpandedSourceKeys] = useState<Set<string>>(() => new Set());
   const [stats, setStats] = useState<VaultStats>({ documents: 0, chunks: 0, nodes: 0 });
   const [error, setError] = useState<string | null>(null);
@@ -213,6 +285,57 @@ export default function App() {
     () => isSearching && !loading && !error && rawAnswer.trim().length > 0,
     [error, isSearching, loading, rawAnswer]
   );
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(AI_LANG_STORAGE_KEY, aiLang);
+    }
+  }, [aiLang]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(THEME_MODE_STORAGE_KEY, uiThemeMode);
+  }, [uiThemeMode]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(FONT_PRESET_STORAGE_KEY, fontPreset);
+  }, [fontPreset]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(FONT_SCALE_STORAGE_KEY, fontScale);
+  }, [fontScale]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const fontPresetMap: Record<FontPreset, string> = {
+      system:
+        '"PingFang SC","Microsoft YaHei","Segoe UI",Inter,"SF Pro Text","Noto Sans",sans-serif',
+      neo: '"HarmonyOS Sans SC","Segoe UI",Inter,"SF Pro Display","Noto Sans",sans-serif',
+      mono:
+        '"IBM Plex Sans","PingFang SC","Microsoft YaHei","Segoe UI",Inter,sans-serif'
+    };
+    const fontScaleMap: Record<FontScale, string> = {
+      s: "14px",
+      m: "16px",
+      l: "18px"
+    };
+
+    root.style.setProperty("--accent", "#58a6ff");
+    root.style.setProperty("--accent-soft", "rgba(88,166,255,0.18)");
+    root.style.setProperty("--app-font-family", fontPresetMap[fontPreset]);
+    root.style.setProperty("--app-font-size", fontScaleMap[fontScale]);
+    // Tailwind typography utilities are rem-based, so root(html) font-size must change.
+    root.style.fontSize = fontScaleMap[fontScale];
+    root.style.setProperty("--theme-layer-opacity", uiThemeMode === "a" ? "0.14" : "0.2");
+  }, [fontPreset, fontScale, uiThemeMode]);
 
   useEffect(() => {
     let active = true;
@@ -230,7 +353,29 @@ export default function App() {
       }
     };
 
+    const loadSettings = async () => {
+      try {
+        const settings = await invoke<AppSettingsDto>("get_app_settings");
+        if (active) {
+          setWatchRoot(settings.watch_root ?? "");
+          if (!window.localStorage.getItem(AI_LANG_STORAGE_KEY) && settings.language) {
+            const normalized = settings.language.toLowerCase();
+            if (normalized.startsWith("zh")) {
+              setAiLang("zh-CN");
+            } else if (normalized.startsWith("en")) {
+              setAiLang("en-US");
+            }
+          }
+        }
+      } catch (error) {
+        if (active) {
+          setError(toUiErrorMessage(error));
+        }
+      }
+    };
+
     void loadStats();
+    void loadSettings();
     const timer = window.setInterval(() => {
       void loadStats();
     }, 5000);
@@ -266,6 +411,24 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const onGlobalKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === ",") {
+        event.preventDefault();
+        setIsSettingsOpen((prev) => !prev);
+        return;
+      }
+
+      if (event.key === "Escape" && isSettingsOpen) {
+        event.preventDefault();
+        setIsSettingsOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", onGlobalKeyDown);
+    return () => window.removeEventListener("keydown", onGlobalKeyDown);
+  }, [isSettingsOpen]);
+
   const runSearch = async () => {
     if (!canSubmit) {
       return;
@@ -277,7 +440,7 @@ export default function App() {
     setExpandedSourceKeys(new Set());
 
     try {
-      const text = await invoke<string>("ask_vault", { query: query.trim() });
+      const text = await invoke<string>("ask_vault", { query: query.trim(), lang: aiLang });
       setRawAnswer(text);
     } catch (error) {
       setRawAnswer("");
@@ -287,7 +450,7 @@ export default function App() {
     }
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       event.preventDefault();
       void runSearch();
@@ -321,6 +484,10 @@ export default function App() {
     }
   };
 
+  const onToggleThemeMode = () => {
+    setUiThemeMode((prev) => (prev === "a" ? "b" : "a"));
+  };
+
   const toggleSourceExpanded = (key: string) => {
     setExpandedSourceKeys((prev) => {
       const next = new Set(prev);
@@ -341,6 +508,37 @@ export default function App() {
     }
   };
 
+  const onPickWatchRoot = async () => {
+    if (!isTauriHostAvailable()) {
+      setError(TAURI_HOST_MISSING_MESSAGE);
+      return;
+    }
+
+    setIsPickingWatchRoot(true);
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: watchRoot || undefined
+      });
+
+      if (!selected || Array.isArray(selected)) {
+        return;
+      }
+
+      const settings = await invoke<AppSettingsDto>("set_watch_root", { path: selected });
+      setWatchRoot(settings.watch_root ?? selected);
+
+      const raw = await invoke<VaultStatsRaw>("get_vault_stats");
+      setStats(normalizeStats(raw));
+      setError(null);
+    } catch (err) {
+      setError(toUiErrorMessage(err));
+    } finally {
+      setIsPickingWatchRoot(false);
+    }
+  };
+
   return (
     <div className="h-screen w-screen bg-[#0d1117] text-[#c9d1d9]">
       <div className="relative flex h-full w-full flex-col overflow-hidden bg-[#0d1117] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
@@ -350,6 +548,27 @@ export default function App() {
         >
           <div data-tauri-drag-region="" className="h-full flex-1 cursor-move" />
           <div className="flex items-center gap-1.5 [app-region:no-drag] [-webkit-app-region:no-drag]">
+            <motion.button
+              type="button"
+              onClick={onToggleThemeMode}
+              className="inline-flex items-center justify-center p-1 text-[#8b949e] transition hover:text-[var(--accent)]"
+              aria-label={t("themeToggle")}
+              title={t("themeToggle")}
+              whileTap={{ scale: 0.9 }}
+              animate={{ rotate: uiThemeMode === "a" ? 0 : 180 }}
+              transition={{ type: "spring", damping: 16, stiffness: 180 }}
+            >
+              {uiThemeMode === "a" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+            </motion.button>
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen(true)}
+              className="inline-flex items-center justify-center p-1 text-[#8b949e] transition hover:text-[var(--accent)]"
+              aria-label={t("settings")}
+              title={t("settings")}
+            >
+              <SettingsIcon className="h-4 w-4" />
+            </button>
             <button
               type="button"
               onClick={() => void onMinimize()}
@@ -382,7 +601,10 @@ export default function App() {
 
         <div className="relative z-10 flex-1 overflow-hidden">
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="absolute left-1/2 top-[-220px] h-[620px] w-[620px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(88,166,255,0.14),rgba(88,166,255,0)_72%)]" />
+            <div
+              className="absolute left-1/2 top-[-220px] h-[620px] w-[620px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(88,166,255,0.14),rgba(88,166,255,0)_72%)] transition-opacity duration-500"
+              style={{ opacity: uiThemeMode === "a" ? 0.8 : 1 }}
+            />
           </div>
 
           <main className="relative mx-auto h-full w-full max-w-5xl px-6 pb-4 md:px-10">
@@ -402,7 +624,7 @@ export default function App() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onKeyDown}
-                  placeholder="Ask your vault..."
+                  placeholder={t("askPlaceholder")}
                   className="w-full border-none bg-transparent pl-9 pr-10 text-2xl text-[#c9d1d9] placeholder:text-[#6e7681] focus:outline-none focus:ring-0"
                 />
                 <AnimatePresence>
@@ -412,7 +634,7 @@ export default function App() {
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0 }}
                       transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.9 }}
-                      className="absolute right-6 top-1/2 -translate-y-1/2 text-[#58a6ff]"
+                      className="absolute right-6 top-1/2 -translate-y-1/2 text-[var(--accent)]"
                     >
                       <LoaderCircle className="h-5 w-5 animate-spin" />
                     </motion.div>
@@ -423,7 +645,7 @@ export default function App() {
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.2 }}
-                      className="absolute right-6 top-1/2 -translate-y-1/2 text-[#58a6ff]"
+                      className="absolute right-6 top-1/2 -translate-y-1/2 text-[var(--accent)]"
                     >
                       <Check className="h-5 w-5" />
                     </motion.div>
@@ -443,8 +665,8 @@ export default function App() {
                 >
                   {loading && (
                     <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#11161d] px-5 py-4 text-sm text-[#9aa4af]">
-                      <LoaderCircle className="h-4 w-4 animate-spin text-[#58a6ff]" />
-                      Retrieving and synthesizing...
+                      <LoaderCircle className="h-4 w-4 animate-spin text-[var(--accent)]" />
+                      {t("loading")}
                     </div>
                   )}
 
@@ -456,11 +678,11 @@ export default function App() {
 
                   {!loading && !error && parsed.synthesis && (
                     <article className="pb-8">
-                      <div className="mb-6 border-l-2 border-[#58a6ff] pl-4">
+                      <div className="mb-6 border-l-2 border-[var(--accent)] pl-4">
                         <div className="mb-3 flex items-center gap-2">
-                          <Sparkles className="h-4 w-4 text-[#58a6ff]" />
-                          <span className="text-xs font-mono font-bold tracking-widest text-[#58a6ff]">
-                            SYNTHESIS
+                          <Sparkles className="h-4 w-4 text-[var(--accent)]" />
+                          <span className="text-xs font-mono font-bold tracking-widest text-[var(--accent)]">
+                            {t("synthesis")}
                           </span>
                         </div>
                         <p className="whitespace-pre-wrap break-words font-sans text-lg leading-relaxed text-[#c9d1d9]">
@@ -471,7 +693,7 @@ export default function App() {
                       {parsed.sources.length > 0 && (
                         <section className="mt-8">
                           <div className="mb-3 text-[11px] tracking-[0.16em] text-[#8b949e] uppercase">
-                            CONTEXT SOURCES
+                            {t("contextSources")}
                           </div>
 
                           <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-2">
@@ -485,7 +707,7 @@ export default function App() {
                                   key={sourceKey}
                                   className="relative h-fit self-start flex flex-row items-start gap-4 rounded-xl border border-[#30363d] bg-[#0d1117] p-4"
                                 >
-                                  <LiquidOrb score={source.score} />
+                                  <LiquidOrb score={source.score} semanticLabel={t("semanticRelevance")} />
 
                                   <div className="min-w-0 flex-1 pr-5">
                                     <div className="truncate font-mono text-xs text-[#8b949e]">
@@ -513,9 +735,9 @@ export default function App() {
                                   <button
                                     type="button"
                                     onClick={() => void onOpenSourceLocation(source.path)}
-                                    className="absolute top-3 right-8 p-0 text-[#8b949e] transition hover:text-[#58a6ff]"
-                                    aria-label="打开文件位置"
-                                    title="打开文件位置"
+                                    className="absolute top-3 right-8 p-0 text-[#8b949e] transition hover:text-[var(--accent)]"
+                                    aria-label={t("openSourceLocation")}
+                                    title={t("openSourceLocation")}
                                   >
                                     <FolderOpen className="h-4 w-4" />
                                   </button>
@@ -523,9 +745,9 @@ export default function App() {
                                   <button
                                     type="button"
                                     onClick={() => toggleSourceExpanded(sourceKey)}
-                                    className="absolute top-3 right-3 p-0 text-[#8b949e] transition hover:text-[#58a6ff]"
-                                    aria-label={expanded ? "收起来源内容" : "展开来源内容"}
-                                    title={expanded ? "收起" : "展开"}
+                                    className="absolute top-3 right-3 p-0 text-[#8b949e] transition hover:text-[var(--accent)]"
+                                    aria-label={expanded ? t("collapseSource") : t("expandSource")}
+                                    title={expanded ? t("collapseSource") : t("expandSource")}
                                   >
                                     {expanded ? (
                                       <ChevronUp className="h-4 w-4" />
@@ -550,14 +772,47 @@ export default function App() {
         <footer className="relative z-10 shrink-0 border-t border-white/10 bg-[#0f141a]/82 backdrop-blur">
           <div className="mx-auto flex h-8 w-full max-w-5xl items-center justify-between px-6 text-[11px] text-[#8b949e] md:px-10">
             <span>
-              Vault: {stats.documents} Docs / {stats.chunks} Chunks / {stats.nodes} Nodes
+              {t("vaultStats", {
+                docs: stats.documents,
+                chunks: stats.chunks,
+                nodes: stats.nodes
+              })}
             </span>
             <span className="inline-flex items-center gap-2 text-[#7ee787]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#3fb950]" />
-              Local-First Daemon
+              {t("localFirstDaemon")}
             </span>
           </div>
         </footer>
+
+        <AnimatePresence>
+          {isSettingsOpen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="pointer-events-none absolute inset-x-0 bottom-0 top-9 z-30 flex justify-end"
+            >
+              <SettingsModal
+                open={isSettingsOpen}
+                onBack={() => setIsSettingsOpen(false)}
+                uiLang={uiLang}
+                aiLang={aiLang}
+                onUiLangChange={setUiLang}
+                onAiLangChange={setAiLang}
+                watchRoot={watchRoot}
+                isPickingWatchRoot={isPickingWatchRoot}
+                onPickWatchRoot={() => void onPickWatchRoot()}
+                fontPreset={fontPreset}
+                onFontPresetChange={setFontPreset}
+                fontScale={fontScale}
+                onFontScaleChange={setFontScale}
+                themeModeState={uiThemeMode}
+                onThemeModeChange={setUiThemeMode}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
