@@ -1,6 +1,7 @@
 import {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
+  UIEvent as ReactUIEvent,
   useEffect,
   useMemo,
   useRef,
@@ -391,6 +392,9 @@ export default function App() {
   const [rawAnswer, setRawAnswer] = useState("");
   const [loading, setLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [isSearchBarCompact, setIsSearchBarCompact] = useState(false);
+  const [isSearchBarHovering, setIsSearchBarHovering] = useState(false);
+  const [isSearchInputFocused, setIsSearchInputFocused] = useState(false);
   const [searchElapsedMs, setSearchElapsedMs] = useState(0);
   const [lastSearchDurationMs, setLastSearchDurationMs] = useState<number | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -427,6 +431,7 @@ export default function App() {
   const [stats, setStats] = useState<VaultStats>({ documents: 0, chunks: 0, nodes: 0 });
   const [error, setError] = useState<string | null>(null);
   const scopeMenuRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchStartedAtRef = useRef<number | null>(null);
 
   const parsed = useMemo(() => parseResponse(rawAnswer), [rawAnswer]);
@@ -455,6 +460,12 @@ export default function App() {
   );
 
   const selectedScopeSet = useMemo(() => new Set(selectedScopePaths), [selectedScopePaths]);
+  const isSearchBarCollapsed =
+    isSearching &&
+    isSearchBarCompact &&
+    !isSearchBarHovering &&
+    !isSearchInputFocused &&
+    !scopeMenuOpen;
   const modelSetupReady = useMemo(
     () => Boolean(modelAvailability?.reachable) && (modelAvailability?.missing_roles?.length ?? 1) === 0,
     [modelAvailability]
@@ -849,6 +860,20 @@ export default function App() {
   }, [modelSettings.active_provider]);
 
   useEffect(() => {
+    if (!isSearching) {
+      setIsSearchBarCompact(false);
+      setIsSearchBarHovering(false);
+      setIsSearchInputFocused(false);
+    }
+  }, [isSearching]);
+
+  useEffect(() => {
+    if (!isSearchBarCompact) {
+      setIsSearchBarHovering(false);
+    }
+  }, [isSearchBarCompact]);
+
+  useEffect(() => {
     if (!loading) {
       return;
     }
@@ -971,6 +996,7 @@ export default function App() {
     }
 
     setIsSearching(true);
+    setIsSearchBarCompact(false);
     setLoading(true);
     setSearchElapsedMs(0);
     setLastSearchDurationMs(null);
@@ -1344,6 +1370,12 @@ export default function App() {
     });
   };
 
+  const onResultScroll = (event: ReactUIEvent<HTMLElement>) => {
+    const scrollTop = event.currentTarget.scrollTop;
+    const shouldCompact = scrollTop > 48;
+    setIsSearchBarCompact((prev) => (prev === shouldCompact ? prev : shouldCompact));
+  };
+
   return (
     <div className="h-screen w-screen bg-[var(--bg-canvas)] text-[var(--text-primary)]">
       <div className="relative flex h-full w-full flex-col overflow-hidden bg-[var(--bg-canvas)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
@@ -1427,18 +1459,56 @@ export default function App() {
             <motion.div
               className="absolute left-6 right-6 md:left-10 md:right-10"
               animate={{
-                top: isSearching ? "20px" : "45%",
+                top: isSearching ? (isSearchBarCollapsed ? "6px" : isSearchBarCompact ? "8px" : "20px") : "45%",
                 y: isSearching ? 0 : "-50%"
               }}
               transition={{ type: "spring", stiffness: 180, damping: 24 }}
             >
-              <div className="relative mx-auto w-full max-w-4xl rounded-xl bg-[var(--bg-surface-1)] px-6 py-5 ring-1 ring-[var(--line-soft)] shadow-[var(--float-shadow)] transition-shadow duration-300 focus-within:shadow-[var(--float-shadow-focus)]">
-                <div className="relative flex items-center gap-3">
+              <motion.div
+                layout
+                transition={{ type: "spring", stiffness: 240, damping: 28 }}
+                onMouseEnter={() => {
+                  if (isSearchBarCompact) {
+                    setIsSearchBarHovering(true);
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (isSearchBarCompact && !isSearchInputFocused && !scopeMenuOpen) {
+                    setIsSearchBarHovering(false);
+                  }
+                }}
+                className={`relative mx-auto w-full transition-shadow duration-300 focus-within:shadow-[var(--float-shadow-focus)] ${
+                  isSearchBarCollapsed
+                    ? "max-w-[300px] bg-transparent px-0 py-0 shadow-none ring-0"
+                    : isSearching && isSearchBarCompact
+                    ? "max-w-3xl rounded-full px-4 py-2.5"
+                    : "max-w-4xl rounded-xl px-6 py-5"
+                } ${
+                  isSearchBarCollapsed
+                    ? ""
+                    : "bg-[var(--bg-surface-1)] ring-1 ring-[var(--line-soft)] shadow-[var(--float-shadow)]"
+                }`}
+              >
+                {isSearchBarCollapsed ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSearchBarHovering(true);
+                      requestAnimationFrame(() => searchInputRef.current?.focus());
+                    }}
+                    aria-label={t("askPlaceholder")}
+                    className="block h-1.5 w-full rounded-full bg-[var(--line-soft-focus)]/90"
+                  />
+                ) : (
+                  <>
+                    <div className="relative flex items-center gap-3">
                   <div ref={scopeMenuRef} className="relative shrink-0">
                     <button
                       type="button"
                       onClick={() => setScopeMenuOpen((prev) => !prev)}
-                      className={`inline-flex h-9 max-w-[170px] items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-xs transition ${
+                      className={`inline-flex max-w-[170px] items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-xs transition ${
+                        isSearching && isSearchBarCompact ? "h-8" : "h-9"
+                      } ${
                         scopeMenuOpen
                           ? "bg-[var(--accent-soft)] text-[var(--accent)]"
                           : "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
@@ -1568,13 +1638,26 @@ export default function App() {
 
                   <Search className="h-5 w-5 shrink-0 text-[var(--text-secondary)]" />
                   <input
+                    ref={searchInputRef}
                     type="text"
                     autoFocus
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={onKeyDown}
+                    onFocus={() => {
+                      setIsSearchInputFocused(true);
+                      if (isSearchBarCompact) {
+                        setIsSearchBarHovering(true);
+                      }
+                    }}
+                    onBlur={() => {
+                      setIsSearchInputFocused(false);
+                      if (isSearchBarCompact && !scopeMenuOpen) {
+                        setIsSearchBarHovering(false);
+                      }
+                    }}
                     placeholder={t("askPlaceholder")}
-                    className="w-full flex-1 border-none bg-transparent pr-10 text-2xl text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-0"
+                    className="w-full flex-1 border-none bg-transparent pr-10 text-xl text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-0"
                   />
                 </div>
                 <AnimatePresence>
@@ -1601,17 +1684,24 @@ export default function App() {
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </div>
+                  </>
+                )}
+              </motion.div>
             </motion.div>
 
             <AnimatePresence>
               {isSearching && (
                 <motion.section
                   initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  animate={{
+                    opacity: 1,
+                    y: 0,
+                    paddingTop: isSearchBarCollapsed ? 74 : isSearchBarCompact ? 102 : 146
+                  }}
                   exit={{ opacity: 0, y: 12 }}
                   transition={{ duration: 0.24, ease: "easeOut" }}
-                  className="no-scrollbar mx-auto h-full w-full max-w-4xl overflow-y-auto pt-36"
+                  className="no-scrollbar mx-auto h-full w-full max-w-4xl overflow-y-auto"
+                  onScroll={onResultScroll}
                 >
                   {loading && (
                     <div className="flex items-center justify-between px-1 py-3 text-sm text-[var(--text-secondary)]">
@@ -1667,9 +1757,13 @@ export default function App() {
                               const markdownPreview = expanded && isMarkdownFile(source.path);
 
                               return (
-                                <div
+                                <motion.div
                                   key={sourceKey}
-                                  className="relative h-fit self-start flex flex-row items-start gap-4 rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] p-4"
+                                  layout="position"
+                                  transition={{ type: "spring", stiffness: 240, damping: 30 }}
+                                  className={`relative h-fit self-start flex flex-row items-start gap-4 rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] p-4 ${
+                                    expanded ? "md:col-span-2" : ""
+                                  }`}
                                 >
                                   <LiquidOrb score={source.score} semanticLabel={t("semanticRelevance")} />
 
@@ -1719,7 +1813,7 @@ export default function App() {
                                       <ChevronDown className="h-4 w-4" />
                                     )}
                                   </button>
-                                </div>
+                                </motion.div>
                               );
                             })}
                           </div>

@@ -13,7 +13,7 @@ use memori_core::{
     ModelProvider, ResourceBudget, ScheduleWindow, VaultStats,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
+use tauri::{Manager, PhysicalPosition, PhysicalSize, Position, Size, State, WindowEvent};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 use tracing::{error, info, warn};
@@ -23,6 +23,10 @@ const ENGINE_SHUTDOWN_TIMEOUT_SECS: u64 = 8;
 const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 15;
 const SETTINGS_APP_DIR_NAME: &str = "Memori-Vault";
 const SETTINGS_FILE_NAME: &str = "settings.json";
+const DEFAULT_WINDOW_WIDTH: u32 = 1480;
+const DEFAULT_WINDOW_HEIGHT: u32 = 920;
+const MIN_WINDOW_WIDTH: u32 = 900;
+const MIN_WINDOW_HEIGHT: u32 = 620;
 
 struct DesktopState {
     engine: Arc<Mutex<Option<MemoriEngine>>>,
@@ -48,6 +52,11 @@ struct AppSettings {
     remote_chat_model: Option<String>,
     remote_graph_model: Option<String>,
     remote_embed_model: Option<String>,
+    window_x: Option<i32>,
+    window_y: Option<i32>,
+    window_width: Option<u32>,
+    window_height: Option<u32>,
+    window_maximized: Option<bool>,
     // legacy fields for backwards compatibility
     provider: Option<String>,
     endpoint: Option<String>,
@@ -827,6 +836,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
+            if let Some(main_window) = app.get_webview_window("main") {
+                if let Err(err) = restore_main_window_state(&main_window, &settings) {
+                    warn!(error = %err, "恢复窗口状态失败，已回退默认窗口布局");
+                }
+            }
+
             let daemon_watch_root = watch_root.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(err) = replace_engine(
@@ -841,11 +856,39 @@ pub fn run() {
                 }
             });
 
+            // Set window icon explicitly for decorations:false (taskbar icon)
+            if let Some(main_window) = app.get_webview_window("main") {
+                match tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")) {
+                    Ok(icon) => {
+                        if let Err(err) = main_window.set_icon(icon) {
+                            warn!(error = %err, "设置窗口图标失败");
+                        }
+                    }
+                    Err(err) => {
+                        warn!(error = %err, "加载窗口图标失败");
+                    }
+                }
+            }
+
             app.manage(DesktopState {
                 engine: Arc::clone(&shared_engine),
                 init_error: Arc::clone(&init_error),
             });
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                WindowEvent::Moved(_)
+                | WindowEvent::Resized(_) => {
+                    if let Err(err) = persist_main_window_state(window) {
+                        warn!(error = %err, "持久化窗口状态失败");
+                    }
+                }
+                _ => {}
+            }
         })
         .invoke_handler(tauri::generate_handler![
             ask_vault,
@@ -938,6 +981,90 @@ fn app_settings_file_path() -> Result<PathBuf, String> {
     Ok(config_root
         .join(SETTINGS_APP_DIR_NAME)
         .join(SETTINGS_FILE_NAME))
+}
+
+fn restore_main_window_state(window: &tauri::WebviewWindow, settings: &AppSettings) -> Result<(), String> {
+    let monitor = window
+        .current_monitor()
+        .map_err(|err| format!("读取当前显示器失败: {err}"))?
+        .or_else(|| window.primary_monitor().ok().flatten());
+
+    let Some(monitor) = monitor else {
+        return Ok(());
+    };
+
+    let monitor_pos = monitor.position();
+    let monitor_size = monitor.size();
+    let max_w = monitor_size.width.saturating_sub(32);
+    let max_h = monitor_size.height.saturating_sub(64);
+
+    let target_w = settings
+        .window_width
+        .unwrap_or_else(|| DEFAULT_WINDOW_WIDTH.min((monitor_size.width as f32 * 0.8) as u32))
+        .clamp(MIN_WINDOW_WIDTH, max_w.max(MIN_WINDOW_WIDTH));
+    let target_h = settings
+        .window_height
+        .unwrap_or_else(|| DEFAULT_WINDOW_HEIGHT.min((monitor_size.height as f32 * 0.82) as u32))
+        .clamp(MIN_WINDOW_HEIGHT, max_h.max(MIN_WINDOW_HEIGHT));
+
+    let max_x = monitor_pos
+        .x
+        .saturating_add(monitor_size.width as i32 - target_w as i32);
+    let max_y = monitor_pos
+        .y
+        .saturating_add(monitor_size.height as i32 - target_h as i32);
+
+    let fallback_x = monitor_pos
+        .x
+        .saturating_add((monitor_size.width as i32 - target_w as i32) / 2);
+    let fallback_y = monitor_pos
+        .y
+        .saturating_add((monitor_size.height as i32 - target_h as i32) / 2);
+
+    let target_x = settings
+        .window_x
+        .unwrap_or(fallback_x)
+        .clamp(monitor_pos.x, max_x.max(monitor_pos.x));
+    let target_y = settings
+        .window_y
+        .unwrap_or(fallback_y)
+        .clamp(monitor_pos.y, max_y.max(monitor_pos.y));
+
+    window
+        .set_size(Size::Physical(PhysicalSize::new(target_w, target_h)))
+        .map_err(|err| format!("设置窗口尺寸失败: {err}"))?;
+    window
+        .set_position(Position::Physical(PhysicalPosition::new(target_x, target_y)))
+        .map_err(|err| format!("设置窗口位置失败: {err}"))?;
+
+    if settings.window_maximized.unwrap_or(false) {
+        let _ = window.maximize();
+    }
+
+    Ok(())
+}
+
+fn persist_main_window_state(window: &tauri::Window) -> Result<(), String> {
+    let mut settings = load_app_settings()?;
+    let maximized = window
+        .is_maximized()
+        .map_err(|err| format!("读取窗口最大化状态失败: {err}"))?;
+
+    settings.window_maximized = Some(maximized);
+    if !maximized {
+        let size = window
+            .outer_size()
+            .map_err(|err| format!("读取窗口尺寸失败: {err}"))?;
+        let pos = window
+            .outer_position()
+            .map_err(|err| format!("读取窗口位置失败: {err}"))?;
+        settings.window_width = Some(size.width);
+        settings.window_height = Some(size.height);
+        settings.window_x = Some(pos.x);
+        settings.window_y = Some(pos.y);
+    }
+
+    save_app_settings(&settings)
 }
 
 fn load_app_settings() -> Result<AppSettings, String> {
