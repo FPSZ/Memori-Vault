@@ -1,0 +1,19 @@
+[Unit]
+Description=Memori-Vault Enterprise Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=memori
+Group=memori
+WorkingDirectory=/opt/memori-vault
+EnvironmentFile=/etc/memori/memori-server.env
+ExecStart=/opt/memori-vault/bin/memori-server
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

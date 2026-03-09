@@ -1,15 +1,18 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::extract::State;
-use axum::http::StatusCode;
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use base64::Engine;
 use memori_core::{
     DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL, DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER,
     DEFAULT_OLLAMA_EMBED_MODEL, DocumentChunk, IndexingConfig, IndexingMode, IndexingStatus,
@@ -22,17 +25,23 @@ use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 const DEFAULT_RETRIEVE_TOP_K: usize = 20;
 const ENGINE_SHUTDOWN_TIMEOUT_SECS: u64 = 8;
 const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 15;
 const SETTINGS_APP_DIR_NAME: &str = "Memori-Vault";
 const SETTINGS_FILE_NAME: &str = "settings.json";
+const AUDIT_LOG_FILE_NAME: &str = "audit.log.jsonl";
+const DEFAULT_SESSION_TTL_SECS: i64 = 8 * 60 * 60;
 
 #[derive(Clone)]
 struct ServerState {
     engine: Arc<Mutex<Option<MemoriEngine>>>,
     init_error: Arc<Mutex<Option<String>>>,
+    sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
+    metrics: Arc<ServerMetrics>,
+    audit_file_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -54,6 +63,13 @@ struct AppSettings {
     remote_chat_model: Option<String>,
     remote_graph_model: Option<String>,
     remote_embed_model: Option<String>,
+    enterprise_egress_mode: Option<String>,
+    enterprise_allowed_model_endpoints: Option<Vec<String>>,
+    enterprise_allowed_models: Option<Vec<String>>,
+    oidc_issuer: Option<String>,
+    oidc_client_id: Option<String>,
+    oidc_redirect_uri: Option<String>,
+    oidc_roles_claim: Option<String>,
     // legacy fields for backwards compatibility
     provider: Option<String>,
     endpoint: Option<String>,
@@ -61,6 +77,105 @@ struct AppSettings {
     chat_model: Option<String>,
     graph_model: Option<String>,
     embed_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+enum EgressMode {
+    #[default]
+    LocalOnly,
+    Allowlist,
+}
+
+impl EgressMode {
+    fn from_value(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "allowlist" => Self::Allowlist,
+            _ => Self::LocalOnly,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+enum Role {
+    Viewer,
+    User,
+    Operator,
+    Admin,
+}
+
+impl Role {
+    fn from_value(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "admin" => Self::Admin,
+            "operator" => Self::Operator,
+            "viewer" => Self::Viewer,
+            _ => Self::User,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AuthConfigDto {
+    issuer: String,
+    client_id: String,
+    redirect_uri: String,
+    roles_claim: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EnterprisePolicyDto {
+    egress_mode: EgressMode,
+    allowed_model_endpoints: Vec<String>,
+    allowed_models: Vec<String>,
+    indexing_default_mode: String,
+    resource_budget_default: String,
+    auth: AuthConfigDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AuditEventDto {
+    actor: String,
+    action: String,
+    resource: String,
+    timestamp: i64,
+    result: String,
+    metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SessionDto {
+    subject: String,
+    role: Role,
+    issued_at: i64,
+    expires_at: i64,
+}
+
+#[derive(Debug, Clone)]
+struct SessionInfo {
+    subject: String,
+    role: Role,
+    issued_at: i64,
+    expires_at: i64,
+}
+
+#[derive(Debug, Default)]
+struct ServerMetrics {
+    total_requests: AtomicU64,
+    failed_requests: AtomicU64,
+    ask_requests: AtomicU64,
+    ask_failed: AtomicU64,
+    ask_latency_total_ms: AtomicU64,
+}
+
+#[derive(Debug, Serialize)]
+struct ServerMetricsDto {
+    total_requests: u64,
+    failed_requests: u64,
+    ask_requests: u64,
+    ask_failed: u64,
+    ask_latency_avg_ms: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -179,6 +294,36 @@ struct PullModelRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct OidcLoginRequest {
+    id_token: Option<String>,
+    access_token: Option<String>,
+    subject: Option<String>,
+    role: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OidcLoginResponse {
+    session_token: String,
+    subject: String,
+    role: Role,
+    expires_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct AuditQuery {
+    page: Option<usize>,
+    page_size: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AuditListResponse {
+    total: usize,
+    page: usize,
+    page_size: usize,
+    items: Vec<AuditEventDto>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct SetLocalModelsRootRequest {
     path: String,
 }
@@ -236,6 +381,20 @@ impl ApiError {
             message: message.into(),
         }
     }
+
+    fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: message.into(),
+        }
+    }
+
+    fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -284,9 +443,33 @@ async fn main() {
         error!(error = %err, "memori-server bootstrap failed");
     }
 
-    let app_state = ServerState { engine, init_error };
+    let app_state = ServerState {
+        engine,
+        init_error,
+        sessions: Arc::new(Mutex::new(HashMap::new())),
+        metrics: Arc::new(ServerMetrics::default()),
+        audit_file_lock: Arc::new(Mutex::new(())),
+    };
     let app = Router::new()
         .route("/api/health", get(health))
+        .route("/api/auth/oidc/login", post(oidc_login_handler))
+        .route("/api/auth/me", get(auth_me_handler))
+        .route("/api/admin/health", get(admin_health_handler))
+        .route("/api/admin/metrics", get(admin_metrics_handler))
+        .route(
+            "/api/admin/policy",
+            get(get_enterprise_policy_handler).put(update_enterprise_policy_handler),
+        )
+        .route("/api/admin/audit", get(get_audit_events_handler))
+        .route("/api/admin/reindex", post(admin_trigger_reindex_handler))
+        .route(
+            "/api/admin/indexing/pause",
+            post(admin_pause_indexing_handler),
+        )
+        .route(
+            "/api/admin/indexing/resume",
+            post(admin_resume_indexing_handler),
+        )
         .route("/api/stats", get(get_vault_stats_handler))
         .route("/api/indexing/status", get(get_indexing_status_handler))
         .route("/api/indexing/mode", post(set_indexing_mode_handler))
@@ -347,20 +530,328 @@ async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { ok: true })
 }
 
+async fn oidc_login_handler(
+    State(state): State<ServerState>,
+    Json(payload): Json<OidcLoginRequest>,
+) -> Result<Json<OidcLoginResponse>, ApiError> {
+    let policy = resolve_enterprise_policy(&load_app_settings().map_err(ApiError::internal)?);
+    let token = payload
+        .id_token
+        .as_deref()
+        .or(payload.access_token.as_deref())
+        .map(str::to_string);
+    let claims = token
+        .as_deref()
+        .and_then(|t| decode_jwt_claims(t).ok())
+        .unwrap_or_default();
+
+    let subject = payload
+        .subject
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            claims
+                .get("sub")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .or_else(|| {
+            claims
+                .get("email")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .ok_or_else(|| ApiError::bad_request("OIDC 登录缺少 subject"))?;
+
+    let role_from_claim = claims
+        .get(&policy.auth.roles_claim)
+        .and_then(extract_role_from_claims);
+    let role = payload
+        .role
+        .as_deref()
+        .map(Role::from_value)
+        .or(role_from_claim)
+        .unwrap_or(Role::User);
+
+    let now = unix_now_secs();
+    let expires_at = now + DEFAULT_SESSION_TTL_SECS;
+    let session_token = Uuid::new_v4().to_string();
+    {
+        let mut sessions = state.sessions.lock().await;
+        sessions.insert(
+            session_token.clone(),
+            SessionInfo {
+                subject: subject.clone(),
+                role,
+                issued_at: now,
+                expires_at,
+            },
+        );
+    }
+
+    append_audit_event(
+        &state,
+        AuditEventDto {
+            actor: subject.clone(),
+            action: "auth.login".to_string(),
+            resource: "oidc".to_string(),
+            timestamp: now,
+            result: "ok".to_string(),
+            metadata: serde_json::json!({
+                "role": role,
+                "issuer": policy.auth.issuer
+            }),
+        },
+    )
+    .await;
+
+    Ok(Json(OidcLoginResponse {
+        session_token,
+        subject,
+        role,
+        expires_at,
+    }))
+}
+
+async fn auth_me_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<SessionDto>, ApiError> {
+    let session = require_session(&state, &headers, Role::Viewer).await?;
+    Ok(Json(SessionDto {
+        subject: session.subject,
+        role: session.role,
+        issued_at: session.issued_at,
+        expires_at: session.expires_at,
+    }))
+}
+
+async fn admin_health_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
+    let init_error_message = state.init_error.lock().await.clone();
+    let engine_guard = state.engine.lock().await;
+    let ready = engine_guard.is_some() && init_error_message.is_none();
+    drop(engine_guard);
+
+    let indexing_status = if ready {
+        get_indexing_status_handler(State(state.clone()))
+            .await
+            .ok()
+            .map(|r| r.0)
+    } else {
+        None
+    };
+    Ok(Json(serde_json::json!({
+        "ok": ready,
+        "engine_ready": ready,
+        "init_error": init_error_message,
+        "indexing_status": indexing_status
+    })))
+}
+
+async fn admin_metrics_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<ServerMetricsDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
+    Ok(Json(snapshot_metrics(&state.metrics)))
+}
+
+async fn get_enterprise_policy_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<EnterprisePolicyDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
+    let settings = load_app_settings().map_err(ApiError::internal)?;
+    Ok(Json(resolve_enterprise_policy(&settings)))
+}
+
+async fn update_enterprise_policy_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<EnterprisePolicyDto>,
+) -> Result<Json<EnterprisePolicyDto>, ApiError> {
+    let session = require_session(&state, &headers, Role::Admin).await?;
+    let mut settings = load_app_settings().map_err(ApiError::internal)?;
+    settings.enterprise_egress_mode = Some(
+        match payload.egress_mode {
+            EgressMode::LocalOnly => "local_only",
+            EgressMode::Allowlist => "allowlist",
+        }
+        .to_string(),
+    );
+    settings.enterprise_allowed_model_endpoints = Some(
+        payload
+            .allowed_model_endpoints
+            .iter()
+            .map(|item| item.trim().to_ascii_lowercase())
+            .filter(|item| !item.is_empty())
+            .collect(),
+    );
+    settings.enterprise_allowed_models = Some(
+        payload
+            .allowed_models
+            .iter()
+            .map(|item| item.trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect(),
+    );
+    settings.oidc_issuer = normalize_optional_text(Some(payload.auth.issuer));
+    settings.oidc_client_id = normalize_optional_text(Some(payload.auth.client_id));
+    settings.oidc_redirect_uri = normalize_optional_text(Some(payload.auth.redirect_uri));
+    settings.oidc_roles_claim = normalize_optional_text(Some(payload.auth.roles_claim));
+    settings.indexing_mode = Some(payload.indexing_default_mode.clone());
+    settings.resource_budget = Some(payload.resource_budget_default.clone());
+    save_app_settings(&settings).map_err(ApiError::internal)?;
+
+    let policy = resolve_enterprise_policy(&settings);
+    append_audit_event(
+        &state,
+        AuditEventDto {
+            actor: session.subject,
+            action: "policy.update".to_string(),
+            resource: "enterprise_policy".to_string(),
+            timestamp: unix_now_secs(),
+            result: "ok".to_string(),
+            metadata: serde_json::json!({
+                "egress_mode": policy.egress_mode,
+                "allowed_model_endpoints": policy.allowed_model_endpoints.len(),
+                "allowed_models": policy.allowed_models.len()
+            }),
+        },
+    )
+    .await;
+
+    Ok(Json(policy))
+}
+
+async fn get_audit_events_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Query(query): Query<AuditQuery>,
+) -> Result<Json<AuditListResponse>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
+    let page = query.page.unwrap_or(1).max(1);
+    let page_size = query.page_size.unwrap_or(50).clamp(1, 200);
+    let all_events = read_audit_events().map_err(ApiError::internal)?;
+    let total = all_events.len();
+    let start = (page - 1) * page_size;
+    let items = if start >= total {
+        Vec::new()
+    } else {
+        all_events
+            .into_iter()
+            .skip(start)
+            .take(page_size)
+            .collect::<Vec<_>>()
+    };
+    Ok(Json(AuditListResponse {
+        total,
+        page,
+        page_size,
+        items,
+    }))
+}
+
+async fn admin_trigger_reindex_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&state, &headers, Role::Operator).await?;
+    let response = trigger_reindex_handler(State(state.clone())).await?;
+    append_audit_event(
+        &state,
+        AuditEventDto {
+            actor: session.subject,
+            action: "indexing.reindex".to_string(),
+            resource: "indexing".to_string(),
+            timestamp: unix_now_secs(),
+            result: "ok".to_string(),
+            metadata: serde_json::json!({}),
+        },
+    )
+    .await;
+    Ok(response)
+}
+
+async fn admin_pause_indexing_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&state, &headers, Role::Operator).await?;
+    let response = pause_indexing_handler(State(state.clone())).await?;
+    append_audit_event(
+        &state,
+        AuditEventDto {
+            actor: session.subject,
+            action: "indexing.pause".to_string(),
+            resource: "indexing".to_string(),
+            timestamp: unix_now_secs(),
+            result: "ok".to_string(),
+            metadata: serde_json::json!({}),
+        },
+    )
+    .await;
+    Ok(response)
+}
+
+async fn admin_resume_indexing_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&state, &headers, Role::Operator).await?;
+    let response = resume_indexing_handler(State(state.clone())).await?;
+    append_audit_event(
+        &state,
+        AuditEventDto {
+            actor: session.subject,
+            action: "indexing.resume".to_string(),
+            resource: "indexing".to_string(),
+            timestamp: unix_now_secs(),
+            result: "ok".to_string(),
+            metadata: serde_json::json!({}),
+        },
+    )
+    .await;
+    Ok(response)
+}
+
 async fn ask_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<AskRequest>,
 ) -> Result<Json<AskResponse>, ApiError> {
+    state.metrics.total_requests.fetch_add(1, Ordering::Relaxed);
+    state.metrics.ask_requests.fetch_add(1, Ordering::Relaxed);
+    let ask_started_at = std::time::Instant::now();
+
     let query = payload.query.trim().to_string();
     if query.is_empty() {
+        state
+            .metrics
+            .failed_requests
+            .fetch_add(1, Ordering::Relaxed);
+        state.metrics.ask_failed.fetch_add(1, Ordering::Relaxed);
         return Ok(Json(AskResponse {
             answer: "请输入一个非空问题。".to_string(),
         }));
     }
 
+    let actor = resolve_actor_subject(&state, &headers).await;
+    let policy = resolve_enterprise_policy(&load_app_settings().map_err(ApiError::internal)?);
+    enforce_policy_for_active_runtime(&policy).map_err(ApiError::forbidden)?;
+
     let init_error_message = state.init_error.lock().await.clone();
     let engine_guard = state.engine.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
+        state
+            .metrics
+            .failed_requests
+            .fetch_add(1, Ordering::Relaxed);
+        state.metrics.ask_failed.fetch_add(1, Ordering::Relaxed);
         if let Some(message) = init_error_message {
             return Err(ApiError::internal(format!("引擎初始化失败: {message}")));
         }
@@ -378,7 +869,14 @@ async fn ask_handler(
     let results = engine
         .search(&query, top_k, scope_refs)
         .await
-        .map_err(|err| ApiError::internal(err.to_string()))?;
+        .map_err(|err| {
+            state
+                .metrics
+                .failed_requests
+                .fetch_add(1, Ordering::Relaxed);
+            state.metrics.ask_failed.fetch_add(1, Ordering::Relaxed);
+            ApiError::internal(err.to_string())
+        })?;
 
     if results.is_empty() {
         return Ok(Json(AskResponse {
@@ -407,6 +905,29 @@ async fn ask_handler(
             format!("本地大模型答案生成失败，以下是检索到的相关片段：\n\n{references}")
         }
     };
+
+    let elapsed_ms = ask_started_at.elapsed().as_millis() as u64;
+    state
+        .metrics
+        .ask_latency_total_ms
+        .fetch_add(elapsed_ms, Ordering::Relaxed);
+    append_audit_event(
+        &state,
+        AuditEventDto {
+            actor,
+            action: "query.ask".to_string(),
+            resource: "vault".to_string(),
+            timestamp: unix_now_secs(),
+            result: "ok".to_string(),
+            metadata: serde_json::json!({
+                "top_k": top_k,
+                "scope_count": scope_paths.len(),
+                "result_chunks": results.len(),
+                "elapsed_ms": elapsed_ms
+            }),
+        },
+    )
+    .await;
 
     Ok(Json(AskResponse { answer }))
 }
@@ -573,6 +1094,8 @@ async fn set_model_settings_handler(
 ) -> Result<Json<ModelSettingsDto>, ApiError> {
     let mut settings = load_app_settings().map_err(ApiError::internal)?;
     let normalized = normalize_model_settings_payload(payload).map_err(ApiError::bad_request)?;
+    let policy = resolve_enterprise_policy(&settings);
+    enforce_policy_for_model_settings(&policy, &normalized).map_err(ApiError::forbidden)?;
     settings.active_provider = Some(normalized.active_provider.clone());
     settings.local_endpoint = Some(normalized.local_profile.endpoint.clone());
     settings.local_models_root = normalized.local_profile.models_root.clone();
@@ -604,6 +1127,8 @@ async fn validate_model_setup_handler() -> Result<Json<ModelAvailabilityDto>, Ap
     let settings = load_app_settings().map_err(ApiError::internal)?;
     let model_settings = resolve_model_settings(&settings);
     let active = resolve_active_runtime_settings(&model_settings);
+    let policy = resolve_enterprise_policy(&settings);
+    enforce_policy_for_runtime_settings(&policy, &active).map_err(ApiError::forbidden)?;
     let provider = active.provider;
     let models = fetch_provider_models(
         provider,
@@ -650,10 +1175,14 @@ async fn validate_model_setup_handler() -> Result<Json<ModelAvailabilityDto>, Ap
 async fn list_provider_models_handler(
     Json(payload): Json<ListProviderModelsRequest>,
 ) -> Result<Json<ProviderModelsDto>, ApiError> {
+    let settings = load_app_settings().map_err(ApiError::internal)?;
+    let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&payload.provider);
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
     let api_key = normalize_optional_text(payload.api_key);
     let models_root = normalize_optional_text(payload.models_root);
+    enforce_policy_for_provider_request(&policy, provider, &endpoint)
+        .map_err(ApiError::forbidden)?;
     if provider == ModelProvider::OllamaLocal {
         let from_folder = models_root
             .as_deref()
@@ -679,10 +1208,14 @@ async fn list_provider_models_handler(
 async fn probe_model_provider_handler(
     Json(payload): Json<ProbeProviderRequest>,
 ) -> Result<Json<ModelAvailabilityDto>, ApiError> {
+    let settings = load_app_settings().map_err(ApiError::internal)?;
+    let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&payload.provider);
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
     let api_key = normalize_optional_text(payload.api_key);
     let models_root = normalize_optional_text(payload.models_root);
+    enforce_policy_for_provider_request(&policy, provider, &endpoint)
+        .map_err(ApiError::forbidden)?;
     let result = fetch_provider_models(
         provider,
         &endpoint,
@@ -723,6 +1256,9 @@ async fn pull_model_handler(
         return Err(ApiError::bad_request("仅本地 Ollama 模式支持拉取模型"));
     }
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
+    let policy = resolve_enterprise_policy(&load_app_settings().map_err(ApiError::internal)?);
+    enforce_policy_for_provider_request(&policy, provider, &endpoint)
+        .map_err(ApiError::forbidden)?;
     let api_key = normalize_optional_text(payload.api_key);
     pull_ollama_model(&endpoint, &model, api_key.as_deref())
         .await
@@ -1674,6 +2210,336 @@ fn model_exists(models: &[String], expected: &str) -> bool {
     }
     models.iter().any(|m| m == expected)
         || (!expected.contains(':') && models.iter().any(|m| m == &format!("{expected}:latest")))
+}
+
+fn resolve_enterprise_policy(settings: &AppSettings) -> EnterprisePolicyDto {
+    let indexing = resolve_indexing_config(settings);
+    let allowed_model_endpoints = settings
+        .enterprise_allowed_model_endpoints
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| normalize_endpoint_allowlist_item(&item))
+        .filter(|item| !item.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let allowed_models = settings
+        .enterprise_allowed_models
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    EnterprisePolicyDto {
+        egress_mode: settings
+            .enterprise_egress_mode
+            .as_deref()
+            .map(EgressMode::from_value)
+            .unwrap_or_default(),
+        allowed_model_endpoints,
+        allowed_models,
+        indexing_default_mode: indexing.mode.as_str().to_string(),
+        resource_budget_default: indexing.resource_budget.as_str().to_string(),
+        auth: AuthConfigDto {
+            issuer: settings
+                .oidc_issuer
+                .clone()
+                .unwrap_or_else(|| "https://example-idp.local".to_string()),
+            client_id: settings
+                .oidc_client_id
+                .clone()
+                .unwrap_or_else(|| "memori-vault-enterprise".to_string()),
+            redirect_uri: settings
+                .oidc_redirect_uri
+                .clone()
+                .unwrap_or_else(|| "http://localhost:3757/api/auth/oidc/login".to_string()),
+            roles_claim: settings
+                .oidc_roles_claim
+                .clone()
+                .unwrap_or_else(|| "roles".to_string()),
+        },
+    }
+}
+
+fn enforce_policy_for_active_runtime(policy: &EnterprisePolicyDto) -> Result<(), String> {
+    let provider = std::env::var(MEMORI_MODEL_PROVIDER_ENV)
+        .ok()
+        .map(|v| ModelProvider::from_value(&v))
+        .unwrap_or(ModelProvider::from_value(DEFAULT_MODEL_PROVIDER));
+    let endpoint = normalize_endpoint(
+        provider,
+        &std::env::var(MEMORI_MODEL_ENDPOINT_ENV).unwrap_or_else(|_| {
+            if provider == ModelProvider::OpenAiCompatible {
+                memori_core::DEFAULT_MODEL_ENDPOINT_OPENAI.to_string()
+            } else {
+                DEFAULT_MODEL_ENDPOINT_OLLAMA.to_string()
+            }
+        }),
+    );
+    let chat_model =
+        std::env::var(MEMORI_CHAT_MODEL_ENV).unwrap_or_else(|_| DEFAULT_CHAT_MODEL.to_string());
+    let graph_model =
+        std::env::var(MEMORI_GRAPH_MODEL_ENV).unwrap_or_else(|_| DEFAULT_GRAPH_MODEL.to_string());
+    let embed_model = std::env::var(MEMORI_EMBED_MODEL_ENV)
+        .unwrap_or_else(|_| DEFAULT_OLLAMA_EMBED_MODEL.to_string());
+    enforce_policy_for_provider_models(
+        policy,
+        provider,
+        &endpoint,
+        &[chat_model, graph_model, embed_model],
+    )
+}
+
+fn enforce_policy_for_model_settings(
+    policy: &EnterprisePolicyDto,
+    settings: &ModelSettingsDto,
+) -> Result<(), String> {
+    let active = resolve_active_runtime_settings(settings);
+    enforce_policy_for_runtime_settings(policy, &active)?;
+    let remote_endpoint = normalize_endpoint(
+        ModelProvider::OpenAiCompatible,
+        &settings.remote_profile.endpoint,
+    );
+    enforce_policy_for_provider_models(
+        policy,
+        ModelProvider::OpenAiCompatible,
+        &remote_endpoint,
+        &[
+            settings.remote_profile.chat_model.clone(),
+            settings.remote_profile.graph_model.clone(),
+            settings.remote_profile.embed_model.clone(),
+        ],
+    )
+}
+
+fn enforce_policy_for_runtime_settings(
+    policy: &EnterprisePolicyDto,
+    runtime: &ActiveRuntimeModelSettings,
+) -> Result<(), String> {
+    enforce_policy_for_provider_models(
+        policy,
+        runtime.provider,
+        &runtime.endpoint,
+        &[
+            runtime.chat_model.clone(),
+            runtime.graph_model.clone(),
+            runtime.embed_model.clone(),
+        ],
+    )
+}
+
+fn enforce_policy_for_provider_request(
+    policy: &EnterprisePolicyDto,
+    provider: ModelProvider,
+    endpoint: &str,
+) -> Result<(), String> {
+    enforce_policy_for_provider_models(policy, provider, endpoint, &[])
+}
+
+fn enforce_policy_for_provider_models(
+    policy: &EnterprisePolicyDto,
+    provider: ModelProvider,
+    endpoint: &str,
+    models: &[String],
+) -> Result<(), String> {
+    if provider == ModelProvider::OllamaLocal {
+        return Ok(());
+    }
+    if policy.egress_mode == EgressMode::LocalOnly {
+        return Err("企业策略禁止外连模型服务（egress_mode=local_only）".to_string());
+    }
+    let normalized_endpoint = normalize_endpoint_allowlist_item(endpoint);
+    if !policy.allowed_model_endpoints.is_empty()
+        && !policy
+            .allowed_model_endpoints
+            .contains(&normalized_endpoint)
+    {
+        return Err(format!("远程模型服务地址不在白名单内: {}", endpoint.trim()));
+    }
+    if !models.is_empty() && !policy.allowed_models.is_empty() {
+        for model in models {
+            let trimmed = model.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if !policy
+                .allowed_models
+                .iter()
+                .any(|allowed| allowed == trimmed)
+            {
+                return Err(format!("模型不在白名单内: {trimmed}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn require_session(
+    state: &ServerState,
+    headers: &HeaderMap,
+    minimum_role: Role,
+) -> Result<SessionInfo, ApiError> {
+    let Some(session_token) = extract_bearer_token(headers) else {
+        return Err(ApiError::unauthorized("缺少认证信息，请先登录"));
+    };
+    let now = unix_now_secs();
+    let mut sessions = state.sessions.lock().await;
+    sessions.retain(|_, session| session.expires_at > now);
+    let Some(session) = sessions.get(&session_token).cloned() else {
+        return Err(ApiError::unauthorized("会话已失效，请重新登录"));
+    };
+    if session.role < minimum_role {
+        return Err(ApiError::forbidden("当前账号权限不足"));
+    }
+    Ok(session)
+}
+
+async fn resolve_actor_subject(state: &ServerState, headers: &HeaderMap) -> String {
+    match require_session(state, headers, Role::Viewer).await {
+        Ok(session) => session.subject,
+        Err(_) => "anonymous".to_string(),
+    }
+}
+
+async fn append_audit_event(state: &ServerState, event: AuditEventDto) {
+    let _guard = state.audit_file_lock.lock().await;
+    let path = match audit_log_file_path() {
+        Ok(path) => path,
+        Err(err) => {
+            warn!(error = %err, "解析审计日志路径失败");
+            return;
+        }
+    };
+    if let Some(parent) = path.parent()
+        && let Err(err) = fs::create_dir_all(parent)
+    {
+        warn!(error = %err, path = %parent.display(), "创建审计日志目录失败");
+        return;
+    }
+    let line = match serde_json::to_string(&event) {
+        Ok(line) => line,
+        Err(err) => {
+            warn!(error = %err, "序列化审计事件失败");
+            return;
+        }
+    };
+    let mut file = match fs::OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(file) => file,
+        Err(err) => {
+            warn!(error = %err, path = %path.display(), "打开审计日志文件失败");
+            return;
+        }
+    };
+    if let Err(err) = writeln!(file, "{line}") {
+        warn!(error = %err, path = %path.display(), "写入审计日志失败");
+    }
+}
+
+fn read_audit_events() -> Result<Vec<AuditEventDto>, String> {
+    let path = audit_log_file_path()?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let file = fs::File::open(&path)
+        .map_err(|err| format!("打开审计日志失败({}): {err}", path.display()))?;
+    let reader = BufReader::new(file);
+    let mut events = Vec::new();
+    for line in reader.lines() {
+        let line = line.map_err(|err| format!("读取审计日志失败({}): {err}", path.display()))?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(event) = serde_json::from_str::<AuditEventDto>(trimmed) {
+            events.push(event);
+        }
+    }
+    events.sort_by_key(|event| std::cmp::Reverse(event.timestamp));
+    Ok(events)
+}
+
+fn decode_jwt_claims(token: &str) -> Result<serde_json::Value, String> {
+    let mut parts = token.split('.');
+    let _header = parts.next();
+    let payload = parts
+        .next()
+        .ok_or_else(|| "JWT 结构非法：缺少 payload".to_string())?;
+    let mut payload_text = payload.trim().to_string();
+    if payload_text.is_empty() {
+        return Err("JWT payload 为空".to_string());
+    }
+    while payload_text.len() % 4 != 0 {
+        payload_text.push('=');
+    }
+    let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_text.as_bytes())
+        .map_err(|err| format!("JWT payload 解码失败: {err}"))?;
+    serde_json::from_slice(&decoded).map_err(|err| format!("JWT payload 解析失败: {err}"))
+}
+
+fn extract_role_from_claims(value: &serde_json::Value) -> Option<Role> {
+    match value {
+        serde_json::Value::String(role) => Some(Role::from_value(role)),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(Role::from_value))
+            .max(),
+        _ => None,
+    }
+}
+
+fn snapshot_metrics(metrics: &ServerMetrics) -> ServerMetricsDto {
+    let ask_requests = metrics.ask_requests.load(Ordering::Relaxed);
+    let ask_latency_total_ms = metrics.ask_latency_total_ms.load(Ordering::Relaxed);
+    let ask_latency_avg_ms = if ask_requests == 0 {
+        0.0
+    } else {
+        ask_latency_total_ms as f64 / ask_requests as f64
+    };
+    ServerMetricsDto {
+        total_requests: metrics.total_requests.load(Ordering::Relaxed),
+        failed_requests: metrics.failed_requests.load(Ordering::Relaxed),
+        ask_requests,
+        ask_failed: metrics.ask_failed.load(Ordering::Relaxed),
+        ask_latency_avg_ms,
+    }
+}
+
+fn unix_now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get("authorization")?;
+    let text = value.to_str().ok()?.trim();
+    let token = text
+        .strip_prefix("Bearer ")
+        .or_else(|| text.strip_prefix("bearer "))?;
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_endpoint_allowlist_item(endpoint: &str) -> String {
+    endpoint.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+
+fn audit_log_file_path() -> Result<PathBuf, String> {
+    let config_root = dirs::config_dir().ok_or_else(|| "无法获取用户配置目录".to_string())?;
+    Ok(config_root
+        .join(SETTINGS_APP_DIR_NAME)
+        .join(AUDIT_LOG_FILE_NAME))
 }
 
 fn build_answer_question(query: &str, lang: Option<&str>) -> String {

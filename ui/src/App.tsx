@@ -395,6 +395,7 @@ export default function App() {
   const [isSearchBarCompact, setIsSearchBarCompact] = useState(false);
   const [isSearchBarHovering, setIsSearchBarHovering] = useState(false);
   const [isSearchInputFocused, setIsSearchInputFocused] = useState(false);
+  const [allowCompactHoverExpand, setAllowCompactHoverExpand] = useState(true);
   const [searchElapsedMs, setSearchElapsedMs] = useState(0);
   const [lastSearchDurationMs, setLastSearchDurationMs] = useState<number | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -433,6 +434,7 @@ export default function App() {
   const scopeMenuRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchStartedAtRef = useRef<number | null>(null);
+  const compactHoverUnlockTimerRef = useRef<number | null>(null);
 
   const parsed = useMemo(() => parseResponse(rawAnswer), [rawAnswer]);
   const visibleSources = useMemo(
@@ -464,7 +466,6 @@ export default function App() {
     isSearching &&
     isSearchBarCompact &&
     !isSearchBarHovering &&
-    !isSearchInputFocused &&
     !scopeMenuOpen;
   const modelSetupReady = useMemo(
     () => Boolean(modelAvailability?.reachable) && (modelAvailability?.missing_roles?.length ?? 1) === 0,
@@ -864,14 +865,24 @@ export default function App() {
       setIsSearchBarCompact(false);
       setIsSearchBarHovering(false);
       setIsSearchInputFocused(false);
+      setAllowCompactHoverExpand(true);
     }
   }, [isSearching]);
 
   useEffect(() => {
     if (!isSearchBarCompact) {
       setIsSearchBarHovering(false);
+      setAllowCompactHoverExpand(true);
     }
   }, [isSearchBarCompact]);
+
+  useEffect(() => {
+    return () => {
+      if (compactHoverUnlockTimerRef.current !== null) {
+        window.clearTimeout(compactHoverUnlockTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!loading) {
@@ -1372,7 +1383,20 @@ export default function App() {
 
   const onResultScroll = (event: ReactUIEvent<HTMLElement>) => {
     const scrollTop = event.currentTarget.scrollTop;
-    const shouldCompact = scrollTop > 48;
+    const shouldCompact = scrollTop > 2;
+    if (shouldCompact) {
+      setAllowCompactHoverExpand(false);
+      if (compactHoverUnlockTimerRef.current !== null) {
+        window.clearTimeout(compactHoverUnlockTimerRef.current);
+      }
+      compactHoverUnlockTimerRef.current = window.setTimeout(() => {
+        setAllowCompactHoverExpand(true);
+      }, 260);
+      setScopeMenuOpen(false);
+      setIsSearchBarHovering(false);
+      setIsSearchInputFocused(false);
+      searchInputRef.current?.blur();
+    }
     setIsSearchBarCompact((prev) => (prev === shouldCompact ? prev : shouldCompact));
   };
 
@@ -1457,7 +1481,7 @@ export default function App() {
 
           <main className="relative mx-auto h-full w-full max-w-5xl px-6 pb-4 md:px-10">
             <motion.div
-              className="absolute left-6 right-6 md:left-10 md:right-10"
+              className="absolute left-6 right-6 z-40 md:left-10 md:right-10"
               animate={{
                 top: isSearching ? (isSearchBarCollapsed ? "6px" : isSearchBarCompact ? "8px" : "20px") : "45%",
                 y: isSearching ? 0 : "-50%"
@@ -1465,10 +1489,8 @@ export default function App() {
               transition={{ type: "spring", stiffness: 180, damping: 24 }}
             >
               <motion.div
-                layout
-                transition={{ type: "spring", stiffness: 240, damping: 28 }}
                 onMouseEnter={() => {
-                  if (isSearchBarCompact) {
+                  if (isSearchBarCompact && allowCompactHoverExpand) {
                     setIsSearchBarHovering(true);
                   }
                 }}
@@ -1477,7 +1499,9 @@ export default function App() {
                     setIsSearchBarHovering(false);
                   }
                 }}
-                className={`relative mx-auto w-full transition-shadow duration-300 focus-within:shadow-[var(--float-shadow-focus)] ${
+                className={`relative mx-auto w-full transition-[box-shadow,background-color,max-width,padding,opacity] duration-200 ${
+                  isSearchBarCompact ? "focus-within:shadow-none" : "focus-within:shadow-[var(--float-shadow-focus)]"
+                } ${
                   isSearchBarCollapsed
                     ? "max-w-[300px] bg-transparent px-0 py-0 shadow-none ring-0"
                     : isSearching && isSearchBarCompact
@@ -1486,7 +1510,11 @@ export default function App() {
                 } ${
                   isSearchBarCollapsed
                     ? ""
-                    : "bg-[var(--bg-surface-1)] ring-1 ring-[var(--line-soft)] shadow-[var(--float-shadow)]"
+                    : isSearching && isSearchBarCompact
+                    ? "bg-[var(--bg-surface-1)] ring-0 shadow-[0_2px_10px_rgba(15,23,42,0.08)]"
+                    : isSearching
+                    ? "bg-[var(--bg-surface-1)] ring-1 ring-[var(--line-soft)] shadow-[var(--float-shadow)]"
+                    : "bg-[var(--bg-surface-1)] ring-1 ring-transparent shadow-[var(--float-shadow)] hover:ring-[var(--line-soft)]"
                 }`}
               >
                 {isSearchBarCollapsed ? (
@@ -1497,7 +1525,7 @@ export default function App() {
                       requestAnimationFrame(() => searchInputRef.current?.focus());
                     }}
                     aria-label={t("askPlaceholder")}
-                    className="block h-1.5 w-full rounded-full bg-[var(--line-soft-focus)]/90"
+                    className="block h-1.5 w-full rounded-full bg-white/95 ring-1 ring-black/5 shadow-[0_2px_9px_rgba(15,23,42,0.16)]"
                   />
                 ) : (
                   <>

@@ -3,13 +3,14 @@
 English: current page  
 中文文档: [README.zh-CN.md](./README.zh-CN.md)  
 Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md) | [中文贡献指南](./CONTRIBUTING.zh-CN.md)
+Tutorial: [docs/TUTORIAL.md](./docs/TUTORIAL.md) | 中文辅助: [docs/TUTORIAL.zh-CN.md](./docs/TUTORIAL.zh-CN.md)
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-111111?style=flat-square)](./LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/Rust-1.85%2B-111111?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![CI](https://img.shields.io/github/actions/workflow/status/FPSZ/Memori-Vault/rust-ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/FPSZ/Memori-Vault/actions/workflows/rust-ci.yml)
 
-Memori-Vault is a local-first memory system for personal knowledge and digital assets.
-It runs on-device by default, supports desktop and browser/server modes, and keeps retrieval available even while graph indexing is still in progress.
+Memori-Vault is a local-first memory engine for personal and team knowledge.
+It combines semantic chunking, vector retrieval, and asynchronous Graph-RAG extraction on Ollama + SQLite, while keeping first-answer speed stable under background indexing.
 
 ## Highlights (Current)
 
@@ -43,6 +44,16 @@ It runs on-device by default, supports desktop and browser/server modes, and kee
 
 2. Browser mode:
 - `memori-server` + UI over HTTP (no Tauri host required).
+
+## Enterprise (Private Deployment v1)
+
+- Single-tenant private deployment for engineering organizations.
+- OIDC/SSO login entry and API RBAC (`viewer/user/operator/admin`).
+- Admin APIs for health, metrics, policy, audit, reindex, pause/resume.
+- Model governance: local-first with remote egress allowlist enforcement.
+- Deployment assets included (`deploy/systemd`, env template, backup/restore scripts).
+
+Details: [docs/enterprise.md](./docs/enterprise.md)
 
 ## Architecture
 
@@ -82,6 +93,7 @@ npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 
 - Ollama local runtime is recommended for local provider mode.
 - Remote provider mode is optional and user-configured.
+- Enterprise policy can enforce `local_only` or remote allowlist mode.
 - Legacy theme key `memori-theme-mode` is migration-only; active key is `memori-theme`.
 
 ## License

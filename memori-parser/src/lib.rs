@@ -56,7 +56,7 @@ pub fn parse_and_chunk(
 
     while cursor < units.len() {
         let overlap = if let Some(prev) = chunks.last() {
-            tail_chars(prev, OVERLAP_SIZE)
+            tail_overlap_text(prev, OVERLAP_SIZE)
         } else {
             String::new()
         };
@@ -213,4 +213,28 @@ fn tail_chars(text: &str, count: usize) -> String {
         return text.to_string();
     }
     text.chars().skip(len - count).collect()
+}
+
+/// 生成相邻块重叠文本时，尽量从行边界开始，避免把 Markdown 语法切断（如表格/代码）。
+fn tail_overlap_text(text: &str, count: usize) -> String {
+    let tail = tail_chars(text, count);
+    if tail.is_empty() {
+        return tail;
+    }
+
+    if let Some(idx) = tail.find("\n\n") {
+        let candidate = tail[idx + 2..].trim_start();
+        if !candidate.is_empty() {
+            return candidate.to_string();
+        }
+    }
+
+    if let Some(idx) = tail.find('\n') {
+        let candidate = tail[idx + 1..].trim_start();
+        if !candidate.is_empty() {
+            return candidate.to_string();
+        }
+    }
+
+    tail.trim_start().to_string()
 }

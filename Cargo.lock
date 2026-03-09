@@ -1917,7 +1917,7 @@ dependencies = [
 
 [[package]]
 name = "memori-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "memori-parser",
  "memori-storage",
@@ -1933,7 +1933,7 @@ dependencies = [
 
 [[package]]
 name = "memori-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs",
  "memori-core",
@@ -1950,16 +1950,17 @@ dependencies = [
 
 [[package]]
 name = "memori-parser"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "memori-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "dirs",
  "memori-core",
  "reqwest 0.12.28",
@@ -1969,11 +1970,12 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
 name = "memori-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bincode",
  "memori-parser",
@@ -1986,7 +1988,7 @@ dependencies = [
 
 [[package]]
 name = "memori-vault"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "notify",
  "thiserror 2.0.18",

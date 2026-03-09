@@ -983,7 +983,7 @@ fn normalize_scope_path_text(path: &Path) -> String {
             text.pop();
         }
 
-        return text.to_ascii_lowercase();
+        text.to_ascii_lowercase()
     }
 
     #[cfg(not(target_os = "windows"))]

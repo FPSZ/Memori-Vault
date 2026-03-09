@@ -47,17 +47,12 @@ pub struct VaultStats {
     pub graph_node_count: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum IndexingMode {
+    #[default]
     Continuous,
     Manual,
     Scheduled,
-}
-
-impl Default for IndexingMode {
-    fn default() -> Self {
-        Self::Continuous
-    }
 }
 
 impl IndexingMode {
@@ -78,17 +73,12 @@ impl IndexingMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ResourceBudget {
+    #[default]
     Low,
     Balanced,
     Fast,
-}
-
-impl Default for ResourceBudget {
-    fn default() -> Self {
-        Self::Low
-    }
 }
 
 impl ResourceBudget {
