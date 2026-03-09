@@ -2,6 +2,7 @@ mod graph_extractor;
 mod llm_generator;
 
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -69,10 +70,19 @@ pub enum ModelProvider {
 }
 
 impl ModelProvider {
-    pub fn from_str(text: &str) -> Self {
+    pub fn from_value(text: &str) -> Self {
+        text.parse().unwrap_or(Self::OllamaLocal)
+    }
+}
+
+impl FromStr for ModelProvider {
+    type Err = &'static str;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
         match text.trim().to_ascii_lowercase().as_str() {
-            "openai_compatible" => Self::OpenAiCompatible,
-            _ => Self::OllamaLocal,
+            "ollama_local" => Ok(Self::OllamaLocal),
+            "openai_compatible" => Ok(Self::OpenAiCompatible),
+            _ => Err("unknown model provider"),
         }
     }
 }
@@ -89,7 +99,7 @@ pub struct RuntimeModelConfig {
 
 pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
     let provider = std::env::var(MEMORI_MODEL_PROVIDER_ENV)
-        .map(|v| ModelProvider::from_str(&v))
+        .map(|v| ModelProvider::from_value(&v))
         .unwrap_or(ModelProvider::OllamaLocal);
 
     let endpoint_default = match provider {

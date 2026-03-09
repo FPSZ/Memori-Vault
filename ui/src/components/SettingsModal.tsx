@@ -1,9 +1,15 @@
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, Cpu, Database, LoaderCircle, Palette, Search, Settings } from "lucide-react";
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Language } from "../i18n";
 import { useI18n } from "../i18n";
+import {
+  AnimatedPanel,
+  AnimatedPressButton,
+  fadeSlideUpVariants,
+  staggerContainerVariants
+} from "./MotionKit";
 import { CyberInput, CyberToggle } from "./UI";
 
 export type FontPreset = "system" | "neo" | "mono";
@@ -89,29 +95,29 @@ function LanguageSwitch({
   onChange: (lang: Language) => void;
 }) {
   return (
-    <div className="inline-flex items-center rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] p-1">
-      <button
+    <div className="inline-flex items-center gap-2 rounded-lg bg-transparent p-1">
+      <AnimatedPressButton
         type="button"
         onClick={() => onChange("zh-CN")}
-        className={`rounded-md px-2 py-1 text-xs transition ${
+        className={`rounded-md px-2.5 py-1 text-sm transition ${
           value === "zh-CN"
-            ? "bg-[var(--accent-soft)] text-[var(--accent)]"
-            : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            ? "bg-transparent text-[var(--accent)]"
+            : "text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
         }`}
       >
         CN
-      </button>
-      <button
+      </AnimatedPressButton>
+      <AnimatedPressButton
         type="button"
         onClick={() => onChange("en-US")}
-        className={`rounded-md px-2 py-1 text-xs transition ${
+        className={`rounded-md px-2.5 py-1 text-sm transition ${
           value === "en-US"
-            ? "bg-[var(--accent-soft)] text-[var(--accent)]"
-            : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            ? "bg-transparent text-[var(--accent)]"
+            : "text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
         }`}
       >
         EN
-      </button>
+      </AnimatedPressButton>
     </div>
   );
 }
@@ -128,18 +134,18 @@ function SelectionChips<T extends string>({
   return (
     <div className="inline-flex flex-wrap items-center gap-2">
       {options.map((option) => (
-        <button
+        <AnimatedPressButton
           key={option.value}
           type="button"
           onClick={() => onChange(option.value)}
-          className={`rounded-md border px-2.5 py-1 text-xs transition ${
+          className={`rounded-md px-3 py-1.5 text-sm transition ${
             value === option.value
-              ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-              : "border-[var(--border-strong)] bg-[var(--bg-surface-2)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              ? "bg-transparent text-[var(--accent)]"
+              : "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
           }`}
         >
           {option.label}
-        </button>
+        </AnimatedPressButton>
       ))}
     </div>
   );
@@ -155,13 +161,13 @@ function SettingCard({
   children: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-3">
+    <AnimatedPanel className="glass-panel-infer flex items-center justify-between gap-4 rounded-lg px-3 py-3">
       <div className="min-w-0">
         <div className="text-sm text-[var(--text-primary)]">{title}</div>
         {description ? <div className="mt-1 text-xs text-[var(--text-secondary)]">{description}</div> : null}
       </div>
       <div className="shrink-0">{children}</div>
-    </div>
+    </AnimatedPanel>
   );
 }
 
@@ -186,7 +192,7 @@ function ModelRoleSelector({
   const hasValue = options.includes(value);
   const selectValue = customMode || !hasValue ? CUSTOM_VALUE : value;
   return (
-    <div className="space-y-2 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-3">
+    <AnimatedPanel className="glass-panel-infer space-y-2 rounded-lg px-3 py-3">
       <div className="text-sm text-[var(--text-primary)]">{label}</div>
       <div className="flex items-center gap-2">
         <select
@@ -199,7 +205,7 @@ function ModelRoleSelector({
               onChange(next);
             }
           }}
-          className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-2 text-sm text-[var(--text-primary)] outline-none focus:ring-1 focus:ring-[var(--accent)]"
+          className="h-9 min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 text-sm text-[var(--text-primary)] outline-none transition hover:bg-[var(--accent-soft)] focus:bg-[var(--accent-soft)] focus:ring-1 focus:ring-[var(--line-soft-focus)]"
         >
           {options.map((item) => (
             <option key={item} value={item}>
@@ -208,22 +214,22 @@ function ModelRoleSelector({
           ))}
           <option value={CUSTOM_VALUE}>{t("modelUseCustom")}</option>
         </select>
-        <button
+        <AnimatedPressButton
           type="button"
           onClick={onToggleCustom}
-          className={`rounded-md border px-2.5 py-1 text-xs transition ${
+          className={`rounded-md px-3 py-1.5 text-sm transition ${
             customMode
-              ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-              : "border-[var(--border-strong)] bg-[var(--bg-surface-2)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+              : "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
           }`}
         >
           {t("modelUseCustom")}
-        </button>
+        </AnimatedPressButton>
       </div>
       {customMode ? (
         <CyberInput value={value} onChange={onChange} placeholder={t("modelCustomPlaceholder")} />
       ) : null}
-    </div>
+    </AnimatedPanel>
   );
 }
 
@@ -488,21 +494,18 @@ export function SettingsModal({
     return t("pullMissingModels");
   };
 
-  const buttonClassByState = (key: ActionKey, variant: "normal" | "primary" = "normal") => {
+  const buttonClassByState = (key: ActionKey) => {
     const phase = actionState[key].phase;
     if (phase === "success") {
-      return "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_0_16px_rgba(88,166,255,0.45)]";
+      return "bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_0_16px_rgba(88,166,255,0.45)]";
     }
     if (phase === "error") {
-      return "border-red-500/60 bg-red-500/15 text-red-300 shadow-[0_0_14px_rgba(239,68,68,0.3)]";
+      return "bg-red-500/15 text-red-300 shadow-[0_0_14px_rgba(239,68,68,0.3)]";
     }
     if (phase === "running") {
-      return "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]";
+      return "bg-[var(--accent-soft)] text-[var(--accent)]";
     }
-    if (variant === "primary") {
-      return "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]";
-    }
-    return "border-[var(--border-strong)] bg-[var(--bg-surface-2)] text-[var(--text-primary)] hover:border-[var(--accent)] hover:text-[var(--accent)]";
+    return "bg-transparent text-[var(--text-primary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]";
   };
 
   const onProviderSwitch = (provider: ModelProvider) => {
@@ -518,12 +521,12 @@ export function SettingsModal({
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 140, opacity: 0 }}
       transition={{ type: "spring", damping: 26, stiffness: 300 }}
-      className="pointer-events-auto h-full w-[78%] overflow-hidden border-l border-[var(--border-subtle)] bg-[var(--bg-surface-1)] shadow-[-24px_0_44px_-26px_rgba(0,0,0,0.48),24px_0_44px_-26px_rgba(0,0,0,0.24)] backdrop-blur-xl"
+      className="pointer-events-auto h-full w-[78%] overflow-hidden bg-[var(--bg-surface-1)] shadow-[-24px_0_44px_-26px_rgba(0,0,0,0.48),24px_0_44px_-26px_rgba(0,0,0,0.24)] backdrop-blur-xl"
       data-open={open}
       onClick={(event) => event.stopPropagation()}
     >
-      <div className="flex h-11 items-center justify-between border-b border-[var(--border-subtle)] px-4">
-        <button
+      <div className="flex h-11 items-center justify-between px-4 shadow-[0_10px_18px_-16px_rgba(88,166,255,0.25)]">
+        <AnimatedPressButton
           type="button"
           onClick={onBack}
           className="inline-flex items-center gap-1.5 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
@@ -532,28 +535,28 @@ export function SettingsModal({
         >
           <ArrowRight className="h-4 w-4" />
           <span className="text-xs tracking-[0.1em] uppercase">{t("back")}</span>
-        </button>
+        </AnimatedPressButton>
         <span className="text-xs tracking-[0.16em] text-[var(--text-secondary)] uppercase">
           {t("settingsTitle")}
         </span>
       </div>
 
       <div className="flex h-[calc(100%-44px)]">
-        <aside className="w-[28%] border-r border-[var(--border-subtle)] bg-[var(--bg-surface-2)] p-3">
+        <aside className="w-[28%] bg-[var(--bg-surface-2)] p-3 shadow-[10px_0_18px_-16px_rgba(88,166,255,0.28)]">
           <div className="mb-3 px-2 pt-1 text-xs tracking-[0.16em] text-[var(--text-secondary)] uppercase">
             {t("settings")}
           </div>
           <div className="relative mb-3">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />
-            <CyberInput
+            <input
               value={search}
-              onChange={setSearch}
+              onChange={(event) => setSearch(event.target.value)}
               placeholder={t("settingsSearchPlaceholder")}
-              className="pl-8 text-xs"
+              className="h-9 w-full rounded-md border-none bg-transparent pl-8 pr-2 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:ring-0"
             />
           </div>
           {filteredTabs.length === 0 ? (
-            <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+            <div className="rounded-lg border border-[var(--line-soft)] bg-[var(--bg-surface-2)] px-3 py-2 text-xs text-[var(--text-secondary)] shadow-[0_8px_22px_-18px_rgba(88,166,255,0.24)]">
               {t("noSettingsMatch")}
             </div>
           ) : (
@@ -562,7 +565,7 @@ export function SettingsModal({
                 const Icon = tab.icon;
                 const active = activeTab === tab.key;
                 return (
-                  <button
+                  <AnimatedPressButton
                     key={tab.key}
                     type="button"
                     onClick={() => setActiveTab(tab.key)}
@@ -570,10 +573,16 @@ export function SettingsModal({
                       active ? "text-[var(--accent)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                     }`}
                   >
-                    {active ? <span className="absolute left-0 h-4 w-[2px] rounded bg-[var(--accent)]" /> : null}
+                    {active ? (
+                      <motion.span
+                        layoutId="settings-tab-active-indicator"
+                        className="absolute left-0 h-4 w-[2px] rounded bg-[var(--accent)]"
+                        transition={{ type: "spring", stiffness: 420, damping: 34, mass: 0.62 }}
+                      />
+                    ) : null}
                     <Icon className="h-4 w-4" />
                     <span>{tab.label}</span>
-                  </button>
+                  </AnimatedPressButton>
                 );
               })}
             </div>
@@ -581,12 +590,25 @@ export function SettingsModal({
         </aside>
 
         <section className="relative w-[72%] overflow-y-auto p-5">
-          {activeTab === "basic" ? (
-            <div className="pt-2">
+          <AnimatePresence mode="wait">
+            {activeTab === "basic" ? (
+              <motion.div
+                key="settings-tab-basic"
+                variants={fadeSlideUpVariants}
+                initial="hidden"
+                animate="show"
+                exit="exit"
+                className="pt-2"
+              >
               <h3 className="mb-5 text-sm tracking-[0.16em] text-[var(--accent)] uppercase">
                 {t("basic")}
               </h3>
-              <div className="space-y-4 pb-2">
+              <motion.div
+                variants={staggerContainerVariants}
+                initial="hidden"
+                animate="show"
+                className="space-y-4 pb-2"
+              >
                 <SettingCard title={t("uiLanguage")}>
                   <LanguageSwitch value={uiLang} onChange={onUiLangChange} />
                 </SettingCard>
@@ -606,7 +628,7 @@ export function SettingsModal({
                     ]}
                   />
                 </SettingCard>
-                <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-3">
+                <AnimatedPanel className="glass-panel-infer rounded-lg px-3 py-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-sm text-[var(--text-primary)]">{t("watchRoot")}</div>
@@ -614,17 +636,17 @@ export function SettingsModal({
                         {watchRoot || "-"}
                       </div>
                     </div>
-                    <button
+                    <AnimatedPressButton
                       type="button"
                       onClick={onPickWatchRoot}
                       disabled={isPickingWatchRoot}
-                      className="inline-flex items-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-xs text-[var(--text-primary)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex items-center rounded-md border border-transparent bg-transparent px-3 py-1.5 text-sm text-[var(--text-secondary)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isPickingWatchRoot ? t("watchRootPicking") : t("watchRootPick")}
-                    </button>
+                    </AnimatedPressButton>
                   </div>
                   <div className="mt-2 text-xs text-[var(--text-secondary)]">{t("watchRootRestartHint")}</div>
-                </div>
+                </AnimatedPanel>
                 <SettingCard title={t("autoSyncDaemon")} description={t("autoSyncDaemonDesc")}>
                   <CyberToggle
                     checked={autoSyncDaemon}
@@ -639,16 +661,28 @@ export function SettingsModal({
                     ariaLabel={t("graphRagInfer")}
                   />
                 </SettingCard>
-              </div>
-            </div>
+              </motion.div>
+            </motion.div>
           ) : null}
 
-          {activeTab === "models" ? (
-            <div className="pt-2">
+            {activeTab === "models" ? (
+              <motion.div
+                key="settings-tab-models"
+                variants={fadeSlideUpVariants}
+                initial="hidden"
+                animate="show"
+                exit="exit"
+                className="pt-2"
+              >
               <h3 className="mb-5 text-sm tracking-[0.16em] text-[var(--accent)] uppercase">
                 {t("models")}
               </h3>
-              <div className="space-y-3">
+              <motion.div
+                variants={staggerContainerVariants}
+                initial="hidden"
+                animate="show"
+                className="space-y-3"
+              >
                 <SettingCard title={t("modelProvider")}>
                   <SelectionChips
                     value={modelSettings.active_provider}
@@ -687,7 +721,7 @@ export function SettingsModal({
                 ) : null}
 
                 {activeProvider === "ollama_local" ? (
-                  <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-3">
+                  <AnimatedPanel className="glass-panel-infer rounded-lg px-3 py-3">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-sm text-[var(--text-primary)]">{t("modelLocalRoot")}</div>
@@ -696,28 +730,28 @@ export function SettingsModal({
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button
+                        <AnimatedPressButton
                           type="button"
                           onClick={() => void onModelAction("refresh", onPickLocalModelsRoot)}
                           disabled={modelBusy}
-                          className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-xs text-[var(--text-primary)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-60"
+                          className="rounded-md border border-transparent bg-transparent px-3 py-1.5 text-sm text-[var(--text-secondary)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] disabled:opacity-60"
                         >
                           {t("modelLocalRootPick")}
-                        </button>
-                        <button
+                        </AnimatedPressButton>
+                        <AnimatedPressButton
                           type="button"
                           onClick={onClearLocalModelsRoot}
                           disabled={modelBusy}
-                          className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-xs text-[var(--text-primary)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-60"
+                          className="rounded-md border border-transparent bg-transparent px-3 py-1.5 text-sm text-[var(--text-secondary)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] disabled:opacity-60"
                         >
                           {t("modelLocalRootClear")}
-                        </button>
+                        </AnimatedPressButton>
                       </div>
                     </div>
-                  </div>
+                  </AnimatedPanel>
                 ) : null}
 
-                <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-3">
+                <AnimatedPanel className="glass-panel-infer rounded-lg px-3 py-3">
                   <div className="mb-2 text-sm text-[var(--text-primary)]">{t("modelMergedCandidates")}</div>
                   <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-secondary)]">
                     <span>
@@ -733,7 +767,7 @@ export function SettingsModal({
                   {providerModels.merged.length === 0 ? (
                     <div className="mt-2 text-xs text-[var(--text-secondary)]">{t("modelNoCandidates")}</div>
                   ) : null}
-                </div>
+                </AnimatedPanel>
 
                 <ModelRoleSelector
                   label={t("chatModel")}
@@ -766,145 +800,165 @@ export function SettingsModal({
                   onChange={(value) => updateActiveProfile({ embed_model: value })}
                 />
 
-                <div className="flex flex-wrap gap-2">
-                  <motion.button
-                    key={`probe-${actionState.probe.tick}`}
-                    type="button"
-                    onClick={() => void onModelAction("probe", onProbeModelProvider)}
-                    disabled={modelBusy}
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition disabled:opacity-60 ${buttonClassByState("probe")}`}
-                    animate={
-                      actionState.probe.phase === "success"
-                        ? { scale: [1, 1.04, 1] }
-                        : { scale: 1 }
-                    }
-                    transition={{ duration: 0.35 }}
-                  >
-                    {actionState.probe.phase === "running" ? (
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                    ) : null}
-                    {buttonLabelByState("probe")}
-                  </motion.button>
-                  <motion.button
-                    key={`refresh-${actionState.refresh.tick}`}
-                    type="button"
-                    onClick={() => void onModelAction("refresh", onRefreshProviderModels)}
-                    disabled={modelBusy}
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition disabled:opacity-60 ${buttonClassByState("refresh")}`}
-                    animate={
-                      actionState.refresh.phase === "success"
-                        ? { scale: [1, 1.04, 1] }
-                        : { scale: 1 }
-                    }
-                    transition={{ duration: 0.35 }}
-                  >
-                    {actionState.refresh.phase === "running" ? (
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                    ) : null}
-                    {buttonLabelByState("refresh")}
-                  </motion.button>
-                  <motion.button
-                    key={`save-${actionState.save.tick}`}
-                    type="button"
-                    onClick={() => void onModelAction("save", onSaveModelSettings)}
-                    disabled={modelBusy}
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition disabled:opacity-60 ${buttonClassByState("save", "primary")}`}
-                    animate={
-                      actionState.save.phase === "success"
-                        ? { scale: [1, 1.04, 1] }
-                        : { scale: 1 }
-                    }
-                    transition={{ duration: 0.35 }}
-                  >
-                    {actionState.save.phase === "running" ? (
-                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                    ) : null}
-                    {buttonLabelByState("save")}
-                  </motion.button>
-                  {activeProvider === "ollama_local" ? (
+                <AnimatedPanel className="glass-panel-infer space-y-2 rounded-md px-3 py-2 text-xs text-[var(--text-secondary)]">
+                  <div className="text-[var(--text-primary)]">{t("modelStatusTitle")}</div>
+                  <div className="flex flex-wrap gap-2">
                     <motion.button
-                      key={`pull-${actionState.pull.tick}`}
+                      key={`probe-${actionState.probe.tick}`}
                       type="button"
-                      onClick={() => {
-                        const candidates = modelAvailability?.missing_roles ?? [];
-                        if (candidates.includes("embed")) {
-                          void onModelAction("pull", () => onPullModel(activeProfile.embed_model));
-                        } else if (candidates.includes("chat")) {
-                          void onModelAction("pull", () => onPullModel(activeProfile.chat_model));
-                        } else if (candidates.includes("graph")) {
-                          void onModelAction("pull", () => onPullModel(activeProfile.graph_model));
-                        }
-                      }}
-                      disabled={modelBusy || !modelAvailability?.missing_roles?.length}
-                      className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs transition disabled:opacity-60 ${buttonClassByState("pull")}`}
+                      onClick={() => void onModelAction("probe", onProbeModelProvider)}
+                      disabled={modelBusy}
+                      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${buttonClassByState("probe")}`}
                       animate={
-                        actionState.pull.phase === "success"
+                        actionState.probe.phase === "success"
                           ? { scale: [1, 1.04, 1] }
                           : { scale: 1 }
                       }
                       transition={{ duration: 0.35 }}
                     >
-                      {actionState.pull.phase === "running" ? (
+                      {actionState.probe.phase === "running" ? (
                         <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                       ) : null}
-                      {buttonLabelByState("pull")}
+                      {buttonLabelByState("probe")}
                     </motion.button>
-                  ) : null}
-                </div>
-
-                {modelAvailability ? (
-                  <div className="space-y-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2 text-xs text-[var(--text-secondary)]">
-                    <div className="text-[var(--text-primary)]">{t("modelStatusTitle")}</div>
-                    <div>
-                      {modelAvailability.reachable ? t("modelStatusReachable") : t("modelStatusUnreachable")}
-                    </div>
-                    <div>
-                      {modelAvailability.missing_roles.length > 0
-                        ? t("modelStatusMissing", {
-                            roles: modelAvailability.missing_roles.join(", ")
-                          })
-                        : t("modelStatusReady")}
-                    </div>
-                    {modelAvailability.checked_provider ? (
-                      <div>
-                        {t("modelStatusProvider", {
-                          provider:
-                            modelAvailability.checked_provider === "ollama_local"
-                              ? t("providerOllama")
-                              : t("providerOpenAI")
-                        })}
-                      </div>
+                    <motion.button
+                      key={`refresh-${actionState.refresh.tick}`}
+                      type="button"
+                      onClick={() => void onModelAction("refresh", onRefreshProviderModels)}
+                      disabled={modelBusy}
+                      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${buttonClassByState("refresh")}`}
+                      animate={
+                        actionState.refresh.phase === "success"
+                          ? { scale: [1, 1.04, 1] }
+                          : { scale: 1 }
+                      }
+                      transition={{ duration: 0.35 }}
+                    >
+                      {actionState.refresh.phase === "running" ? (
+                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                      ) : null}
+                      {buttonLabelByState("refresh")}
+                    </motion.button>
+                    <motion.button
+                      key={`save-${actionState.save.tick}`}
+                      type="button"
+                      onClick={() => void onModelAction("save", onSaveModelSettings)}
+                      disabled={modelBusy}
+                      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${buttonClassByState("save")}`}
+                      animate={
+                        actionState.save.phase === "success"
+                          ? { scale: [1, 1.04, 1] }
+                          : { scale: 1 }
+                      }
+                      transition={{ duration: 0.35 }}
+                    >
+                      {actionState.save.phase === "running" ? (
+                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                      ) : null}
+                      {buttonLabelByState("save")}
+                    </motion.button>
+                    {activeProvider === "ollama_local" ? (
+                      <motion.button
+                        key={`pull-${actionState.pull.tick}`}
+                        type="button"
+                        onClick={() => {
+                          const candidates = modelAvailability?.missing_roles ?? [];
+                          if (candidates.includes("embed")) {
+                            void onModelAction("pull", () => onPullModel(activeProfile.embed_model));
+                          } else if (candidates.includes("chat")) {
+                            void onModelAction("pull", () => onPullModel(activeProfile.chat_model));
+                          } else if (candidates.includes("graph")) {
+                            void onModelAction("pull", () => onPullModel(activeProfile.graph_model));
+                          }
+                        }}
+                        disabled={modelBusy || !modelAvailability?.missing_roles?.length}
+                        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${buttonClassByState("pull")}`}
+                        animate={
+                          actionState.pull.phase === "success"
+                            ? { scale: [1, 1.04, 1] }
+                            : { scale: 1 }
+                        }
+                        transition={{ duration: 0.35 }}
+                      >
+                        {actionState.pull.phase === "running" ? (
+                          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                        ) : null}
+                        {buttonLabelByState("pull")}
+                      </motion.button>
                     ) : null}
-                    {modelAvailability.errors.map((item, idx) => (
-                      <div key={`${item.code}-${idx}`} className="text-red-300">
-                        {item.code}: {item.message}
-                      </div>
-                    ))}
                   </div>
-                ) : null}
-              </div>
-            </div>
+                  {modelAvailability ? (
+                    <>
+                      <div>
+                        {modelAvailability.reachable ? t("modelStatusReachable") : t("modelStatusUnreachable")}
+                      </div>
+                      <div>
+                        {modelAvailability.missing_roles.length > 0
+                          ? t("modelStatusMissing", {
+                              roles: modelAvailability.missing_roles.join(", ")
+                            })
+                          : t("modelStatusReady")}
+                      </div>
+                      {modelAvailability.checked_provider ? (
+                        <div>
+                          {t("modelStatusProvider", {
+                            provider:
+                              modelAvailability.checked_provider === "ollama_local"
+                                ? t("providerOllama")
+                                : t("providerOpenAI")
+                          })}
+                        </div>
+                      ) : null}
+                      {modelAvailability.errors.map((item, idx) => (
+                        <div key={`${item.code}-${idx}`} className="text-red-300">
+                          {item.code}: {item.message}
+                        </div>
+                      ))}
+                    </>
+                  ) : null}
+                </AnimatedPanel>
+              </motion.div>
+            </motion.div>
           ) : null}
 
-          {activeTab === "advanced" ? (
-            <div className="pt-2">
+            {activeTab === "advanced" ? (
+              <motion.div
+                key="settings-tab-advanced"
+                variants={fadeSlideUpVariants}
+                initial="hidden"
+                animate="show"
+                exit="exit"
+                className="pt-2"
+              >
               <h3 className="mb-5 text-sm tracking-[0.16em] text-[var(--accent)] uppercase">
                 {t("advanced")}
               </h3>
-              <div className="rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] p-3 text-xs leading-5 text-[var(--text-secondary)]">
+              <AnimatedPanel className="glass-panel-infer rounded-lg p-3 text-xs leading-5 text-[var(--text-secondary)]">
                 {uiLang === "zh-CN"
                   ? "高级运行参数预留区，后续可扩展性能与调试选项。"
                   : "Reserved for advanced runtime and diagnostics options."}
-              </div>
-            </div>
+              </AnimatedPanel>
+            </motion.div>
           ) : null}
 
-          {activeTab === "personalization" ? (
-            <div className="pt-2">
+            {activeTab === "personalization" ? (
+              <motion.div
+                key="settings-tab-personalization"
+                variants={fadeSlideUpVariants}
+                initial="hidden"
+                animate="show"
+                exit="exit"
+                className="pt-2"
+              >
               <h3 className="mb-5 text-sm tracking-[0.16em] text-[var(--accent)] uppercase">
                 {t("personalization")}
               </h3>
-              <div className="space-y-4">
+              <motion.div
+                variants={staggerContainerVariants}
+                initial="hidden"
+                animate="show"
+                className="space-y-4"
+              >
                 <SettingCard title={t("fontPreset")}>
                   <SelectionChips
                     value={fontPreset}
@@ -929,9 +983,10 @@ export function SettingsModal({
                     ]}
                   />
                 </SettingCard>
-              </div>
-            </div>
+              </motion.div>
+            </motion.div>
           ) : null}
+          </AnimatePresence>
         </section>
       </div>
     </motion.aside>

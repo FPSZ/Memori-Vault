@@ -260,7 +260,7 @@ async fn list_provider_models(
     api_key: Option<String>,
     models_root: Option<String>,
 ) -> Result<ProviderModelsDto, String> {
-    let provider = ModelProvider::from_str(&provider);
+    let provider = ModelProvider::from_value(&provider);
     let endpoint = normalize_endpoint(provider, &endpoint);
     let api_key = normalize_optional_text(api_key);
     let models_root = normalize_optional_text(models_root);
@@ -292,7 +292,7 @@ async fn probe_model_provider(
     api_key: Option<String>,
     models_root: Option<String>,
 ) -> Result<ModelAvailabilityDto, String> {
-    let provider = ModelProvider::from_str(&provider);
+    let provider = ModelProvider::from_value(&provider);
     let endpoint = normalize_endpoint(provider, &endpoint);
     let api_key = normalize_optional_text(api_key);
     let models_root = normalize_optional_text(models_root);
@@ -384,7 +384,7 @@ async fn pull_model(
     if model.is_empty() {
         return Err("模型名不能为空".to_string());
     }
-    let provider = ModelProvider::from_str(&provider);
+    let provider = ModelProvider::from_value(&provider);
     if provider != ModelProvider::OllamaLocal {
         return Err("仅本地 Ollama 模式支持拉取模型".to_string());
     }
@@ -851,17 +851,17 @@ fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
                 .unwrap_or_else(|_| DEFAULT_MODEL_PROVIDER.to_string())
         })
     });
-    let active_provider = ModelProvider::from_str(&fallback_provider);
+    let active_provider = ModelProvider::from_value(&fallback_provider);
     let env_provider = std::env::var(MEMORI_MODEL_PROVIDER_ENV)
         .ok()
-        .map(|value| ModelProvider::from_str(&value))
+        .map(|value| ModelProvider::from_value(&value))
         .unwrap_or(active_provider);
 
     let local_endpoint = settings
         .local_endpoint
         .clone()
         .or_else(|| {
-            if ModelProvider::from_str(
+            if ModelProvider::from_value(
                 settings
                     .provider
                     .as_deref()
@@ -886,7 +886,7 @@ fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
         .remote_endpoint
         .clone()
         .or_else(|| {
-            if ModelProvider::from_str(
+            if ModelProvider::from_value(
                 settings
                     .provider
                     .as_deref()
@@ -911,7 +911,7 @@ fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
         .local_chat_model
         .clone()
         .or_else(|| {
-            if ModelProvider::from_str(
+            if ModelProvider::from_value(
                 settings
                     .provider
                     .as_deref()
@@ -936,7 +936,7 @@ fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
         .local_graph_model
         .clone()
         .or_else(|| {
-            if ModelProvider::from_str(
+            if ModelProvider::from_value(
                 settings
                     .provider
                     .as_deref()
@@ -961,7 +961,7 @@ fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
         .local_embed_model
         .clone()
         .or_else(|| {
-            if ModelProvider::from_str(
+            if ModelProvider::from_value(
                 settings
                     .provider
                     .as_deref()
@@ -986,7 +986,7 @@ fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
         .remote_chat_model
         .clone()
         .or_else(|| {
-            if ModelProvider::from_str(
+            if ModelProvider::from_value(
                 settings
                     .provider
                     .as_deref()
@@ -1011,7 +1011,7 @@ fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
         .remote_graph_model
         .clone()
         .or_else(|| {
-            if ModelProvider::from_str(
+            if ModelProvider::from_value(
                 settings
                     .provider
                     .as_deref()
@@ -1036,7 +1036,7 @@ fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
         .remote_embed_model
         .clone()
         .or_else(|| {
-            if ModelProvider::from_str(
+            if ModelProvider::from_value(
                 settings
                     .provider
                     .as_deref()
@@ -1061,7 +1061,7 @@ fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
         .remote_api_key
         .clone()
         .or_else(|| {
-            if ModelProvider::from_str(
+            if ModelProvider::from_value(
                 settings
                     .provider
                     .as_deref()
@@ -1102,7 +1102,7 @@ fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
 }
 
 fn normalize_model_settings_payload(payload: ModelSettingsDto) -> Result<ModelSettingsDto, String> {
-    let active_provider = ModelProvider::from_str(&payload.active_provider);
+    let active_provider = ModelProvider::from_value(&payload.active_provider);
     let local_endpoint =
         normalize_endpoint(ModelProvider::OllamaLocal, &payload.local_profile.endpoint);
     let remote_endpoint = normalize_endpoint(
@@ -1153,7 +1153,7 @@ fn normalize_model_settings_payload(payload: ModelSettingsDto) -> Result<ModelSe
 }
 
 fn resolve_active_runtime_settings(settings: &ModelSettingsDto) -> ActiveRuntimeModelSettings {
-    let active_provider = ModelProvider::from_str(&settings.active_provider);
+    let active_provider = ModelProvider::from_value(&settings.active_provider);
     if active_provider == ModelProvider::OpenAiCompatible {
         return ActiveRuntimeModelSettings {
             provider: ModelProvider::OpenAiCompatible,

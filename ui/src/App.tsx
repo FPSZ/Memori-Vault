@@ -1168,7 +1168,7 @@ export default function App() {
             data-tauri-drag-region=""
             className="pointer-events-none absolute inset-0 flex items-center justify-center px-44"
           >
-            <div className="inline-flex min-w-0 max-w-[62vw] items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--overlay)] px-3 py-1 text-[10px] text-[var(--text-secondary)]">
+            <div className="inline-flex min-w-0 max-w-[62vw] items-center gap-2 px-1 text-[10px] text-[var(--text-secondary)]">
               <span className="shrink-0 uppercase tracking-[0.08em]">{t("watchRoot")}</span>
               <span className="min-w-0 truncate text-[var(--text-primary)]">{headerWatchRoot}</span>
               <span className="shrink-0 text-[var(--text-muted)]">|</span>
@@ -1245,13 +1245,17 @@ export default function App() {
               }}
               transition={{ type: "spring", stiffness: 180, damping: 24 }}
             >
-              <div className="relative mx-auto w-full max-w-4xl rounded-xl bg-[var(--bg-surface-1)] px-6 py-5 ring-1 ring-[var(--border-subtle)]">
+              <div className="relative mx-auto w-full max-w-4xl rounded-xl bg-[var(--bg-surface-1)] px-6 py-5 ring-1 ring-[var(--line-soft)] shadow-[var(--float-shadow)] transition-shadow duration-300 focus-within:shadow-[var(--float-shadow-focus)]">
                 <div className="relative flex items-center gap-3">
                   <div ref={scopeMenuRef} className="relative shrink-0">
                     <button
                       type="button"
                       onClick={() => setScopeMenuOpen((prev) => !prev)}
-                      className="inline-flex h-9 max-w-[170px] items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2.5 text-xs text-[var(--text-secondary)] transition hover:border-[var(--accent)]/60 hover:text-[var(--text-primary)]"
+                      className={`inline-flex h-9 max-w-[170px] items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-xs transition ${
+                        scopeMenuOpen
+                          ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                          : "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+                      }`}
                       aria-label={t("scopeSelectTitle")}
                       title={t("scopeSelectTitle")}
                     >
@@ -1444,9 +1448,11 @@ export default function App() {
                             {t("synthesis")}
                           </span>
                         </div>
-                        <p className="whitespace-pre-wrap break-words font-sans text-lg leading-relaxed text-[var(--text-primary)]">
-                          {parsed.synthesis}
-                        </p>
+                        <div className="md-preview mt-1 break-words font-sans text-lg leading-relaxed text-[var(--text-primary)]">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {parsed.synthesis}
+                          </ReactMarkdown>
+                        </div>
                       </div>
 
                       {visibleSources.length > 0 && (
