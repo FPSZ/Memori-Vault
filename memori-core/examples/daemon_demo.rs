@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
 
-        match engine.search(query, 3).await {
+        match engine.search(query, 3, None).await {
             Ok(results) => {
                 if results.is_empty() {
                     println!("\n未检索到相关记忆。\n");
