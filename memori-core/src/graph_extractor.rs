@@ -3,10 +3,8 @@ use std::collections::HashSet;
 use memori_storage::{GraphEdge, GraphNode};
 use serde::{Deserialize, Serialize};
 
-use crate::EngineError;
+use crate::{EngineError, ModelProvider, resolve_runtime_model_config_from_env};
 
-const DEFAULT_GRAPH_MODEL: &str = "qwen2.5:7b";
-const OLLAMA_CHAT_ENDPOINT: &str = "http://localhost:11434/api/chat";
 const GRAPH_TEMPERATURE: f32 = 0.0;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -47,6 +45,23 @@ struct OllamaMessageResponse {
     content: String,
 }
 
+#[derive(Debug, Serialize)]
+struct OpenAiChatCompletionRequest<'a> {
+    model: &'a str,
+    temperature: f32,
+    messages: Vec<OllamaMessage<'a>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiChatCompletionResponse {
+    choices: Vec<OpenAiChatChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiChatChoice {
+    message: OllamaMessageResponse,
+}
+
 /// 从文本块中抽取实体与关系。
 ///
 /// 关键点：
@@ -56,8 +71,8 @@ struct OllamaMessageResponse {
 pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError> {
     let client = reqwest::Client::new();
 
-    let model =
-        std::env::var("MEMORI_GRAPH_MODEL").unwrap_or_else(|_| DEFAULT_GRAPH_MODEL.to_string());
+    let runtime = resolve_runtime_model_config_from_env();
+    let model = runtime.graph_model.clone();
 
     let system_prompt = r#"
 你是图谱抽取器。只允许输出严格 JSON，不要输出任何额外解释。
@@ -83,31 +98,51 @@ pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError
 
     let user_prompt = format!("请抽取以下文本中的实体与关系：\n{}", text_chunk);
 
-    let request_body = OllamaChatRequest {
-        model: &model,
-        stream: false,
-        format: "json",
-        options: OllamaChatOptions {
-            temperature: GRAPH_TEMPERATURE,
+    let messages = vec![
+        OllamaMessage {
+            role: "system",
+            content: system_prompt,
         },
-        messages: vec![
-            OllamaMessage {
-                role: "system",
-                content: system_prompt,
-            },
-            OllamaMessage {
-                role: "user",
-                content: &user_prompt,
-            },
-        ],
-    };
+        OllamaMessage {
+            role: "user",
+            content: &user_prompt,
+        },
+    ];
 
-    let response = client
-        .post(OLLAMA_CHAT_ENDPOINT)
-        .json(&request_body)
-        .send()
-        .await
-        .map_err(EngineError::GraphExtractRequest)?;
+    let response = if runtime.provider == ModelProvider::OllamaLocal {
+        let endpoint = format!("{}/api/chat", runtime.endpoint.trim_end_matches('/'));
+        client
+            .post(endpoint)
+            .json(&OllamaChatRequest {
+                model: &model,
+                stream: false,
+                format: "json",
+                options: OllamaChatOptions {
+                    temperature: GRAPH_TEMPERATURE,
+                },
+                messages,
+            })
+            .send()
+            .await
+            .map_err(EngineError::GraphExtractRequest)?
+    } else {
+        let endpoint = format!(
+            "{}/v1/chat/completions",
+            runtime.endpoint.trim_end_matches('/')
+        );
+        let mut request = client.post(endpoint).json(&OpenAiChatCompletionRequest {
+            model: &model,
+            temperature: GRAPH_TEMPERATURE,
+            messages,
+        });
+        if let Some(key) = runtime.api_key.as_ref() {
+            request = request.bearer_auth(key);
+        }
+        request
+            .send()
+            .await
+            .map_err(EngineError::GraphExtractRequest)?
+    };
 
     let status = response.status();
     if !status.is_success() {
@@ -121,12 +156,26 @@ pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError
         });
     }
 
-    let parsed: OllamaChatResponse = response
-        .json()
-        .await
-        .map_err(EngineError::GraphExtractDeserialize)?;
+    let raw_content = if runtime.provider == ModelProvider::OllamaLocal {
+        let parsed: OllamaChatResponse = response
+            .json()
+            .await
+            .map_err(EngineError::GraphExtractDeserialize)?;
+        parsed.message.content
+    } else {
+        let parsed: OpenAiChatCompletionResponse = response
+            .json()
+            .await
+            .map_err(EngineError::GraphExtractDeserialize)?;
+        parsed
+            .choices
+            .into_iter()
+            .next()
+            .map(|c| c.message.content)
+            .unwrap_or_default()
+    };
 
-    parse_graph_data(&parsed.message.content)
+    parse_graph_data(&raw_content)
 }
 
 fn parse_graph_data(raw: &str) -> Result<GraphData, EngineError> {

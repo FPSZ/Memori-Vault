@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::EngineError;
+use crate::{EngineError, ModelProvider, resolve_runtime_model_config_from_env};
 
-const DEFAULT_OLLAMA_CHAT_ENDPOINT: &str = "http://localhost:11434/api/chat";
-const DEFAULT_ANSWER_MODEL: &str = "qwen2.5:7b";
 const ANSWER_TEMPERATURE: f32 = 0.1;
 
 #[derive(Debug, Serialize)]
@@ -35,6 +33,23 @@ struct OllamaMessageResponse {
     content: String,
 }
 
+#[derive(Debug, Serialize)]
+struct OpenAiChatCompletionRequest<'a> {
+    model: &'a str,
+    temperature: f32,
+    messages: Vec<OllamaMessage<'a>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiChatCompletionResponse {
+    choices: Vec<OpenAiChatChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiChatChoice {
+    message: OllamaMessageResponse,
+}
+
 /// 结合向量文本上下文与图谱上下文，生成最终回答。
 pub async fn generate_answer(
     question: &str,
@@ -45,10 +60,16 @@ pub async fn generate_answer(
         return Err(EngineError::AnswerGenerateEmpty);
     }
 
-    let endpoint = std::env::var("MEMORI_OLLAMA_CHAT_ENDPOINT")
-        .unwrap_or_else(|_| DEFAULT_OLLAMA_CHAT_ENDPOINT.to_string());
-    let model =
-        std::env::var("MEMORI_CHAT_MODEL").unwrap_or_else(|_| DEFAULT_ANSWER_MODEL.to_string());
+    let runtime = resolve_runtime_model_config_from_env();
+    let model = runtime.chat_model.clone();
+    let endpoint = if runtime.provider == ModelProvider::OllamaLocal {
+        format!("{}/api/chat", runtime.endpoint.trim_end_matches('/'))
+    } else {
+        format!(
+            "{}/v1/chat/completions",
+            runtime.endpoint.trim_end_matches('/')
+        )
+    };
 
     let system_prompt = r#"
 你是 Memori-Vault 的检索问答助手。
@@ -62,31 +83,46 @@ pub async fn generate_answer(
         question, text_context, graph_context
     );
 
-    let body = OllamaChatRequest {
-        model: &model,
-        stream: false,
-        options: OllamaChatOptions {
-            temperature: ANSWER_TEMPERATURE,
+    let messages = vec![
+        OllamaMessage {
+            role: "system",
+            content: system_prompt,
         },
-        messages: vec![
-            OllamaMessage {
-                role: "system",
-                content: system_prompt,
-            },
-            OllamaMessage {
-                role: "user",
-                content: &user_prompt,
-            },
-        ],
-    };
+        OllamaMessage {
+            role: "user",
+            content: &user_prompt,
+        },
+    ];
 
     let client = reqwest::Client::new();
-    let response = client
-        .post(endpoint)
-        .json(&body)
-        .send()
-        .await
-        .map_err(EngineError::AnswerGenerateRequest)?;
+    let response = if runtime.provider == ModelProvider::OllamaLocal {
+        client
+            .post(endpoint)
+            .json(&OllamaChatRequest {
+                model: &model,
+                stream: false,
+                options: OllamaChatOptions {
+                    temperature: ANSWER_TEMPERATURE,
+                },
+                messages,
+            })
+            .send()
+            .await
+            .map_err(EngineError::AnswerGenerateRequest)?
+    } else {
+        let mut request = client.post(endpoint).json(&OpenAiChatCompletionRequest {
+            model: &model,
+            temperature: ANSWER_TEMPERATURE,
+            messages,
+        });
+        if let Some(key) = runtime.api_key.as_ref() {
+            request = request.bearer_auth(key);
+        }
+        request
+            .send()
+            .await
+            .map_err(EngineError::AnswerGenerateRequest)?
+    };
 
     let status = response.status();
     if !status.is_success() {
@@ -100,11 +136,25 @@ pub async fn generate_answer(
         });
     }
 
-    let parsed: OllamaChatResponse = response
-        .json()
-        .await
-        .map_err(EngineError::AnswerGenerateDeserialize)?;
-    let answer = parsed.message.content.trim();
+    let answer = if runtime.provider == ModelProvider::OllamaLocal {
+        let parsed: OllamaChatResponse = response
+            .json()
+            .await
+            .map_err(EngineError::AnswerGenerateDeserialize)?;
+        parsed.message.content
+    } else {
+        let parsed: OpenAiChatCompletionResponse = response
+            .json()
+            .await
+            .map_err(EngineError::AnswerGenerateDeserialize)?;
+        parsed
+            .choices
+            .into_iter()
+            .next()
+            .map(|c| c.message.content)
+            .unwrap_or_default()
+    };
+    let answer = answer.trim();
 
     if answer.is_empty() {
         return Err(EngineError::AnswerGenerateEmpty);

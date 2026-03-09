@@ -39,6 +39,7 @@ pub struct StoredVectorRecord {
 struct CachedVector {
     chunk_id: i64,
     doc_id: i64,
+    file_path: PathBuf,
     embedding: Vec<f32>,
 }
 
@@ -167,7 +168,11 @@ impl SqliteStore {
         let loaded = {
             let conn_guard = self.lock_conn()?;
             let mut stmt = conn_guard
-                .prepare("SELECT id, doc_id, embedding_blob FROM chunks")
+                .prepare(
+                    "SELECT c.id, c.doc_id, c.embedding_blob, d.file_path
+                     FROM chunks c
+                     INNER JOIN documents d ON d.id = c.doc_id",
+                )
                 .map_err(map_sqlite_error)?;
 
             let mut rows = stmt.query([]).map_err(map_sqlite_error)?;
@@ -177,12 +182,14 @@ impl SqliteStore {
                 let chunk_id: i64 = row.get(0).map_err(map_sqlite_error)?;
                 let doc_id: i64 = row.get(1).map_err(map_sqlite_error)?;
                 let blob: Vec<u8> = row.get(2).map_err(map_sqlite_error)?;
+                let file_path: String = row.get(3).map_err(map_sqlite_error)?;
                 let embedding: Vec<f32> =
                     bincode::deserialize(&blob).map_err(StorageError::DeserializeEmbedding)?;
 
                 loaded.push(CachedVector {
                     chunk_id,
                     doc_id,
+                    file_path: PathBuf::from(file_path),
                     embedding,
                 });
             }
@@ -253,6 +260,7 @@ impl SqliteStore {
         }
 
         let mut valid_nodes = 0usize;
+        let mut available_node_ids = HashSet::new();
         for node in &nodes {
             if node.id.trim().is_empty()
                 || node.label.trim().is_empty()
@@ -282,16 +290,50 @@ impl SqliteStore {
             )
             .map_err(map_sqlite_error)?;
 
+            available_node_ids.insert(node.id.clone());
             valid_nodes += 1;
         }
 
-        let mut valid_edges = 0usize;
+        let mut candidate_edges: Vec<&GraphEdge> = Vec::new();
+        let mut unresolved_node_ids = HashSet::new();
         for edge in &edges {
             if edge.id.trim().is_empty()
                 || edge.source_node.trim().is_empty()
                 || edge.target_node.trim().is_empty()
                 || edge.relation.trim().is_empty()
             {
+                continue;
+            }
+            if !available_node_ids.contains(&edge.source_node) {
+                unresolved_node_ids.insert(edge.source_node.clone());
+            }
+            if !available_node_ids.contains(&edge.target_node) {
+                unresolved_node_ids.insert(edge.target_node.clone());
+            }
+            candidate_edges.push(edge);
+        }
+
+        if !unresolved_node_ids.is_empty() {
+            let mut ids: Vec<String> = unresolved_node_ids.into_iter().collect();
+            ids.sort();
+            let placeholders = make_placeholders(ids.len());
+            let query = format!("SELECT id FROM nodes WHERE id IN ({})", placeholders);
+            let mut stmt = tx.prepare(&query).map_err(map_sqlite_error)?;
+            let rows = stmt
+                .query_map(params_from_iter(ids.iter()), |row| row.get::<_, String>(0))
+                .map_err(map_sqlite_error)?;
+            for row in rows {
+                available_node_ids.insert(row.map_err(map_sqlite_error)?);
+            }
+        }
+
+        let mut valid_edges = 0usize;
+        let mut skipped_edges = 0usize;
+        for edge in candidate_edges {
+            if !available_node_ids.contains(&edge.source_node)
+                || !available_node_ids.contains(&edge.target_node)
+            {
+                skipped_edges += 1;
                 continue;
             }
 
@@ -315,6 +357,7 @@ impl SqliteStore {
             chunk_id = chunk_id,
             node_count = valid_nodes,
             edge_count = valid_edges,
+            skipped_edge_count = skipped_edges,
             "图谱数据写入完成"
         );
 
@@ -496,6 +539,81 @@ impl SqliteStore {
             count,
         })
     }
+
+    pub async fn search_similar_scoped(
+        &self,
+        query_embedding: Vec<f32>,
+        top_k: usize,
+        scope_paths: &[PathBuf],
+    ) -> Result<Vec<(DocumentChunk, f32)>, StorageError> {
+        if top_k == 0 || query_embedding.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let scope_matchers = build_scope_matchers(scope_paths);
+
+        let mut top = {
+            let cache_guard = self.cache.read().await;
+            let mut scored: Vec<(i64, f32)> = cache_guard
+                .iter()
+                .filter(|item| matches_scopes(&item.file_path, &scope_matchers))
+                .map(|item| {
+                    let score = cosine_similarity(&query_embedding, &item.embedding);
+                    (item.chunk_id, score)
+                })
+                .collect();
+
+            scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+            scored.truncate(top_k);
+            scored
+        };
+
+        if top.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn_guard = self.lock_conn()?;
+        let mut stmt = conn_guard
+            .prepare(
+                "SELECT c.chunk_index, c.content, d.file_path
+                 FROM chunks c
+                 INNER JOIN documents d ON d.id = c.doc_id
+                 WHERE c.id = ?1",
+            )
+            .map_err(map_sqlite_error)?;
+
+        let mut results = Vec::with_capacity(top.len());
+        for (chunk_id, score) in top.drain(..) {
+            let row = stmt
+                .query_row(params![chunk_id], |row| {
+                    let chunk_index_raw: i64 = row.get(0)?;
+                    let content: String = row.get(1)?;
+                    let file_path: String = row.get(2)?;
+                    Ok((chunk_index_raw, content, file_path))
+                })
+                .optional()
+                .map_err(map_sqlite_error)?;
+
+            if let Some((chunk_index_raw, content, file_path_text)) = row {
+                let chunk_index = usize::try_from(chunk_index_raw).map_err(|_| {
+                    StorageError::InvalidChunkIndex {
+                        raw: chunk_index_raw,
+                    }
+                })?;
+
+                results.push((
+                    DocumentChunk {
+                        file_path: PathBuf::from(file_path_text),
+                        content,
+                        chunk_index,
+                    },
+                    score,
+                ));
+            }
+        }
+
+        Ok(results)
+    }
 }
 
 impl VectorStore for SqliteStore {
@@ -568,6 +686,7 @@ impl VectorStore for SqliteStore {
                 inserted.push(CachedVector {
                     chunk_id,
                     doc_id,
+                    file_path: file_path.clone(),
                     embedding,
                 });
             }
@@ -596,71 +715,101 @@ impl VectorStore for SqliteStore {
         query_embedding: Vec<f32>,
         top_k: usize,
     ) -> Result<Vec<(DocumentChunk, f32)>, StorageError> {
-        if top_k == 0 || query_embedding.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut top = {
-            let cache_guard = self.cache.read().await;
-            let mut scored: Vec<(i64, f32)> = cache_guard
-                .iter()
-                .map(|item| {
-                    let score = cosine_similarity(&query_embedding, &item.embedding);
-                    (item.chunk_id, score)
-                })
-                .collect();
-
-            scored.sort_by(|a, b| b.1.total_cmp(&a.1));
-            scored.truncate(top_k);
-            scored
-        };
-
-        if top.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let conn_guard = self.lock_conn()?;
-        let mut stmt = conn_guard
-            .prepare(
-                "SELECT c.chunk_index, c.content, d.file_path
-                 FROM chunks c
-                 INNER JOIN documents d ON d.id = c.doc_id
-                 WHERE c.id = ?1",
-            )
-            .map_err(map_sqlite_error)?;
-
-        let mut results = Vec::with_capacity(top.len());
-        for (chunk_id, score) in top.drain(..) {
-            let row = stmt
-                .query_row(params![chunk_id], |row| {
-                    let chunk_index_raw: i64 = row.get(0)?;
-                    let content: String = row.get(1)?;
-                    let file_path: String = row.get(2)?;
-                    Ok((chunk_index_raw, content, file_path))
-                })
-                .optional()
-                .map_err(map_sqlite_error)?;
-
-            if let Some((chunk_index_raw, content, file_path_text)) = row {
-                let chunk_index = usize::try_from(chunk_index_raw).map_err(|_| {
-                    StorageError::InvalidChunkIndex {
-                        raw: chunk_index_raw,
-                    }
-                })?;
-
-                results.push((
-                    DocumentChunk {
-                        file_path: PathBuf::from(file_path_text),
-                        content,
-                        chunk_index,
-                    },
-                    score,
-                ));
-            }
-        }
-
-        Ok(results)
+        self.search_similar_scoped(query_embedding, top_k, &[])
+            .await
     }
+}
+
+#[derive(Debug, Clone)]
+enum ScopeMatcher {
+    File(String),
+    Dir(String),
+}
+
+fn build_scope_matchers(scope_paths: &[PathBuf]) -> Vec<ScopeMatcher> {
+    let mut matchers = Vec::new();
+    for scope in scope_paths {
+        let trimmed = scope.to_string_lossy().trim().to_string();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(trimmed);
+        let normalized = normalize_scope_path_text(&path);
+        if normalized.is_empty() {
+            continue;
+        }
+        match std::fs::metadata(&path) {
+            Ok(meta) if meta.is_file() => matchers.push(ScopeMatcher::File(normalized)),
+            _ => matchers.push(ScopeMatcher::Dir(normalized)),
+        }
+    }
+    matchers
+}
+
+fn matches_scopes(file_path: &Path, scope_matchers: &[ScopeMatcher]) -> bool {
+    if scope_matchers.is_empty() {
+        return true;
+    }
+
+    let normalized_file = normalize_scope_path_text(file_path);
+    if normalized_file.is_empty() {
+        return false;
+    }
+
+    scope_matchers.iter().any(|matcher| match matcher {
+        ScopeMatcher::File(scope_file) => normalized_file == *scope_file,
+        ScopeMatcher::Dir(scope_dir) => path_is_within_scope_dir(&normalized_file, scope_dir),
+    })
+}
+
+fn normalize_scope_path_text(path: &Path) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let mut text = path.to_string_lossy().replace('/', "\\");
+
+        if let Some(stripped) = text.strip_prefix(r"\\?\") {
+            text = stripped.to_string();
+        } else if let Some(stripped) = text.strip_prefix(r"\??\") {
+            text = stripped.to_string();
+        }
+
+        while text.len() > 3 && text.ends_with('\\') {
+            text.pop();
+        }
+
+        return text.to_ascii_lowercase();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut text = path.to_string_lossy().to_string();
+        while text.len() > 1 && text.ends_with('/') {
+            text.pop();
+        }
+        text
+    }
+}
+
+fn path_is_within_scope_dir(file_path: &str, scope_dir: &str) -> bool {
+    if file_path == scope_dir {
+        return true;
+    }
+
+    if scope_dir.is_empty() {
+        return false;
+    }
+
+    #[cfg(target_os = "windows")]
+    let sep = '\\';
+    #[cfg(not(target_os = "windows"))]
+    let sep = '/';
+
+    let mut prefix = scope_dir.to_string();
+    if !prefix.ends_with(sep) {
+        prefix.push(sep);
+    }
+
+    file_path.starts_with(&prefix)
 }
 
 fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {

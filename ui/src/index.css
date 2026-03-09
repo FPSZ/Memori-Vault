@@ -1,13 +1,53 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: dark;
   --accent: #58a6ff;
   --accent-soft: rgba(88, 166, 255, 0.18);
+  --danger: #ef4444;
   --app-font-family:
     "PingFang SC", "Microsoft YaHei", "Segoe UI", Inter, "SF Pro Text", "Noto Sans", sans-serif;
+  --app-font-family-mono:
+    "Cascadia Mono", "JetBrains Mono", "Maple Mono", "IBM Plex Mono", "Consolas", "SFMono-Regular",
+    "Noto Sans Mono", monospace;
   --app-font-size: 16px;
-  --theme-layer-opacity: 0.14;
+  --bg-canvas: #0d1117;
+  --bg-surface-1: #161b22;
+  --bg-surface-2: #11161d;
+  --bg-elevated: #0f141a;
+  --text-primary: #c9d1d9;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --border-subtle: rgba(255, 255, 255, 0.1);
+  --border-strong: #30363d;
+  --overlay: rgba(0, 0, 0, 0.32);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-canvas: #0d1117;
+  --bg-surface-1: #161b22;
+  --bg-surface-2: #11161d;
+  --bg-elevated: #0f141a;
+  --text-primary: #c9d1d9;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --border-subtle: rgba(255, 255, 255, 0.1);
+  --border-strong: #30363d;
+  --overlay: rgba(0, 0, 0, 0.32);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-canvas: #f7f8fa;
+  --bg-surface-1: #ffffff;
+  --bg-surface-2: #f1f4f8;
+  --bg-elevated: #ffffff;
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+  --border-subtle: rgba(15, 23, 42, 0.12);
+  --border-strong: #d1d5db;
+  --overlay: rgba(15, 23, 42, 0.1);
 }
 
 * {
@@ -17,7 +57,7 @@
 html,
 body,
 #root {
-  background-color: #0d1117;
+  background-color: var(--bg-canvas);
   margin: 0;
   padding: 0;
   height: 100vh;
@@ -26,7 +66,7 @@ body,
 }
 
 body {
-  color: #c9d1d9;
+  color: var(--text-primary);
   font-family: var(--app-font-family);
   font-size: var(--app-font-size);
   line-height: 1.5;
@@ -36,6 +76,14 @@ html {
   font-size: var(--app-font-size);
 }
 
+.font-sans {
+  font-family: var(--app-font-family) !important;
+}
+
+.font-mono {
+  font-family: var(--app-font-family-mono) !important;
+}
+
 .glass-orb {
   position: relative;
   width: 2.5rem;
@@ -43,7 +91,7 @@ html {
   flex-shrink: 0;
   border-radius: 50%;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--border-subtle);
   box-shadow:
     inset 0 -8px 14px rgba(88, 166, 255, 0.2),
     inset 0 10px 14px rgba(255, 255, 255, 0.05),
@@ -51,7 +99,7 @@ html {
   background:
     radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 38%),
     radial-gradient(circle at 60% 70%, rgba(88, 166, 255, 0.08), rgba(88, 166, 255, 0) 65%),
-    #0d1117;
+    var(--bg-surface-2);
 }
 
 .glass-orb-light {
@@ -245,7 +293,7 @@ html {
 .md-preview h3,
 .md-preview h4 {
   margin: 0.45rem 0 0.35rem;
-  color: #c9d1d9;
+  color: var(--text-primary);
   line-height: 1.35;
 }
 
@@ -277,8 +325,8 @@ html {
 }
 
 .md-preview code {
-  background: rgba(110, 118, 129, 0.2);
-  color: #c9d1d9;
+  background: color-mix(in srgb, var(--text-muted) 22%, transparent);
+  color: var(--text-primary);
   border-radius: 0.28rem;
   padding: 0.02rem 0.28rem;
   font-size: 0.86em;
@@ -287,9 +335,9 @@ html {
 .md-preview pre {
   margin: 0.35rem 0;
   overflow-x: auto;
-  border: 1px solid rgba(48, 54, 61, 0.9);
+  border: 1px solid var(--border-strong);
   border-radius: 0.55rem;
-  background: #11161d;
+  background: var(--bg-surface-2);
   padding: 0.42rem 0.55rem;
 }
 
@@ -299,7 +347,7 @@ html {
 }
 
 .md-preview a {
-  color: #58a6ff;
+  color: var(--accent);
   text-decoration: none;
 }
 

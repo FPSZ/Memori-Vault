@@ -19,10 +19,20 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434";
-const DEFAULT_OLLAMA_EMBED_MODEL: &str = "nomic-embed-text:latest";
+pub const DEFAULT_MODEL_PROVIDER: &str = "ollama_local";
+pub const DEFAULT_MODEL_ENDPOINT_OLLAMA: &str = "http://localhost:11434";
+pub const DEFAULT_MODEL_ENDPOINT_OPENAI: &str = "https://api.openai.com";
+pub const DEFAULT_OLLAMA_EMBED_MODEL: &str = "nomic-embed-text:latest";
+pub const DEFAULT_CHAT_MODEL: &str = "qwen2.5:7b";
+pub const DEFAULT_GRAPH_MODEL: &str = "qwen2.5:7b";
 const DEFAULT_DB_FILE_NAME: &str = ".memori.db";
 const MEMORI_DB_PATH_ENV: &str = "MEMORI_DB_PATH";
+pub const MEMORI_MODEL_PROVIDER_ENV: &str = "MEMORI_MODEL_PROVIDER";
+pub const MEMORI_MODEL_ENDPOINT_ENV: &str = "MEMORI_MODEL_ENDPOINT";
+pub const MEMORI_MODEL_API_KEY_ENV: &str = "MEMORI_MODEL_API_KEY";
+pub const MEMORI_CHAT_MODEL_ENV: &str = "MEMORI_CHAT_MODEL";
+pub const MEMORI_GRAPH_MODEL_ENV: &str = "MEMORI_GRAPH_MODEL";
+pub const MEMORI_EMBED_MODEL_ENV: &str = "MEMORI_EMBED_MODEL";
 
 /// 前端/CLI 可消费的 Vault 统计信息。
 #[derive(Debug, Clone, serde::Serialize)]
@@ -38,7 +48,7 @@ pub struct VaultStats {
 pub struct AppState {
     pub parser: ParserStub,
     pub vector_store: Arc<SqliteStore>,
-    pub ollama_client: OllamaEmbeddingClient,
+    pub embedding_client: OllamaEmbeddingClient,
 }
 
 impl AppState {
@@ -47,8 +57,71 @@ impl AppState {
         Ok(Self {
             parser: ParserStub,
             vector_store,
-            ollama_client: OllamaEmbeddingClient::default(),
+            embedding_client: OllamaEmbeddingClient::default(),
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelProvider {
+    OllamaLocal,
+    OpenAiCompatible,
+}
+
+impl ModelProvider {
+    pub fn from_str(text: &str) -> Self {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "openai_compatible" => Self::OpenAiCompatible,
+            _ => Self::OllamaLocal,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeModelConfig {
+    pub provider: ModelProvider,
+    pub endpoint: String,
+    pub api_key: Option<String>,
+    pub chat_model: String,
+    pub graph_model: String,
+    pub embed_model: String,
+}
+
+pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
+    let provider = std::env::var(MEMORI_MODEL_PROVIDER_ENV)
+        .map(|v| ModelProvider::from_str(&v))
+        .unwrap_or(ModelProvider::OllamaLocal);
+
+    let endpoint_default = match provider {
+        ModelProvider::OllamaLocal => DEFAULT_MODEL_ENDPOINT_OLLAMA,
+        ModelProvider::OpenAiCompatible => DEFAULT_MODEL_ENDPOINT_OPENAI,
+    };
+    let endpoint =
+        std::env::var(MEMORI_MODEL_ENDPOINT_ENV).unwrap_or_else(|_| endpoint_default.to_string());
+
+    let api_key = std::env::var(MEMORI_MODEL_API_KEY_ENV).ok().and_then(|v| {
+        let trimmed = v.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
+
+    let chat_model =
+        std::env::var(MEMORI_CHAT_MODEL_ENV).unwrap_or_else(|_| DEFAULT_CHAT_MODEL.to_string());
+    let graph_model =
+        std::env::var(MEMORI_GRAPH_MODEL_ENV).unwrap_or_else(|_| DEFAULT_GRAPH_MODEL.to_string());
+    let embed_model = std::env::var(MEMORI_EMBED_MODEL_ENV)
+        .unwrap_or_else(|_| DEFAULT_OLLAMA_EMBED_MODEL.to_string());
+
+    RuntimeModelConfig {
+        provider,
+        endpoint,
+        api_key,
+        chat_model,
+        graph_model,
+        embed_model,
     }
 }
 
@@ -56,17 +129,22 @@ impl AppState {
 #[derive(Debug, Clone)]
 pub struct OllamaEmbeddingClient {
     http: reqwest::Client,
+    provider: ModelProvider,
     base_url: String,
+    api_key: Option<String>,
     model: String,
 }
 
 impl Default for OllamaEmbeddingClient {
     fn default() -> Self {
-        let base_url = std::env::var("MEMORI_OLLAMA_BASE_URL")
-            .unwrap_or_else(|_| DEFAULT_OLLAMA_BASE_URL.to_string());
-        let model = std::env::var("MEMORI_EMBED_MODEL")
-            .unwrap_or_else(|_| DEFAULT_OLLAMA_EMBED_MODEL.to_string());
-        Self::new(base_url, model)
+        let runtime = resolve_runtime_model_config_from_env();
+        Self {
+            http: reqwest::Client::new(),
+            provider: runtime.provider,
+            base_url: runtime.endpoint,
+            api_key: runtime.api_key,
+            model: runtime.embed_model,
+        }
     }
 }
 
@@ -74,12 +152,18 @@ impl OllamaEmbeddingClient {
     pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             http: reqwest::Client::new(),
+            provider: ModelProvider::OllamaLocal,
             base_url: base_url.into(),
+            api_key: None,
             model: model.into(),
         }
     }
 
     pub async fn embed_text(&self, prompt: &str) -> Result<Vec<f32>, OllamaClientError> {
+        if self.provider == ModelProvider::OpenAiCompatible {
+            return self.embed_text_openai_compatible(&self.model, prompt).await;
+        }
+
         match self.embed_text_with_model(&self.model, prompt).await {
             // Ollama 常见 tag 省略场景：`nomic-embed-text` 实际只有 `nomic-embed-text:latest`
             // 若命中 404 not found 且当前 model 无 tag，则自动回退一次。
@@ -130,6 +214,49 @@ impl OllamaEmbeddingClient {
 
         Ok(parsed.embedding)
     }
+
+    async fn embed_text_openai_compatible(
+        &self,
+        model: &str,
+        prompt: &str,
+    ) -> Result<Vec<f32>, OllamaClientError> {
+        let url = format!("{}/v1/embeddings", self.base_url.trim_end_matches('/'));
+        let mut request = self.http.post(url).json(&OpenAiEmbeddingRequest {
+            model,
+            input: prompt,
+        });
+        if let Some(key) = self.api_key.as_ref() {
+            request = request.bearer_auth(key);
+        }
+
+        let response = request.send().await.map_err(OllamaClientError::Request)?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = match response.text().await {
+                Ok(text) => text,
+                Err(err) => format!("<读取响应体失败: {err}>"),
+            };
+
+            return Err(OllamaClientError::HttpStatus {
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        let parsed: OpenAiEmbeddingResponse =
+            response.json().await.map_err(OllamaClientError::Request)?;
+
+        let embedding = parsed
+            .data
+            .into_iter()
+            .next()
+            .map(|item| item.embedding)
+            .unwrap_or_default();
+        if embedding.is_empty() {
+            return Err(OllamaClientError::EmptyEmbedding);
+        }
+        Ok(embedding)
+    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -140,6 +267,22 @@ struct OllamaEmbeddingRequest<'a> {
 
 #[derive(Debug, serde::Deserialize)]
 struct OllamaEmbeddingResponse {
+    embedding: Vec<f32>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct OpenAiEmbeddingRequest<'a> {
+    model: &'a str,
+    input: &'a str,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct OpenAiEmbeddingResponse {
+    data: Vec<OpenAiEmbeddingItem>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct OpenAiEmbeddingItem {
     embedding: Vec<f32>,
 }
 
@@ -264,16 +407,17 @@ impl MemoriEngine {
         &self,
         query: &str,
         top_k: usize,
+        scope_paths: Option<&[PathBuf]>,
     ) -> Result<Vec<(DocumentChunk, f32)>, EngineError> {
         if query.trim().is_empty() || top_k == 0 {
             return Ok(Vec::new());
         }
 
-        let query_embedding = self.state.ollama_client.embed_text(query).await?;
+        let query_embedding = self.state.embedding_client.embed_text(query).await?;
         let results = self
             .state
             .vector_store
-            .search_similar(query_embedding, top_k)
+            .search_similar_scoped(query_embedding, top_k, scope_paths.unwrap_or(&[]))
             .await?;
 
         Ok(results)
@@ -498,7 +642,7 @@ async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {
 
     // 优先完成 embedding 与向量落盘，避免图谱抽取耗时导致 stats 长时间保持 0。
     for chunk in &chunks {
-        match state.ollama_client.embed_text(&chunk.content).await {
+        match state.embedding_client.embed_text(&chunk.content).await {
             Ok(embedding) => embeddings.push(embedding),
             Err(err) => {
                 error!(
