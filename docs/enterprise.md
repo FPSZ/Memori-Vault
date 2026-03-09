@@ -1,19 +1,29 @@
-# Memori-Vault Enterprise (Single-Tenant Private Deployment)
+# Memori-Vault Enterprise Preview (Single-Tenant Private Deployment)
 
-This document describes the v1 enterprise capabilities for private deployment in mid/large engineering organizations.
+This document describes the current preview-stage enterprise capabilities for single-tenant private deployment in mid/large engineering organizations.
 
 ## Scope (v1)
 
 - Single-tenant, private deployment on Linux.
 - Performance and stability first.
-- OIDC/SSO login entry.
+- Preview auth/session integration entry for controlled environments.
 - API-level RBAC: `viewer`, `user`, `operator`, `admin`.
 - Model governance:
   - default local-first
   - remote provider controlled by egress policy + allowlist
 - Audit logging for key management/search operations.
 
+Preview note:
+
+- The current auth/session implementation is intended for private evaluation and controlled internal environments.
+- Treat this document as the capability baseline for `v0.2.0`, not as a claim of fully hardened enterprise identity infrastructure.
+
 ## Auth and Session
+
+Current implementation note:
+
+- `POST /api/auth/oidc/login` is a lightweight integration entry used by the current preview server runtime.
+- Full production identity hardening (for example stricter IdP validation, external session backing, or broader enterprise controls) should be evaluated before GA use.
 
 ### `POST /api/auth/oidc/login`
 

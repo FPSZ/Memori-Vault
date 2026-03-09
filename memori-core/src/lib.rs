@@ -39,6 +39,23 @@ pub const MEMORI_EMBED_MODEL_ENV: &str = "MEMORI_EMBED_MODEL";
 const QUERY_EMBEDDING_CACHE_SIZE: usize = 256;
 const QUERY_EMBEDDING_CACHE_TTL_SECS: i64 = 300;
 
+fn is_supported_index_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("txt"))
+        .unwrap_or(false)
+}
+
+fn is_likely_directory_path(path: &std::path::Path) -> bool {
+    path.extension().is_none()
+}
+
+async fn set_runtime_idle(state: &Arc<AppState>, last_error: Option<String>) {
+    let mut runtime = state.indexing_runtime.write().await;
+    runtime.phase = "idle".to_string();
+    runtime.last_error = last_error;
+}
+
 /// 前端/CLI 可消费的 Vault 统计信息。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VaultStats {
@@ -794,15 +811,9 @@ impl MemoriEngine {
                 match event.kind {
                     WatchEventKind::Created
                     | WatchEventKind::Modified
-                    | WatchEventKind::Renamed => {
+                    | WatchEventKind::Renamed
+                    | WatchEventKind::Removed => {
                         process_file_event(&state, &event, Some(&graph_notify_tx)).await;
-                    }
-                    _ => {
-                        debug!(
-                            kind = ?event.kind,
-                            path = %event.path.display(),
-                            "忽略非 Created/Modified 事件"
-                        );
                     }
                 }
             }
@@ -864,6 +875,24 @@ async fn process_file_event(
     event: &WatchEvent,
     graph_notify_tx: Option<&mpsc::Sender<()>>,
 ) {
+    if matches!(event.kind, WatchEventKind::Removed) {
+        remove_indexed_file(state, &event.path, "文件已删除，清理旧索引").await;
+        return;
+    }
+
+    if matches!(event.kind, WatchEventKind::Renamed)
+        && let Some(old_path) = event.old_path.as_ref()
+        && old_path != &event.path
+    {
+        remove_indexed_file(state, old_path, "文件已重命名，清理旧路径索引").await;
+    }
+
+    if !is_supported_index_file(&event.path) {
+        debug!(path = %event.path.display(), kind = ?event.kind, "目标路径不是受支持文本文件，跳过重建索引");
+        set_runtime_idle(state, None).await;
+        return;
+    }
+
     {
         let mut runtime = state.indexing_runtime.write().await;
         runtime.phase = "scanning".to_string();
@@ -902,6 +931,7 @@ async fn process_file_event(
         && prev.mtime_secs == mtime_secs
     {
         debug!(path = %event.path.display(), "文件元数据未变化，跳过重建索引");
+        set_runtime_idle(state, None).await;
         return;
     }
 
@@ -935,6 +965,7 @@ async fn process_file_event(
                 "刷新文件索引元数据失败"
             );
         }
+        set_runtime_idle(state, None).await;
         return;
     }
 
@@ -1059,9 +1090,41 @@ async fn process_file_event(
         let _ = tx.send(()).await;
     }
 
-    let mut runtime = state.indexing_runtime.write().await;
-    runtime.phase = "idle".to_string();
-    runtime.last_error = None;
+    set_runtime_idle(state, None).await;
+}
+
+async fn remove_indexed_file(state: &Arc<AppState>, file_path: &std::path::Path, reason: &str) {
+    {
+        let mut runtime = state.indexing_runtime.write().await;
+        runtime.phase = "scanning".to_string();
+        runtime.last_scan_at = Some(unix_now_secs());
+    }
+
+    let purge_result = if is_likely_directory_path(file_path) {
+        state.vector_store.purge_directory_path(file_path).await
+    } else {
+        state.vector_store.purge_file_path(file_path).await
+    };
+
+    match purge_result {
+        Ok(true) => {
+            info!(path = %file_path.display(), reason = reason, "文件索引清理完成");
+            set_runtime_idle(state, None).await;
+        }
+        Ok(false) => {
+            debug!(path = %file_path.display(), reason = reason, "文件不存在可清理索引，跳过");
+            set_runtime_idle(state, None).await;
+        }
+        Err(err) => {
+            warn!(
+                path = %file_path.display(),
+                reason = reason,
+                error = %err,
+                "清理旧文件索引失败"
+            );
+            set_runtime_idle(state, Some(err.to_string())).await;
+        }
+    }
 }
 
 async fn run_graph_worker(
@@ -1281,4 +1344,203 @@ fn is_supported_text_file(path: &std::path::Path) -> bool {
         return false;
     };
     ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("txt")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppState, WatchEvent, WatchEventKind, process_file_event};
+    use memori_parser::DocumentChunk;
+    use memori_storage::VectorStore;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_db_path(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("memori_vault_core_{name}_{unique}.db"))
+    }
+
+    async fn seed_indexed_file(state: &Arc<AppState>, file_path: &PathBuf) {
+        state
+            .vector_store
+            .insert_chunks(
+                vec![DocumentChunk {
+                    file_path: file_path.clone(),
+                    content: "seed content".to_string(),
+                    chunk_index: 0,
+                }],
+                vec![vec![0.1_f32, 0.2_f32]],
+            )
+            .await
+            .expect("insert seed chunks");
+        state
+            .vector_store
+            .upsert_file_index_state(file_path, 12, 34, "seed_hash")
+            .await
+            .expect("upsert seed index state");
+    }
+
+    #[tokio::test]
+    async fn removed_event_purges_existing_index() {
+        let db_path = temp_db_path("removed");
+        let state = Arc::new(AppState::new(&db_path).expect("create app state"));
+        let file_path = PathBuf::from("notes/removed.md");
+        seed_indexed_file(&state, &file_path).await;
+
+        let event = WatchEvent {
+            kind: WatchEventKind::Removed,
+            path: file_path.clone(),
+            old_path: None,
+            observed_at: SystemTime::now(),
+        };
+
+        process_file_event(&state, &event, None).await;
+
+        assert!(
+            state
+                .vector_store
+                .resolve_chunk_id(&file_path, 0)
+                .await
+                .expect("resolve chunk after remove")
+                .is_none()
+        );
+        assert!(
+            state
+                .vector_store
+                .get_file_index_state(&file_path)
+                .await
+                .expect("get file index after remove")
+                .is_none()
+        );
+
+        drop(state);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
+    async fn renamed_event_to_unsupported_extension_only_purges_old_index() {
+        let db_path = temp_db_path("rename_unsupported");
+        let state = Arc::new(AppState::new(&db_path).expect("create app state"));
+        let old_path = PathBuf::from("notes/rename_me.md");
+        let new_path = PathBuf::from("notes/rename_me.pdf");
+        seed_indexed_file(&state, &old_path).await;
+
+        let event = WatchEvent {
+            kind: WatchEventKind::Renamed,
+            path: new_path.clone(),
+            old_path: Some(old_path.clone()),
+            observed_at: SystemTime::now(),
+        };
+
+        process_file_event(&state, &event, None).await;
+
+        assert!(
+            state
+                .vector_store
+                .resolve_chunk_id(&old_path, 0)
+                .await
+                .expect("resolve old chunk after rename")
+                .is_none()
+        );
+        assert!(
+            state
+                .vector_store
+                .get_file_index_state(&old_path)
+                .await
+                .expect("get old file index after rename")
+                .is_none()
+        );
+        assert!(
+            state
+                .vector_store
+                .get_file_index_state(&new_path)
+                .await
+                .expect("get new file index after rename")
+                .is_none()
+        );
+
+        drop(state);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
+    async fn removed_directory_event_purges_nested_indexes() {
+        let db_path = temp_db_path("removed_dir");
+        let state = Arc::new(AppState::new(&db_path).expect("create app state"));
+        let nested_a = PathBuf::from("notes/project/a.md");
+        let nested_b = PathBuf::from("notes/project/sub/b.txt");
+        let outside = PathBuf::from("notes/other/c.md");
+
+        seed_indexed_file(&state, &nested_a).await;
+        seed_indexed_file(&state, &nested_b).await;
+        seed_indexed_file(&state, &outside).await;
+
+        let event = WatchEvent {
+            kind: WatchEventKind::Removed,
+            path: PathBuf::from("notes/project"),
+            old_path: None,
+            observed_at: SystemTime::now(),
+        };
+
+        process_file_event(&state, &event, None).await;
+
+        assert!(state.vector_store.resolve_chunk_id(&nested_a, 0).await.expect("resolve nested a").is_none());
+        assert!(state.vector_store.resolve_chunk_id(&nested_b, 0).await.expect("resolve nested b").is_none());
+        assert!(state.vector_store.resolve_chunk_id(&outside, 0).await.expect("resolve outside").is_some());
+
+        drop(state);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
+    async fn unchanged_metadata_branch_restores_idle_phase() {
+        let db_path = temp_db_path("unchanged_meta");
+        let state = Arc::new(AppState::new(&db_path).expect("create app state"));
+        let file_path = PathBuf::from("notes/unchanged.md");
+
+        let parent = std::env::temp_dir().join(format!(
+            "memori_vault_core_file_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("duration since epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&parent).expect("create temp dir");
+        let real_file_path = parent.join("unchanged.md");
+        std::fs::write(&real_file_path, "same content").expect("write temp file");
+
+        let metadata = std::fs::metadata(&real_file_path).expect("read metadata");
+        let file_size = i64::try_from(metadata.len()).expect("file size fits i64");
+        let mtime_secs = metadata
+            .modified()
+            .expect("modified time")
+            .duration_since(UNIX_EPOCH)
+            .expect("duration since epoch")
+            .as_secs() as i64;
+        state
+            .vector_store
+            .upsert_file_index_state(&real_file_path, file_size, mtime_secs, "seed_hash")
+            .await
+            .expect("seed file index state");
+
+        let event = WatchEvent {
+            kind: WatchEventKind::Modified,
+            path: real_file_path.clone(),
+            old_path: Some(file_path),
+            observed_at: SystemTime::now(),
+        };
+
+        process_file_event(&state, &event, None).await;
+
+        let runtime = state.indexing_runtime.read().await.clone();
+        assert_eq!(runtime.phase, "idle");
+
+        drop(state);
+        let _ = std::fs::remove_file(&real_file_path);
+        let _ = std::fs::remove_dir_all(&parent);
+        let _ = std::fs::remove_file(&db_path);
+    }
 }

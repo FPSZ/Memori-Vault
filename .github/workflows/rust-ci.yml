@@ -10,12 +10,19 @@ permissions:
 
 jobs:
   ci:
-    name: fmt-clippy-test
+    name: fmt-clippy-test-ui-build
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
 
       - name: Install Linux system dependencies (Tauri/WebKit/GTK)
         run: |
@@ -44,6 +51,40 @@ jobs:
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Install UI dependencies
+        run: npm ci --prefix ui
+
+      - name: Check version consistency
+        run: |
+          WORKSPACE_VERSION=$(python - <<'PY'
+          import pathlib, re
+          text = pathlib.Path('Cargo.toml').read_text(encoding='utf-8')
+          match = re.search(r'(?ms)^\[workspace\.package\]\s+.*?^version\s*=\s*"([^"]+)"', text)
+          if not match:
+              raise SystemExit('Failed to read workspace version from Cargo.toml')
+          print(match.group(1))
+          PY
+          )
+          UI_VERSION=$(python - <<'PY'
+          import json, pathlib
+          print(json.loads(pathlib.Path('ui/package.json').read_text(encoding='utf-8'))['version'])
+          PY
+          )
+          TAURI_VERSION=$(python - <<'PY'
+          import json, pathlib
+          print(json.loads(pathlib.Path('memori-desktop/tauri.conf.json').read_text(encoding='utf-8'))['version'])
+          PY
+          )
+
+          echo "workspace version: $WORKSPACE_VERSION"
+          echo "ui version: $UI_VERSION"
+          echo "tauri version: $TAURI_VERSION"
+
+          if [ "$WORKSPACE_VERSION" != "$UI_VERSION" ] || [ "$WORKSPACE_VERSION" != "$TAURI_VERSION" ]; then
+            echo "Version mismatch detected among Cargo workspace, ui/package.json, and memori-desktop/tauri.conf.json"
+            exit 1
+          fi
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -52,3 +93,6 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace
+
+      - name: Build UI
+        run: npm --prefix ui run build

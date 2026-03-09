@@ -17,7 +17,7 @@
   - retrieval Top-K control
   - personalization options
 - Source cards support markdown preview, expand/collapse, and open file location.
-- Browser-compatible server mode (`memori-server`).
+- Server runtime (`memori-server`) for HTTP APIs and private deployment preview.
 - Cross-platform release workflow with draft release automation.
 
 ### Runtime Requirements
@@ -76,7 +76,7 @@
   - Top-K 调节
   - 个性化选项
 - 来源卡片支持 Markdown 预览、展开/折叠、打开文件位置。
-- 支持浏览器模式（`memori-server`）。
+- 提供服务端运行时（`memori-server`），用于 HTTP API 与私有化预览部署。
 - 支持三端自动构建与草稿发布。
 
 ### 运行要求

@@ -330,7 +330,19 @@ fn should_keep_event(event: &WatchEvent) -> bool {
         return true;
     }
     if let Some(old) = &event.old_path {
-        return is_supported_text_file(old);
+        if is_supported_text_file(old) {
+            return true;
+        }
+    }
+    if matches!(event.kind, WatchEventKind::Removed | WatchEventKind::Renamed)
+        && path_has_no_extension(&event.path)
+    {
+        return true;
+    }
+    if matches!(event.kind, WatchEventKind::Renamed)
+        && event.old_path.as_ref().is_some_and(|old| path_has_no_extension(old))
+    {
+        return true;
     }
     false
 }
@@ -344,6 +356,10 @@ fn is_supported_text_file(path: &Path) -> bool {
     ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("txt")
 }
 
+fn path_has_no_extension(path: &Path) -> bool {
+    path.extension().is_none()
+}
+
 /// 对外暴露的轻量诊断信息，可用于 core 层日志落点验证。
 pub fn memori_vault_defaults_debug() {
     debug!(
@@ -351,4 +367,35 @@ pub fn memori_vault_defaults_debug() {
         channel_capacity = DEFAULT_EVENT_CHANNEL_CAPACITY,
         "memori_vault default config loaded"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WatchEvent, WatchEventKind, should_keep_event};
+    use std::path::PathBuf;
+    use std::time::SystemTime;
+
+    #[test]
+    fn keeps_removed_directory_event_for_cleanup() {
+        let event = WatchEvent {
+            kind: WatchEventKind::Removed,
+            path: PathBuf::from("notes/project"),
+            old_path: None,
+            observed_at: SystemTime::now(),
+        };
+
+        assert!(should_keep_event(&event));
+    }
+
+    #[test]
+    fn keeps_renamed_directory_event_for_cleanup() {
+        let event = WatchEvent {
+            kind: WatchEventKind::Renamed,
+            path: PathBuf::from("notes/archive"),
+            old_path: Some(PathBuf::from("notes/project")),
+            observed_at: SystemTime::now(),
+        };
+
+        assert!(should_keep_event(&event));
+    }
 }

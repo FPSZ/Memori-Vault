@@ -109,6 +109,53 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          WORKSPACE_VERSION=$(python - <<'PY'
+          import pathlib, re
+          text = pathlib.Path('Cargo.toml').read_text(encoding='utf-8')
+          match = re.search(r'(?ms)^\[workspace\.package\]\s+.*?^version\s*=\s*"([^"]+)"', text)
+          if not match:
+              raise SystemExit('Failed to read workspace version from Cargo.toml')
+          print(match.group(1))
+          PY
+          )
+          UI_VERSION=$(python - <<'PY'
+          import json, pathlib
+          print(json.loads(pathlib.Path('ui/package.json').read_text(encoding='utf-8'))['version'])
+          PY
+          )
+          TAURI_VERSION=$(python - <<'PY'
+          import json, pathlib
+          print(json.loads(pathlib.Path('memori-desktop/tauri.conf.json').read_text(encoding='utf-8'))['version'])
+          PY
+          )
+          EXPECTED_VERSION="${{ steps.release_meta.outputs.version }}"
+          EXPECTED_TAG="v${EXPECTED_VERSION}"
+          RELEASE_NOTES_PATH="docs/RELEASE_NOTES_v${EXPECTED_VERSION}.md"
+
+          echo "workspace version: $WORKSPACE_VERSION"
+          echo "ui version: $UI_VERSION"
+          echo "tauri version: $TAURI_VERSION"
+          echo "release version: $EXPECTED_VERSION"
+          echo "release tag: ${{ steps.release_meta.outputs.tag }}"
+
+          if [ "$WORKSPACE_VERSION" != "$UI_VERSION" ] || [ "$WORKSPACE_VERSION" != "$TAURI_VERSION" ] || [ "$WORKSPACE_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "Version mismatch detected among Cargo workspace, ui/package.json, memori-desktop/tauri.conf.json, and resolved release version"
+            exit 1
+          fi
+
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ steps.release_meta.outputs.tag }}" != "$EXPECTED_TAG" ]; then
+            echo "Tag/version mismatch: expected $EXPECTED_TAG but got ${{ steps.release_meta.outputs.tag }}"
+            exit 1
+          fi
+
+          if [ ! -f "$RELEASE_NOTES_PATH" ]; then
+            echo "Missing release notes file: $RELEASE_NOTES_PATH"
+            exit 1
+          fi
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -122,19 +169,7 @@ jobs:
           name: Memori-Vault ${{ steps.release_meta.outputs.version }}
           draft: true
           target_commitish: ${{ github.sha }}
-          body: |
-            ## Memori-Vault ${{ steps.release_meta.outputs.version }}
-
-            This is an auto-generated draft release.
-
-            ### Build Matrix
-            - Windows installer/bundle
-            - Linux installer/bundle
-            - macOS installer/bundle
-
-            ### Notes
-            - Version is read from `memori-desktop/tauri.conf.json`.
-            - Assets are attached from GitHub Actions build artifacts.
+          body_path: docs/RELEASE_NOTES_v${{ steps.release_meta.outputs.version }}.md
           files: |
             release-artifacts/**/*.msi
             release-artifacts/**/*-setup.exe
@@ -143,4 +178,3 @@ jobs:
             release-artifacts/**/*.deb
             release-artifacts/**/*.rpm
             release-artifacts/**/*.sig
-          generate_release_notes: true

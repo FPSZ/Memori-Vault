@@ -435,6 +435,118 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub async fn purge_file_path(&self, file_path: &Path) -> Result<bool, StorageError> {
+        let file_path_text = file_path.to_string_lossy().to_string();
+
+        let (removed_doc_id, removed_state_rows, removed_doc_rows) = {
+            let mut conn_guard = self.lock_conn()?;
+            let tx = conn_guard.transaction().map_err(map_sqlite_error)?;
+
+            let doc_id = tx
+                .query_row(
+                    "SELECT id FROM documents WHERE file_path = ?1",
+                    params![file_path_text.clone()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(map_sqlite_error)?;
+
+            let removed_state_rows = tx
+                .execute(
+                "DELETE FROM file_index_state WHERE file_path = ?1",
+                params![file_path_text.clone()],
+            )
+            .map_err(map_sqlite_error)?;
+
+            let mut removed_doc_rows = 0usize;
+            if let Some(doc_id) = doc_id {
+                removed_doc_rows = tx
+                    .execute("DELETE FROM documents WHERE id = ?1", params![doc_id])
+                    .map_err(map_sqlite_error)?;
+            }
+
+            tx.commit().map_err(map_sqlite_error)?;
+            (doc_id, removed_state_rows, removed_doc_rows)
+        };
+
+        if let Some(doc_id) = removed_doc_id {
+            let mut cache_guard = self.cache.write().await;
+            cache_guard.retain(|item| item.doc_id != doc_id);
+        }
+
+        Ok(removed_state_rows > 0 || removed_doc_rows > 0)
+    }
+
+    pub async fn purge_directory_path(&self, dir_path: &Path) -> Result<bool, StorageError> {
+        let dir_path_text = dir_path.to_string_lossy().to_string();
+        let (like_prefix_slash, like_prefix_backslash) = directory_like_pattern(&dir_path_text);
+
+        let (removed_doc_ids, removed_state_rows, removed_doc_rows) = {
+            let mut conn_guard = self.lock_conn()?;
+            let tx = conn_guard.transaction().map_err(map_sqlite_error)?;
+
+            let mut doc_ids = Vec::new();
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT id FROM documents
+                         WHERE file_path = ?1
+                            OR file_path LIKE ?2 ESCAPE '\\'
+                            OR file_path LIKE ?3 ESCAPE '\\'",
+                    )
+                    .map_err(map_sqlite_error)?;
+                let rows = stmt
+                    .query_map(
+                        params![
+                            dir_path_text.clone(),
+                            like_prefix_slash.clone(),
+                            like_prefix_backslash.clone()
+                        ],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map_err(map_sqlite_error)?;
+
+                for row in rows {
+                    doc_ids.push(row.map_err(map_sqlite_error)?);
+                }
+            }
+
+            let removed_state_rows = tx
+                .execute(
+                    "DELETE FROM file_index_state
+                     WHERE file_path = ?1
+                        OR file_path LIKE ?2 ESCAPE '\\'
+                        OR file_path LIKE ?3 ESCAPE '\\'",
+                    params![
+                        dir_path_text.clone(),
+                        like_prefix_slash.clone(),
+                        like_prefix_backslash.clone()
+                    ],
+                )
+                .map_err(map_sqlite_error)?;
+            let removed_doc_rows = tx
+                .execute(
+                    "DELETE FROM documents
+                     WHERE file_path = ?1
+                        OR file_path LIKE ?2 ESCAPE '\\'
+                        OR file_path LIKE ?3 ESCAPE '\\'",
+                    params![dir_path_text, like_prefix_slash, like_prefix_backslash],
+                )
+                .map_err(map_sqlite_error)?;
+
+            tx.commit().map_err(map_sqlite_error)?;
+            (doc_ids, removed_state_rows, removed_doc_rows)
+        };
+
+        if !removed_doc_ids.is_empty() {
+            let removed_doc_ids: std::collections::HashSet<i64> = removed_doc_ids.into_iter().collect();
+            let mut cache_guard = self.cache.write().await;
+            cache_guard.retain(|item| !removed_doc_ids.contains(&item.doc_id));
+        }
+
+        Ok(removed_state_rows > 0 || removed_doc_rows > 0)
+    }
+
     pub async fn enqueue_graph_task(
         &self,
         chunk_id: i64,
@@ -1161,6 +1273,166 @@ fn map_sqlite_error(err: rusqlite::Error) -> StorageError {
             _ => StorageError::Sqlite(err),
         },
         _ => StorageError::Sqlite(err),
+    }
+}
+
+fn directory_like_pattern(dir_path: &str) -> (String, String) {
+    let trimmed = dir_path.trim_end_matches(['/', '\\']);
+    let mut prefix = trimmed.to_string();
+
+    let mut windows_prefix = prefix.clone();
+    windows_prefix.push('\\');
+
+    prefix.push('/');
+
+    (
+        format!("{}%", escape_like_pattern(&prefix)),
+        format!("{}%", escape_like_pattern(&windows_prefix)),
+    )
+}
+
+fn escape_like_pattern(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\\' | '%' | '_' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SqliteStore;
+    use memori_parser::DocumentChunk;
+    use crate::VectorStore;
+
+    #[tokio::test]
+    async fn purge_file_path_removes_document_chunks_and_index_state() {
+        let db_path = std::env::temp_dir().join(format!(
+            "memori_vault_storage_purge_{}.db",
+            std::process::id()
+        ));
+        if db_path.exists() {
+            let _ = std::fs::remove_file(&db_path);
+        }
+
+        let store = SqliteStore::new(&db_path).expect("create sqlite store");
+        let file_path = std::path::PathBuf::from("notes/test.md");
+        let chunks = vec![
+            DocumentChunk {
+                file_path: file_path.clone(),
+                content: "hello".to_string(),
+                chunk_index: 0,
+            },
+            DocumentChunk {
+                file_path: file_path.clone(),
+                content: "world".to_string(),
+                chunk_index: 1,
+            },
+        ];
+        let embeddings = vec![vec![0.1_f32, 0.2_f32], vec![0.3_f32, 0.4_f32]];
+
+        store
+            .insert_chunks(chunks, embeddings)
+            .await
+            .expect("insert chunks");
+        store
+            .upsert_file_index_state(&file_path, 10, 20, "hash")
+            .await
+            .expect("upsert file index state");
+
+        let purged = store.purge_file_path(&file_path).await.expect("purge file path");
+        assert!(purged);
+
+        assert!(
+            store
+                .resolve_chunk_id(&file_path, 0)
+                .await
+                .expect("resolve chunk id")
+                .is_none()
+        );
+        assert!(
+            store
+                .get_file_index_state(&file_path)
+                .await
+                .expect("get file index state")
+                .is_none()
+        );
+
+        let purged_again = store
+            .purge_file_path(&file_path)
+            .await
+            .expect("purge missing file path");
+        assert!(!purged_again);
+
+        drop(store);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
+    async fn purge_directory_path_removes_nested_documents_and_index_state() {
+        let db_path = std::env::temp_dir().join(format!(
+            "memori_vault_storage_purge_dir_{}.db",
+            std::process::id()
+        ));
+        if db_path.exists() {
+            let _ = std::fs::remove_file(&db_path);
+        }
+
+        let store = SqliteStore::new(&db_path).expect("create sqlite store");
+        let nested_a = std::path::PathBuf::from("notes/project/a.md");
+        let nested_b = std::path::PathBuf::from("notes/project/sub/b.txt");
+        let outside = std::path::PathBuf::from("notes/other/c.md");
+
+        for file_path in [&nested_a, &nested_b, &outside] {
+            store
+                .insert_chunks(
+                    vec![DocumentChunk {
+                        file_path: file_path.clone(),
+                        content: format!("content for {}", file_path.display()),
+                        chunk_index: 0,
+                    }],
+                    vec![vec![0.1_f32, 0.2_f32]],
+                )
+                .await
+                .expect("insert chunks");
+            store
+                .upsert_file_index_state(file_path, 10, 20, "hash")
+                .await
+                .expect("upsert file index state");
+        }
+
+        let purged = store
+            .purge_directory_path(&std::path::PathBuf::from("notes/project"))
+            .await
+            .expect("purge directory path");
+        assert!(purged);
+
+        assert!(store.resolve_chunk_id(&nested_a, 0).await.expect("resolve nested a").is_none());
+        assert!(store.resolve_chunk_id(&nested_b, 0).await.expect("resolve nested b").is_none());
+        assert!(
+            store
+                .get_file_index_state(&nested_a)
+                .await
+                .expect("state nested a")
+                .is_none()
+        );
+        assert!(
+            store
+                .get_file_index_state(&nested_b)
+                .await
+                .expect("state nested b")
+                .is_none()
+        );
+        assert!(store.resolve_chunk_id(&outside, 0).await.expect("resolve outside").is_some());
+
+        drop(store);
+        let _ = std::fs::remove_file(&db_path);
     }
 }
 

@@ -42,16 +42,21 @@ It combines semantic chunking, vector retrieval, and asynchronous Graph-RAG extr
 1. Desktop mode:
 - Tauri shell + UI + IPC backend.
 
-2. Browser mode:
-- `memori-server` + UI over HTTP (no Tauri host required).
+2. Server mode:
+- `memori-server` exposes HTTP APIs for local/browser access and private deployment.
+- The current product experience is desktop-first; browser-facing UI support is still being aligned with the server runtime.
 
-## Enterprise (Private Deployment v1)
+## Enterprise (Private Deployment v1 Preview)
 
 - Single-tenant private deployment for engineering organizations.
-- OIDC/SSO login entry and API RBAC (`viewer/user/operator/admin`).
+- Preview auth/session entry plus API RBAC (`viewer/user/operator/admin`).
 - Admin APIs for health, metrics, policy, audit, reindex, pause/resume.
 - Model governance: local-first with remote egress allowlist enforcement.
 - Deployment assets included (`deploy/systemd`, env template, backup/restore scripts).
+
+Current note:
+- Enterprise deployment is available as a private deployment preview in `v0.2.0`.
+- Auth/session flows are suitable for controlled internal environments first and will continue to harden in later releases.
 
 Details: [docs/enterprise.md](./docs/enterprise.md)
 
@@ -82,7 +87,7 @@ npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 cargo tauri dev -p memori-desktop
 ```
 
-Browser/server dev:
+Server dev:
 
 ```bash
 cargo run -p memori-server
