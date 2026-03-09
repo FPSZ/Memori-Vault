@@ -735,7 +735,10 @@ impl MemoriEngine {
         let watch_root = self.watch_root.clone();
         let graph_worker_state = Arc::clone(&self.state);
 
-        let graph_task = tokio::spawn(async move { run_graph_worker(graph_worker_state, graph_notify_rx).await });
+        let graph_task =
+            tokio::spawn(
+                async move { run_graph_worker(graph_worker_state, graph_notify_rx).await },
+            );
 
         let task = tokio::spawn(async move {
             info!("memori-core daemon started");
@@ -1080,7 +1083,10 @@ async fn run_graph_worker(
 
     loop {
         let runtime = state.indexing_runtime.read().await.clone();
-        if runtime.paused || runtime.config.mode == IndexingMode::Manual || !is_within_schedule_window(&runtime.config) {
+        if runtime.paused
+            || runtime.config.mode == IndexingMode::Manual
+            || !is_within_schedule_window(&runtime.config)
+        {
             sleep(Duration::from_millis(500)).await;
             if channel_closed && state.vector_store.count_graph_backlog().await.unwrap_or(0) == 0 {
                 break;
@@ -1133,7 +1139,10 @@ async fn run_graph_worker(
                     continue;
                 }
 
-                state.vector_store.mark_graph_task_done(task.task_id).await?;
+                state
+                    .vector_store
+                    .mark_graph_task_done(task.task_id)
+                    .await?;
                 let mut runtime = state.indexing_runtime.write().await;
                 runtime.phase = "idle".to_string();
                 runtime.last_error = None;

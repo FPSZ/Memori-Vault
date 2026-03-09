@@ -7,9 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use memori_core::{
     DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL, DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER,
-    DEFAULT_OLLAMA_EMBED_MODEL, DocumentChunk, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV,
-    MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV,
-    MEMORI_MODEL_PROVIDER_ENV, IndexingConfig, IndexingMode, IndexingStatus, MemoriEngine,
+    DEFAULT_OLLAMA_EMBED_MODEL, DocumentChunk, IndexingConfig, IndexingMode, IndexingStatus,
+    MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_MODEL_ENV,
+    MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,
     ModelProvider, ResourceBudget, ScheduleWindow, VaultStats,
 };
 use serde::{Deserialize, Serialize};
@@ -881,8 +881,7 @@ pub fn run() {
                 return;
             }
             match event {
-                WindowEvent::Moved(_)
-                | WindowEvent::Resized(_) => {
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
                     if let Err(err) = persist_main_window_state(window) {
                         warn!(error = %err, "持久化窗口状态失败");
                     }
@@ -983,7 +982,10 @@ fn app_settings_file_path() -> Result<PathBuf, String> {
         .join(SETTINGS_FILE_NAME))
 }
 
-fn restore_main_window_state(window: &tauri::WebviewWindow, settings: &AppSettings) -> Result<(), String> {
+fn restore_main_window_state(
+    window: &tauri::WebviewWindow,
+    settings: &AppSettings,
+) -> Result<(), String> {
     let monitor = window
         .current_monitor()
         .map_err(|err| format!("读取当前显示器失败: {err}"))?
@@ -1034,7 +1036,9 @@ fn restore_main_window_state(window: &tauri::WebviewWindow, settings: &AppSettin
         .set_size(Size::Physical(PhysicalSize::new(target_w, target_h)))
         .map_err(|err| format!("设置窗口尺寸失败: {err}"))?;
     window
-        .set_position(Position::Physical(PhysicalPosition::new(target_x, target_y)))
+        .set_position(Position::Physical(PhysicalPosition::new(
+            target_x, target_y,
+        )))
         .map_err(|err| format!("设置窗口位置失败: {err}"))?;
 
     if settings.window_maximized.unwrap_or(false) {

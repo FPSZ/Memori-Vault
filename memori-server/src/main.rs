@@ -12,9 +12,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use memori_core::{
     DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL, DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER,
-    DEFAULT_OLLAMA_EMBED_MODEL, DocumentChunk, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV,
-    MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV,
-    MEMORI_MODEL_PROVIDER_ENV, IndexingConfig, IndexingMode, IndexingStatus, MemoriEngine,
+    DEFAULT_OLLAMA_EMBED_MODEL, DocumentChunk, IndexingConfig, IndexingMode, IndexingStatus,
+    MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_MODEL_ENV,
+    MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,
     ModelProvider, ResourceBudget, ScheduleWindow, VaultStats,
 };
 use serde::{Deserialize, Serialize};
@@ -456,7 +456,9 @@ async fn set_indexing_mode_handler(
     let budget = ResourceBudget::from_value(&payload.resource_budget);
     let schedule_window = if mode == IndexingMode::Scheduled {
         Some(ScheduleWindow {
-            start: payload.schedule_start.unwrap_or_else(|| "00:00".to_string()),
+            start: payload
+                .schedule_start
+                .unwrap_or_else(|| "00:00".to_string()),
             end: payload.schedule_end.unwrap_or_else(|| "06:00".to_string()),
         })
     } else {
@@ -516,7 +518,9 @@ async fn trigger_reindex_handler(
     })))
 }
 
-async fn pause_indexing_handler(State(state): State<ServerState>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn pause_indexing_handler(
+    State(state): State<ServerState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     let init_error_message = state.init_error.lock().await.clone();
     let engine_guard = state.engine.lock().await;
     let Some(engine) = engine_guard.as_ref() else {

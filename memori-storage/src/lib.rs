@@ -523,7 +523,11 @@ impl SqliteStore {
         retry_count: i64,
     ) -> Result<(), StorageError> {
         let now = current_unix_timestamp_secs()?;
-        let next_status = if retry_count >= 3 { "failed" } else { "pending" };
+        let next_status = if retry_count >= 3 {
+            "failed"
+        } else {
+            "pending"
+        };
         let conn_guard = self.lock_conn()?;
         conn_guard
             .execute(
