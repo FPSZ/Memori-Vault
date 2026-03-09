@@ -5,76 +5,87 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/FPSZ/Memori-Vault/rust-ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/FPSZ/Memori-Vault/actions/workflows/rust-ci.yml)
 
 中文文档：当前页  
-English: [README.md](./README.md)
+English: [README.md](./README.md)  
 贡献指南：[CONTRIBUTING.zh-CN.md](./CONTRIBUTING.zh-CN.md) | English: [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## 项目简介
 
-Memori-Vault 是一个 **本地优先（Local-First）** 的个人记忆系统：
-- 监听本地文档变化并自动解析；
-- 使用本地模型进行向量化与关系抽取；
-- 将向量和图谱写入本地存储，支持检索与后续推理。
+Memori-Vault 是一个本地优先（Local-First）的个人记忆系统，支持桌面版与浏览器/服务端模式。
+核心目标是让“首问尽快返回”，并把图谱补全放到后台异步进行。
 
-它不依赖云端，不做隐式遥测，目标是在 2026 年提供可长期演化的个人数据主权基础设施。
+## 当前能力
 
-## 愿景
+- 本地文档摄入：监听 `.md/.txt`，自动解析与分块。
+- 混合检索：向量召回 + 图谱上下文。
+- 异步索引重构：
+  - 快路径：先向量化并可检索
+  - 慢路径：图谱任务入队后台补齐
+- 索引策略可配置：
+  - 模式：`continuous | manual | scheduled`
+  - 资源档位：`low | balanced | fast`
+  - 支持暂停/恢复与手动重建
+- 设置中心（右侧抽屉）：
+  - UI 语言与 AI 回答语言分离
+  - 模型来源（本地 Ollama / 远程 OpenAI-compatible）
+  - 读取目录切换
+  - Top-K 检索条数
+  - 个性化（字体、字号、深浅主题）
+- 检索范围选择：
+  - 支持多选文件/目录
+  - 支持子目录分层展开
+- 来源卡片增强：
+  - Markdown 预览
+  - 展开/折叠
+  - 打开文件位置
 
-Memori-Vault 的目标是构建一个真正可控的个人知识底座：
-- **Local-First**：摄入、索引、检索、推理尽可能都在本机完成；
-- **Zero-Config**：默认可用，降低对模型参数和存储细节的理解门槛；
-- **Graph-RAG Native**：向量相似度与实体关系图协同工作。
+## 运行模式
+
+1. 桌面模式（Tauri）：
+- UI + IPC + 本地桌面壳。
+
+2. 浏览器模式（Server）：
+- `memori-server` 提供 HTTP API，前端通过浏览器访问。
 
 ## 架构
 
-项目按 Rust crate 进行物理隔离：
+工作区模块：
+- `memori-vault`：监听、防抖、事件通道
+- `memori-parser`：解析与分块
+- `memori-storage`：SQLite、向量/图谱/任务元数据
+- `memori-core`：引擎编排、检索链路、后台索引 worker
+- `memori-desktop`：Tauri 命令与桌面生命周期
+- `memori-server`：Axum HTTP 接口
+- `ui`：React + Vite + Tailwind v4 前端
 
-- `memori-vault`：文件监听、防抖与背压事件投递。
-- `memori-core`：守护进程生命周期、任务编排、调用链路。
-- `memori-parser`：文本分块与结构化预处理。
-- `memori-storage`：向量与图谱持久化存储。
-
-当前主流程：
-
-`memori-vault -> memori-core -> memori-parser -> memori-storage`
-
-## 当前状态
-
-当前阶段：**Phase 2（Headless Backend）**。
-
-已完成：
-- 实时监听 + 异步防抖 + 背压通道；
-- 文本分块、向量化、SQLite 持久化；
-- 实体关系抽取与图谱表落盘；
-- CLI 交互检索与基础 CI 流程。
-
-未完成：
-- Tauri GUI 可视化层；
-- 图谱可视化与交互式关系探索页面。
-
-## 路线图
-
-### Phase 1 - 摄入与向量化核心
-- 文件监听与稳定摄入链路；
-- 语义分块与向量检索闭环。
-
-### Phase 2 - Graph-RAG 与长期记忆
-- 实体/关系抽取；
-- 本地图谱持久化；
-- 混合检索（向量 + 图路径）。
-
-### Phase 3 - Tauri 桌面体验
-- IPC 接入核心引擎；
-- 可视化检索界面与来源追踪；
-- 图谱关系浏览与交互。
-
-## 开发
+## 开发快速开始
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
+npm --prefix ui run build
 ```
+
+桌面开发：
+
+```bash
+npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+cargo tauri dev -p memori-desktop
+```
+
+浏览器/服务端开发：
+
+```bash
+cargo run -p memori-server
+npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+```
+
+## 说明
+
+- 本地模式建议先启动 Ollama。
+- 远程模式为可选项，由用户自行配置 endpoint/key/model。
+- 主题旧键 `memori-theme-mode` 仅用于迁移读取，当前使用 `memori-theme`。
 
 ## 许可证
 
-Apache License 2.0
+Apache License 2.0。

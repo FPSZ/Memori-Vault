@@ -1,7 +1,7 @@
 # Memori-Vault
 
 English: current page  
-中文文档: [README.zh-CN.md](./README.zh-CN.md)
+中文文档: [README.zh-CN.md](./README.zh-CN.md)  
 Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md) | [中文贡献指南](./CONTRIBUTING.zh-CN.md)
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-111111?style=flat-square)](./LICENSE)
@@ -9,90 +9,80 @@ Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md) | [中文贡献指南](./CONT
 [![CI](https://img.shields.io/github/actions/workflow/status/FPSZ/Memori-Vault/rust-ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/FPSZ/Memori-Vault/actions/workflows/rust-ci.yml)
 
 Memori-Vault is a local-first memory system for personal knowledge and digital assets.
-It is designed to run entirely on-device, with no cloud dependency, no silent telemetry,
-and no compromise on data ownership.
+It runs on-device by default, supports desktop and browser/server modes, and keeps retrieval available even while graph indexing is still in progress.
 
-## Intro
+## Highlights (Current)
 
-Memori-Vault is a local-first memory engine for personal knowledge.
-It watches local files, chunks content, generates embeddings, extracts graph relations,
-and persists everything to local storage for retrieval and reasoning.
+- Local-first ingestion pipeline (`.md` / `.txt`) with watcher + semantic chunking.
+- Hybrid retrieval: vector similarity + graph context.
+- Async indexing refactor:
+  - fast path for searchable chunks first
+  - deferred graph build in background queue
+- Indexing strategy controls:
+  - `continuous | manual | scheduled`
+  - resource budget `low | balanced | fast`
+  - pause/resume + trigger reindex
+- Settings center (right drawer):
+  - UI language and AI answer language (separate)
+  - model provider profiles (local Ollama / remote OpenAI-compatible)
+  - watch folder switching
+  - top-k retrieval control
+  - personalization (font, size, theme)
+- Search scope selector:
+  - nested folder expand/collapse
+  - multi-select files/folders
+- Source cards:
+  - markdown preview for `.md`
+  - expand/collapse
+  - open file location
 
-## Vision
+## Runtime Modes
 
-In 2026, personal data sovereignty is not optional.
-Memori-Vault is built as a practical answer:
+1. Desktop mode:
+- Tauri shell + UI + IPC backend.
 
-- Local-First: ingestion, indexing, retrieval, and generation happen on your machine.
-- Zero-Config: users do not need to understand vector dimensions, model routing, or storage internals.
-- Graph-RAG Native: semantic similarity and explicit relationships work together for long-term memory.
-
-This project is not a chat wrapper. It is an operating layer for private, durable, personal intelligence.
+2. Browser mode:
+- `memori-server` + UI over HTTP (no Tauri host required).
 
 ## Architecture
 
-Memori-Vault keeps core concerns physically isolated by crate boundaries:
+Workspace crates:
+- `memori-vault`: watch/debounce/event stream
+- `memori-parser`: parse/chunk
+- `memori-storage`: SQLite + vector/graph/task metadata
+- `memori-core`: orchestration, retrieval, indexing worker
+- `memori-desktop`: Tauri commands and desktop lifecycle
+- `memori-server`: Axum APIs
+- `ui`: React + Vite + Tailwind v4 frontend
 
-- `memori-vault` (watch layer): file-system event capture, debounce, and backpressure-safe streaming.
-- `memori-core` (orchestration layer): daemon lifecycle, event routing, and pipeline coordination.
-- `memori-parser` (understanding layer): text normalization and semantic chunk generation.
-- `memori-storage` (persistence layer): local metadata/graph/vector persistence abstraction.
-
-Pipeline (current headless design):
-
-`memori-vault -> memori-core -> memori-parser -> memori-storage`
-
-## Status
-
-Current stage: **Phase 2 - Headless Backend Development**.
-
-Implemented:
-
-- Rust workspace with crate-level boundaries.
-- Real-time file watching with debounce and bounded-channel backpressure.
-- Parser, embedding, and SQLite persistence pipeline.
-- Graph extraction and graph persistence tables.
-- CLI retrieval flow and CI baseline (format, lint, tests).
-
-Not yet released:
-
-- GUI / Tauri desktop shell.
-- End-user application packaging.
-
-## Roadmap
-
-### Phase 1 - Ingestion & Vectorization Core (Headless)
-
-- File watch pipeline for `.md` / `.txt`.
-- Semantic chunking with overlap.
-- Local embedding bridge and Top-K retrieval in CLI flow.
-
-### Phase 2 - Graph-RAG & Long-Term Memory
-
-- Local entity/relation extraction during ingestion.
-- SQLite graph persistence for nodes and edges.
-- Hybrid retrieval: vector similarity + multi-hop graph traversal.
-
-### Phase 3 - Tauri IPC & Desktop UX
-
-- Core engine exposure through Tauri commands.
-- Fast summon window and focused interaction loop.
-- Streaming answer UI with source traceability.
-
-## Principles
-
-- No cloud dependency for core capabilities.
-- No uncontrolled memory growth during ingestion.
-- No unchecked errors in critical paths.
-- No UI-first shortcuts before core correctness.
-
-## Development
+## Development Quick Start
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
+npm --prefix ui run build
 ```
+
+Desktop dev:
+
+```bash
+npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+cargo tauri dev -p memori-desktop
+```
+
+Browser/server dev:
+
+```bash
+cargo run -p memori-server
+npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+```
+
+## Notes
+
+- Ollama local runtime is recommended for local provider mode.
+- Remote provider mode is optional and user-configured.
+- Legacy theme key `memori-theme-mode` is migration-only; active key is `memori-theme`.
 
 ## License
 

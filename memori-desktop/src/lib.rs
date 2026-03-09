@@ -3,12 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use memori_core::{
     DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL, DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER,
     DEFAULT_OLLAMA_EMBED_MODEL, DocumentChunk, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV,
     MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV,
-    MEMORI_MODEL_PROVIDER_ENV, MemoriEngine, ModelProvider, VaultStats,
+    MEMORI_MODEL_PROVIDER_ENV, IndexingConfig, IndexingMode, IndexingStatus, MemoriEngine,
+    ModelProvider, ResourceBudget, ScheduleWindow, VaultStats,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
@@ -31,6 +33,10 @@ struct DesktopState {
 struct AppSettings {
     watch_root: Option<String>,
     language: Option<String>,
+    indexing_mode: Option<String>,
+    resource_budget: Option<String>,
+    schedule_start: Option<String>,
+    schedule_end: Option<String>,
     active_provider: Option<String>,
     local_endpoint: Option<String>,
     local_models_root: Option<String>,
@@ -55,6 +61,18 @@ struct AppSettings {
 struct AppSettingsDto {
     watch_root: String,
     language: Option<String>,
+    indexing_mode: String,
+    resource_budget: String,
+    schedule_start: Option<String>,
+    schedule_end: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SetIndexingModePayload {
+    indexing_mode: String,
+    resource_budget: String,
+    schedule_start: Option<String>,
+    schedule_end: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,12 +223,137 @@ async fn get_vault_stats(state: State<'_, DesktopState>) -> Result<VaultStats, S
 }
 
 #[tauri::command]
-async fn get_app_settings() -> Result<AppSettingsDto, String> {
-    let settings = load_app_settings()?;
+async fn get_indexing_status(state: State<'_, DesktopState>) -> Result<IndexingStatus, String> {
+    let engine_guard = state.engine.lock().await;
+    let init_error_guard = state.init_error.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_guard.as_ref() {
+            return Err(format!("引擎初始化失败: {message}"));
+        }
+        return Err("引擎尚在初始化中，请稍后重试。".to_string());
+    };
+    engine
+        .get_indexing_status()
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn set_indexing_mode(
+    payload: SetIndexingModePayload,
+    state: State<'_, DesktopState>,
+) -> Result<AppSettingsDto, String> {
+    let mut settings = load_app_settings()?;
+    let mode = IndexingMode::from_value(&payload.indexing_mode);
+    let budget = ResourceBudget::from_value(&payload.resource_budget);
+    let schedule_window = if mode == IndexingMode::Scheduled {
+        let start = payload
+            .schedule_start
+            .unwrap_or_else(|| "00:00".to_string())
+            .trim()
+            .to_string();
+        let end = payload
+            .schedule_end
+            .unwrap_or_else(|| "06:00".to_string())
+            .trim()
+            .to_string();
+        Some(ScheduleWindow { start, end })
+    } else {
+        None
+    };
+    settings.indexing_mode = Some(mode.as_str().to_string());
+    settings.resource_budget = Some(budget.as_str().to_string());
+    settings.schedule_start = schedule_window.as_ref().map(|w| w.start.clone());
+    settings.schedule_end = schedule_window.as_ref().map(|w| w.end.clone());
+    save_app_settings(&settings)?;
+
+    let engine_guard = state.engine.lock().await;
+    let init_error_guard = state.init_error.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_guard.as_ref() {
+            return Err(format!("引擎初始化失败: {message}"));
+        }
+        return Err("引擎尚在初始化中，请稍后重试。".to_string());
+    };
+
+    engine
+        .set_indexing_config(IndexingConfig {
+            mode,
+            resource_budget: budget,
+            schedule_window,
+        })
+        .await;
+
     let watch_root = resolve_watch_root_from_settings(&settings)?;
+    let indexing = resolve_indexing_config(&settings);
     Ok(AppSettingsDto {
         watch_root: watch_root.to_string_lossy().to_string(),
         language: settings.language,
+        indexing_mode: indexing.mode.as_str().to_string(),
+        resource_budget: indexing.resource_budget.as_str().to_string(),
+        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
+        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
+    })
+}
+
+#[tauri::command]
+async fn trigger_reindex(state: State<'_, DesktopState>) -> Result<String, String> {
+    let task_id = format!("reindex-{}", chrono_like_now_token());
+    let engine_guard = state.engine.lock().await;
+    let init_error_guard = state.init_error.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_guard.as_ref() {
+            return Err(format!("引擎初始化失败: {message}"));
+        }
+        return Err("引擎尚在初始化中，请稍后重试。".to_string());
+    };
+    engine
+        .trigger_reindex()
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(task_id)
+}
+
+#[tauri::command]
+async fn pause_indexing(state: State<'_, DesktopState>) -> Result<(), String> {
+    let engine_guard = state.engine.lock().await;
+    let init_error_guard = state.init_error.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_guard.as_ref() {
+            return Err(format!("引擎初始化失败: {message}"));
+        }
+        return Err("引擎尚在初始化中，请稍后重试。".to_string());
+    };
+    engine.pause_indexing().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn resume_indexing(state: State<'_, DesktopState>) -> Result<(), String> {
+    let engine_guard = state.engine.lock().await;
+    let init_error_guard = state.init_error.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_guard.as_ref() {
+            return Err(format!("引擎初始化失败: {message}"));
+        }
+        return Err("引擎尚在初始化中，请稍后重试。".to_string());
+    };
+    engine.resume_indexing().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_app_settings() -> Result<AppSettingsDto, String> {
+    let settings = load_app_settings()?;
+    let watch_root = resolve_watch_root_from_settings(&settings)?;
+    let indexing = resolve_indexing_config(&settings);
+    Ok(AppSettingsDto {
+        watch_root: watch_root.to_string_lossy().to_string(),
+        language: settings.language,
+        indexing_mode: indexing.mode.as_str().to_string(),
+        resource_budget: indexing.resource_budget.as_str().to_string(),
+        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
+        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
     })
 }
 
@@ -467,9 +610,14 @@ async fn set_watch_root(
     )
     .await?;
 
+    let indexing = resolve_indexing_config(&settings);
     Ok(AppSettingsDto {
         watch_root: canonical.to_string_lossy().to_string(),
         language: settings.language,
+        indexing_mode: indexing.mode.as_str().to_string(),
+        resource_budget: indexing.resource_budget.as_str().to_string(),
+        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
+        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
     })
 }
 
@@ -702,6 +850,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ask_vault,
             get_vault_stats,
+            get_indexing_status,
+            set_indexing_mode,
+            trigger_reindex,
+            pause_indexing,
+            resume_indexing,
             get_app_settings,
             get_model_settings,
             set_model_settings,
@@ -755,6 +908,11 @@ async fn replace_engine(
 
     let mut new_engine =
         MemoriEngine::bootstrap(watch_root.clone()).map_err(|err| err.to_string())?;
+    if let Ok(settings) = load_app_settings() {
+        new_engine
+            .set_indexing_config(resolve_indexing_config(&settings))
+            .await;
+    }
     new_engine.start_daemon().map_err(|err| err.to_string())?;
 
     {
@@ -1482,6 +1640,48 @@ fn normalize_top_k(top_k: Option<usize>) -> usize {
         Some(value) if (1..=50).contains(&value) => value,
         _ => DEFAULT_RETRIEVE_TOP_K,
     }
+}
+
+fn resolve_indexing_config(settings: &AppSettings) -> IndexingConfig {
+    let mode = settings
+        .indexing_mode
+        .as_deref()
+        .map(IndexingMode::from_value)
+        .unwrap_or(IndexingMode::Continuous);
+    let resource_budget = settings
+        .resource_budget
+        .as_deref()
+        .map(ResourceBudget::from_value)
+        .unwrap_or(ResourceBudget::Low);
+    let schedule_window = if mode == IndexingMode::Scheduled {
+        Some(ScheduleWindow {
+            start: settings
+                .schedule_start
+                .clone()
+                .unwrap_or_else(|| "00:00".to_string()),
+            end: settings
+                .schedule_end
+                .clone()
+                .unwrap_or_else(|| "06:00".to_string()),
+        })
+    } else {
+        None
+    };
+
+    IndexingConfig {
+        mode,
+        resource_budget,
+        schedule_window,
+    }
+}
+
+fn chrono_like_now_token() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    now.to_string()
 }
 
 fn normalize_scope_paths(scope_paths: Option<Vec<String>>) -> Vec<PathBuf> {

@@ -35,6 +35,25 @@ pub struct StoredVectorRecord {
     pub embedding: Vec<f32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileIndexState {
+    pub file_path: String,
+    pub file_size: i64,
+    pub mtime_secs: i64,
+    pub content_hash: String,
+    pub indexed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphTaskRecord {
+    pub task_id: i64,
+    pub chunk_id: i64,
+    pub content: String,
+    pub content_hash: String,
+    pub status: String,
+    pub retry_count: i64,
+}
+
 #[derive(Debug, Clone)]
 struct CachedVector {
     chunk_id: i64,
@@ -362,6 +381,189 @@ impl SqliteStore {
         );
 
         Ok(())
+    }
+
+    pub async fn get_file_index_state(
+        &self,
+        file_path: &Path,
+    ) -> Result<Option<FileIndexState>, StorageError> {
+        let file_path_text = file_path.to_string_lossy().to_string();
+        let conn_guard = self.lock_conn()?;
+        let row = conn_guard
+            .query_row(
+                "SELECT file_path, file_size, mtime_secs, content_hash, indexed_at
+                 FROM file_index_state
+                 WHERE file_path = ?1",
+                params![file_path_text],
+                |row| {
+                    Ok(FileIndexState {
+                        file_path: row.get(0)?,
+                        file_size: row.get(1)?,
+                        mtime_secs: row.get(2)?,
+                        content_hash: row.get(3)?,
+                        indexed_at: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(map_sqlite_error)?;
+        Ok(row)
+    }
+
+    pub async fn upsert_file_index_state(
+        &self,
+        file_path: &Path,
+        file_size: i64,
+        mtime_secs: i64,
+        content_hash: &str,
+    ) -> Result<(), StorageError> {
+        let file_path_text = file_path.to_string_lossy().to_string();
+        let now = current_unix_timestamp_secs()?;
+        let conn_guard = self.lock_conn()?;
+        conn_guard
+            .execute(
+                "INSERT INTO file_index_state(file_path, file_size, mtime_secs, content_hash, indexed_at)
+                 VALUES(?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(file_path) DO UPDATE SET
+                   file_size = excluded.file_size,
+                   mtime_secs = excluded.mtime_secs,
+                   content_hash = excluded.content_hash,
+                   indexed_at = excluded.indexed_at",
+                params![file_path_text, file_size, mtime_secs, content_hash, now],
+            )
+            .map_err(map_sqlite_error)?;
+        Ok(())
+    }
+
+    pub async fn enqueue_graph_task(
+        &self,
+        chunk_id: i64,
+        content_hash: &str,
+        content: &str,
+    ) -> Result<(), StorageError> {
+        let now = current_unix_timestamp_secs()?;
+        let conn_guard = self.lock_conn()?;
+        conn_guard
+            .execute(
+                "INSERT INTO graph_task_queue(chunk_id, content, content_hash, status, retry_count, updated_at)
+                 VALUES(?1, ?2, ?3, 'pending', 0, ?4)
+                 ON CONFLICT(chunk_id, content_hash) DO UPDATE SET
+                   status = CASE
+                     WHEN graph_task_queue.status = 'done' THEN graph_task_queue.status
+                     ELSE 'pending'
+                   END,
+                   content = excluded.content,
+                   updated_at = excluded.updated_at",
+                params![chunk_id, content, content_hash, now],
+            )
+            .map_err(map_sqlite_error)?;
+        Ok(())
+    }
+
+    pub async fn fetch_next_graph_task(&self) -> Result<Option<GraphTaskRecord>, StorageError> {
+        let mut conn_guard = self.lock_conn()?;
+        let tx = conn_guard.transaction().map_err(map_sqlite_error)?;
+        let task = tx
+            .query_row(
+                "SELECT task_id, chunk_id, content_hash, status, retry_count
+                 , content
+                 FROM graph_task_queue
+                 WHERE status = 'pending'
+                 ORDER BY updated_at ASC, task_id ASC
+                 LIMIT 1",
+                [],
+                |row| {
+                    Ok(GraphTaskRecord {
+                        task_id: row.get(0)?,
+                        chunk_id: row.get(1)?,
+                        content_hash: row.get(2)?,
+                        status: row.get(3)?,
+                        retry_count: row.get(4)?,
+                        content: row.get(5)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(map_sqlite_error)?;
+
+        if let Some(task) = task {
+            let now = current_unix_timestamp_secs()?;
+            tx.execute(
+                "UPDATE graph_task_queue
+                 SET status = 'running', updated_at = ?2
+                 WHERE task_id = ?1",
+                params![task.task_id, now],
+            )
+            .map_err(map_sqlite_error)?;
+            tx.commit().map_err(map_sqlite_error)?;
+            return Ok(Some(task));
+        }
+
+        tx.commit().map_err(map_sqlite_error)?;
+        Ok(None)
+    }
+
+    pub async fn mark_graph_task_done(&self, task_id: i64) -> Result<(), StorageError> {
+        let now = current_unix_timestamp_secs()?;
+        let conn_guard = self.lock_conn()?;
+        conn_guard
+            .execute(
+                "UPDATE graph_task_queue
+                 SET status = 'done', updated_at = ?2
+                 WHERE task_id = ?1",
+                params![task_id, now],
+            )
+            .map_err(map_sqlite_error)?;
+        Ok(())
+    }
+
+    pub async fn mark_graph_task_failed(
+        &self,
+        task_id: i64,
+        retry_count: i64,
+    ) -> Result<(), StorageError> {
+        let now = current_unix_timestamp_secs()?;
+        let next_status = if retry_count >= 3 { "failed" } else { "pending" };
+        let conn_guard = self.lock_conn()?;
+        conn_guard
+            .execute(
+                "UPDATE graph_task_queue
+                 SET status = ?2, retry_count = ?3, updated_at = ?4
+                 WHERE task_id = ?1",
+                params![task_id, next_status, retry_count, now],
+            )
+            .map_err(map_sqlite_error)?;
+        Ok(())
+    }
+
+    pub async fn count_graph_backlog(&self) -> Result<u64, StorageError> {
+        let conn_guard = self.lock_conn()?;
+        let count: i64 = conn_guard
+            .query_row(
+                "SELECT COUNT(*) FROM graph_task_queue WHERE status IN ('pending','running')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(map_sqlite_error)?;
+        u64::try_from(count).map_err(|_| StorageError::NegativeCount {
+            table: "graph_task_queue",
+            count,
+        })
+    }
+
+    pub async fn count_graphed_chunks(&self) -> Result<u64, StorageError> {
+        let conn_guard = self.lock_conn()?;
+        let count: i64 = conn_guard
+            .query_row(
+                "SELECT COUNT(DISTINCT chunk_id) FROM chunk_nodes",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(map_sqlite_error)?;
+        u64::try_from(count).map_err(|_| StorageError::NegativeCount {
+            table: "chunk_nodes",
+            count,
+        })
     }
 
     /// 根据检索到的 chunk_id 列表生成 1-hop 图谱上下文。
@@ -849,14 +1051,60 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
              FOREIGN KEY(chunk_id) REFERENCES chunks(id) ON DELETE CASCADE,
              FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE
          );
+         CREATE TABLE IF NOT EXISTS file_index_state (
+             file_path TEXT PRIMARY KEY,
+             file_size INTEGER NOT NULL,
+             mtime_secs INTEGER NOT NULL,
+             content_hash TEXT NOT NULL,
+             indexed_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS graph_task_queue (
+             task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+             chunk_id INTEGER NOT NULL,
+             content TEXT NOT NULL,
+             content_hash TEXT NOT NULL,
+             status TEXT NOT NULL,
+             retry_count INTEGER NOT NULL DEFAULT 0,
+             updated_at INTEGER NOT NULL,
+             UNIQUE(chunk_id, content_hash),
+             FOREIGN KEY(chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
+         );
          CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id);
          CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_doc_chunk_index ON chunks(doc_id, chunk_index);
          CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_node);
          CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_node);
          CREATE INDEX IF NOT EXISTS idx_chunk_nodes_chunk_id ON chunk_nodes(chunk_id);
-         CREATE INDEX IF NOT EXISTS idx_chunk_nodes_node_id ON chunk_nodes(node_id);",
+         CREATE INDEX IF NOT EXISTS idx_chunk_nodes_node_id ON chunk_nodes(node_id);
+         CREATE INDEX IF NOT EXISTS idx_graph_task_queue_status ON graph_task_queue(status, updated_at);
+         CREATE INDEX IF NOT EXISTS idx_file_index_state_indexed_at ON file_index_state(indexed_at);",
     )
-    .map_err(map_sqlite_error)
+    .map_err(map_sqlite_error)?;
+    ensure_graph_task_queue_schema(conn)?;
+    Ok(())
+}
+
+fn ensure_graph_task_queue_schema(conn: &Connection) -> Result<(), StorageError> {
+    let mut has_content = false;
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(graph_task_queue)")
+        .map_err(map_sqlite_error)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(map_sqlite_error)?;
+    for col in rows {
+        if col.map_err(map_sqlite_error)? == "content" {
+            has_content = true;
+            break;
+        }
+    }
+    if !has_content {
+        conn.execute(
+            "ALTER TABLE graph_task_queue ADD COLUMN content TEXT NOT NULL DEFAULT ''",
+            [],
+        )
+        .map_err(map_sqlite_error)?;
+    }
+    Ok(())
 }
 
 fn current_unix_timestamp_secs() -> Result<i64, StorageError> {

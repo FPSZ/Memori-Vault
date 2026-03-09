@@ -3,6 +3,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -13,7 +14,8 @@ use memori_core::{
     DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL, DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER,
     DEFAULT_OLLAMA_EMBED_MODEL, DocumentChunk, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV,
     MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV,
-    MEMORI_MODEL_PROVIDER_ENV, MemoriEngine, ModelProvider, VaultStats,
+    MEMORI_MODEL_PROVIDER_ENV, IndexingConfig, IndexingMode, IndexingStatus, MemoriEngine,
+    ModelProvider, ResourceBudget, ScheduleWindow, VaultStats,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -37,6 +39,10 @@ struct ServerState {
 struct AppSettings {
     watch_root: Option<String>,
     language: Option<String>,
+    indexing_mode: Option<String>,
+    resource_budget: Option<String>,
+    schedule_start: Option<String>,
+    schedule_end: Option<String>,
     active_provider: Option<String>,
     local_endpoint: Option<String>,
     local_models_root: Option<String>,
@@ -61,6 +67,18 @@ struct AppSettings {
 struct AppSettingsDto {
     watch_root: String,
     language: Option<String>,
+    indexing_mode: String,
+    resource_budget: String,
+    schedule_start: Option<String>,
+    schedule_end: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SetIndexingModePayload {
+    indexing_mode: String,
+    resource_budget: String,
+    schedule_start: Option<String>,
+    schedule_end: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,6 +288,11 @@ async fn main() {
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/stats", get(get_vault_stats_handler))
+        .route("/api/indexing/status", get(get_indexing_status_handler))
+        .route("/api/indexing/mode", post(set_indexing_mode_handler))
+        .route("/api/indexing/trigger", post(trigger_reindex_handler))
+        .route("/api/indexing/pause", post(pause_indexing_handler))
+        .route("/api/indexing/resume", post(resume_indexing_handler))
         .route("/api/ask", post(ask_handler))
         .route("/api/settings", get(get_app_settings_handler))
         .route("/api/model-settings", get(get_model_settings_handler))
@@ -406,12 +429,132 @@ async fn get_vault_stats_handler(
     Ok(Json(stats))
 }
 
-async fn get_app_settings_handler() -> Result<Json<AppSettingsDto>, ApiError> {
-    let settings = load_app_settings().map_err(ApiError::internal)?;
+async fn get_indexing_status_handler(
+    State(state): State<ServerState>,
+) -> Result<Json<IndexingStatus>, ApiError> {
+    let init_error_message = state.init_error.lock().await.clone();
+    let engine_guard = state.engine.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_message {
+            return Err(ApiError::internal(format!("引擎初始化失败: {message}")));
+        }
+        return Err(ApiError::internal("引擎尚在初始化中，请稍后重试。"));
+    };
+    let status = engine
+        .get_indexing_status()
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?;
+    Ok(Json(status))
+}
+
+async fn set_indexing_mode_handler(
+    State(state): State<ServerState>,
+    Json(payload): Json<SetIndexingModePayload>,
+) -> Result<Json<AppSettingsDto>, ApiError> {
+    let mut settings = load_app_settings().map_err(ApiError::internal)?;
+    let mode = IndexingMode::from_value(&payload.indexing_mode);
+    let budget = ResourceBudget::from_value(&payload.resource_budget);
+    let schedule_window = if mode == IndexingMode::Scheduled {
+        Some(ScheduleWindow {
+            start: payload.schedule_start.unwrap_or_else(|| "00:00".to_string()),
+            end: payload.schedule_end.unwrap_or_else(|| "06:00".to_string()),
+        })
+    } else {
+        None
+    };
+    settings.indexing_mode = Some(mode.as_str().to_string());
+    settings.resource_budget = Some(budget.as_str().to_string());
+    settings.schedule_start = schedule_window.as_ref().map(|w| w.start.clone());
+    settings.schedule_end = schedule_window.as_ref().map(|w| w.end.clone());
+    save_app_settings(&settings).map_err(ApiError::internal)?;
+
+    let init_error_message = state.init_error.lock().await.clone();
+    let engine_guard = state.engine.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_message {
+            return Err(ApiError::internal(format!("引擎初始化失败: {message}")));
+        }
+        return Err(ApiError::internal("引擎尚在初始化中，请稍后重试。"));
+    };
+    engine
+        .set_indexing_config(IndexingConfig {
+            mode,
+            resource_budget: budget,
+            schedule_window,
+        })
+        .await;
+
     let watch_root = resolve_watch_root_from_settings(&settings).map_err(ApiError::internal)?;
+    let indexing = resolve_indexing_config(&settings);
     Ok(Json(AppSettingsDto {
         watch_root: watch_root.to_string_lossy().to_string(),
         language: settings.language,
+        indexing_mode: indexing.mode.as_str().to_string(),
+        resource_budget: indexing.resource_budget.as_str().to_string(),
+        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
+        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
+    }))
+}
+
+async fn trigger_reindex_handler(
+    State(state): State<ServerState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let init_error_message = state.init_error.lock().await.clone();
+    let engine_guard = state.engine.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_message {
+            return Err(ApiError::internal(format!("引擎初始化失败: {message}")));
+        }
+        return Err(ApiError::internal("引擎尚在初始化中，请稍后重试。"));
+    };
+    engine
+        .trigger_reindex()
+        .await
+        .map_err(|err| ApiError::internal(err.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "task_id": format!("reindex-{}", chrono_like_now_token())
+    })))
+}
+
+async fn pause_indexing_handler(State(state): State<ServerState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let init_error_message = state.init_error.lock().await.clone();
+    let engine_guard = state.engine.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_message {
+            return Err(ApiError::internal(format!("引擎初始化失败: {message}")));
+        }
+        return Err(ApiError::internal("引擎尚在初始化中，请稍后重试。"));
+    };
+    engine.pause_indexing().await;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn resume_indexing_handler(
+    State(state): State<ServerState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let init_error_message = state.init_error.lock().await.clone();
+    let engine_guard = state.engine.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_message {
+            return Err(ApiError::internal(format!("引擎初始化失败: {message}")));
+        }
+        return Err(ApiError::internal("引擎尚在初始化中，请稍后重试。"));
+    };
+    engine.resume_indexing().await;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn get_app_settings_handler() -> Result<Json<AppSettingsDto>, ApiError> {
+    let settings = load_app_settings().map_err(ApiError::internal)?;
+    let watch_root = resolve_watch_root_from_settings(&settings).map_err(ApiError::internal)?;
+    let indexing = resolve_indexing_config(&settings);
+    Ok(Json(AppSettingsDto {
+        watch_root: watch_root.to_string_lossy().to_string(),
+        language: settings.language,
+        indexing_mode: indexing.mode.as_str().to_string(),
+        resource_budget: indexing.resource_budget.as_str().to_string(),
+        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
+        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
     }))
 }
 
@@ -674,9 +817,14 @@ async fn set_watch_root_handler(
     .await
     .map_err(ApiError::internal)?;
 
+    let indexing = resolve_indexing_config(&settings);
     Ok(Json(AppSettingsDto {
         watch_root: canonical.to_string_lossy().to_string(),
         language: settings.language,
+        indexing_mode: indexing.mode.as_str().to_string(),
+        resource_budget: indexing.resource_budget.as_str().to_string(),
+        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
+        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
     }))
 }
 
@@ -803,6 +951,11 @@ async fn replace_engine(
 
     let mut new_engine =
         MemoriEngine::bootstrap(watch_root.clone()).map_err(|err| err.to_string())?;
+    if let Ok(settings) = load_app_settings() {
+        new_engine
+            .set_indexing_config(resolve_indexing_config(&settings))
+            .await;
+    }
     new_engine.start_daemon().map_err(|err| err.to_string())?;
 
     {
@@ -1544,6 +1697,47 @@ fn normalize_top_k(top_k: Option<usize>) -> usize {
         Some(value) if (1..=50).contains(&value) => value,
         _ => DEFAULT_RETRIEVE_TOP_K,
     }
+}
+
+fn resolve_indexing_config(settings: &AppSettings) -> IndexingConfig {
+    let mode = settings
+        .indexing_mode
+        .as_deref()
+        .map(IndexingMode::from_value)
+        .unwrap_or(IndexingMode::Continuous);
+    let resource_budget = settings
+        .resource_budget
+        .as_deref()
+        .map(ResourceBudget::from_value)
+        .unwrap_or(ResourceBudget::Low);
+    let schedule_window = if mode == IndexingMode::Scheduled {
+        Some(ScheduleWindow {
+            start: settings
+                .schedule_start
+                .clone()
+                .unwrap_or_else(|| "00:00".to_string()),
+            end: settings
+                .schedule_end
+                .clone()
+                .unwrap_or_else(|| "06:00".to_string()),
+        })
+    } else {
+        None
+    };
+    IndexingConfig {
+        mode,
+        resource_budget,
+        schedule_window,
+    }
+}
+
+fn chrono_like_now_token() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    now.to_string()
 }
 
 fn normalize_scope_paths(scope_paths: Option<Vec<String>>) -> Vec<PathBuf> {

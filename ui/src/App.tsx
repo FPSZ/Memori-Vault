@@ -32,10 +32,13 @@ import remarkGfm from "remark-gfm";
 import {
   FontPreset,
   FontScale,
+  IndexingMode,
+  IndexingStatusDto,
   ModelAvailabilityDto,
   ModelSettingsDto,
   ModelProvider,
   ProviderModelsDto,
+  ResourceBudget,
   ThemeMode,
   SettingsModal
 } from "./components/SettingsModal";
@@ -70,6 +73,10 @@ type ParsedResponse = {
 type AppSettingsDto = {
   watch_root: string;
   language?: string | null;
+  indexing_mode?: string | null;
+  resource_budget?: string | null;
+  schedule_start?: string | null;
+  schedule_end?: string | null;
 };
 
 type SearchScopeItem = {
@@ -88,6 +95,7 @@ const FONT_PRESET_STORAGE_KEY = "memori-font-preset";
 const FONT_SCALE_STORAGE_KEY = "memori-font-scale";
 const RETRIEVE_TOP_K_STORAGE_KEY = "memori-retrieve-top-k";
 const MODEL_ACTION_TIMEOUT_MS = 20000;
+const INDEXING_ACTION_TIMEOUT_MS = 15000;
 
 const DEFAULT_MODEL_SETTINGS: ModelSettingsDto = {
   active_provider: "ollama_local",
@@ -172,6 +180,20 @@ function resolveInitialRetrieveTopK(): number {
     return parsed;
   }
   return 20;
+}
+
+function normalizeIndexingMode(value: string | null | undefined): IndexingMode {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (normalized === "manual") return "manual";
+  if (normalized === "scheduled") return "scheduled";
+  return "continuous";
+}
+
+function normalizeResourceBudget(value: string | null | undefined): ResourceBudget {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (normalized === "balanced") return "balanced";
+  if (normalized === "fast") return "fast";
+  return "low";
 }
 
 function isTauriHostAvailable(): boolean {
@@ -311,6 +333,17 @@ function clampScore(score: number): number {
   return Math.max(0, Math.min(1, score));
 }
 
+function formatElapsed(ms: number): string {
+  const safe = Math.max(0, ms);
+  if (safe < 60_000) {
+    return `${(safe / 1000).toFixed(1)}s`;
+  }
+  const totalSeconds = Math.round(safe / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
 function isMarkdownFile(path: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(path.trim());
 }
@@ -343,7 +376,7 @@ function LiquidOrb({ score, semanticLabel }: { score: number; semanticLabel: str
       </div>
 
       <div className="flex flex-col items-start gap-1 leading-none">
-        <span className="text-sm font-mono font-bold text-[var(--accent)]">
+        <span className="text-sm font-bold text-[var(--accent)]">
           {percentage}%
         </span>
         <span className="text-[10px] tracking-[0.08em] text-[var(--text-secondary)]">{semanticLabel}</span>
@@ -358,6 +391,8 @@ export default function App() {
   const [rawAnswer, setRawAnswer] = useState("");
   const [loading, setLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchElapsedMs, setSearchElapsedMs] = useState(0);
+  const [lastSearchDurationMs, setLastSearchDurationMs] = useState<number | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
@@ -383,9 +418,16 @@ export default function App() {
     merged: []
   });
   const [modelBusy, setModelBusy] = useState(false);
+  const [indexingMode, setIndexingMode] = useState<IndexingMode>("continuous");
+  const [resourceBudget, setResourceBudget] = useState<ResourceBudget>("low");
+  const [scheduleStart, setScheduleStart] = useState("00:00");
+  const [scheduleEnd, setScheduleEnd] = useState("06:00");
+  const [indexingStatus, setIndexingStatus] = useState<IndexingStatusDto | null>(null);
+  const [indexingBusy, setIndexingBusy] = useState(false);
   const [stats, setStats] = useState<VaultStats>({ documents: 0, chunks: 0, nodes: 0 });
   const [error, setError] = useState<string | null>(null);
   const scopeMenuRef = useRef<HTMLDivElement | null>(null);
+  const searchStartedAtRef = useRef<number | null>(null);
 
   const parsed = useMemo(() => parseResponse(rawAnswer), [rawAnswer]);
   const visibleSources = useMemo(
@@ -564,6 +606,10 @@ export default function App() {
         const settings = await invoke<AppSettingsDto>("get_app_settings");
         if (active) {
           setWatchRoot(settings.watch_root ?? "");
+          setIndexingMode(normalizeIndexingMode(settings.indexing_mode));
+          setResourceBudget(normalizeResourceBudget(settings.resource_budget));
+          setScheduleStart(settings.schedule_start || "00:00");
+          setScheduleEnd(settings.schedule_end || "06:00");
           if (!window.localStorage.getItem(AI_LANG_STORAGE_KEY) && settings.language) {
             const normalized = settings.language.toLowerCase();
             if (normalized.startsWith("zh")) {
@@ -572,6 +618,23 @@ export default function App() {
               setAiLang("en-US");
             }
           }
+        }
+      } catch (error) {
+        if (active) {
+          setError(toUiErrorMessage(error));
+        }
+      }
+    };
+
+    const loadIndexingStatus = async () => {
+      try {
+        const status = await invoke<IndexingStatusDto>("get_indexing_status");
+        if (active) {
+          setIndexingStatus({
+            ...status,
+            mode: normalizeIndexingMode(status.mode),
+            resource_budget: normalizeResourceBudget(status.resource_budget)
+          });
         }
       } catch (error) {
         if (active) {
@@ -631,11 +694,13 @@ export default function App() {
 
     void loadStats();
     void loadSettings();
+    void loadIndexingStatus();
     void loadModelSettings().then(() => {
       void validateModelSetup();
     });
     const timer = window.setInterval(() => {
       void loadStats();
+      void loadIndexingStatus();
     }, 5000);
 
     return () => {
@@ -783,6 +848,118 @@ export default function App() {
     };
   }, [modelSettings.active_provider]);
 
+  useEffect(() => {
+    if (!loading) {
+      return;
+    }
+    const updateElapsed = () => {
+      const startedAt = searchStartedAtRef.current;
+      if (startedAt == null) {
+        return;
+      }
+      setSearchElapsedMs(performance.now() - startedAt);
+    };
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 100);
+    return () => window.clearInterval(timer);
+  }, [loading]);
+
+  const refreshIndexingStatus = async () => {
+    const status = await withTimeout(
+      invoke<IndexingStatusDto>("get_indexing_status"),
+      INDEXING_ACTION_TIMEOUT_MS,
+      uiLang === "zh-CN" ? "获取索引状态超时，请稍后重试。" : "Fetching indexing status timed out."
+    );
+    setIndexingStatus({
+      ...status,
+      mode: normalizeIndexingMode(status.mode),
+      resource_budget: normalizeResourceBudget(status.resource_budget)
+    });
+  };
+
+  const onSaveIndexingConfig = async () => {
+    setIndexingBusy(true);
+    try {
+      const saved = await withTimeout(
+        invoke<AppSettingsDto>("set_indexing_mode", {
+          payload: {
+            indexing_mode: indexingMode,
+            resource_budget: resourceBudget,
+            schedule_start: indexingMode === "scheduled" ? scheduleStart : null,
+            schedule_end: indexingMode === "scheduled" ? scheduleEnd : null
+          }
+        }),
+        INDEXING_ACTION_TIMEOUT_MS,
+        uiLang === "zh-CN" ? "保存索引配置超时，请重试。" : "Saving indexing config timed out."
+      );
+      setIndexingMode(normalizeIndexingMode(saved.indexing_mode));
+      setResourceBudget(normalizeResourceBudget(saved.resource_budget));
+      setScheduleStart(saved.schedule_start || "00:00");
+      setScheduleEnd(saved.schedule_end || "06:00");
+      await refreshIndexingStatus();
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      throw err;
+    } finally {
+      setIndexingBusy(false);
+    }
+  };
+
+  const onTriggerReindex = async () => {
+    setIndexingBusy(true);
+    try {
+      await withTimeout(
+        invoke<string>("trigger_reindex"),
+        INDEXING_ACTION_TIMEOUT_MS * 2,
+        uiLang === "zh-CN" ? "触发重建索引超时，请稍后重试。" : "Triggering reindex timed out."
+      );
+      await refreshIndexingStatus();
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      throw err;
+    } finally {
+      setIndexingBusy(false);
+    }
+  };
+
+  const onPauseIndexing = async () => {
+    setIndexingBusy(true);
+    try {
+      await withTimeout(
+        invoke("pause_indexing"),
+        INDEXING_ACTION_TIMEOUT_MS,
+        uiLang === "zh-CN" ? "暂停索引超时，请稍后重试。" : "Pausing indexing timed out."
+      );
+      await refreshIndexingStatus();
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      throw err;
+    } finally {
+      setIndexingBusy(false);
+    }
+  };
+
+  const onResumeIndexing = async () => {
+    setIndexingBusy(true);
+    try {
+      await withTimeout(
+        invoke("resume_indexing"),
+        INDEXING_ACTION_TIMEOUT_MS,
+        uiLang === "zh-CN" ? "恢复索引超时，请稍后重试。" : "Resuming indexing timed out."
+      );
+      await refreshIndexingStatus();
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      throw err;
+    } finally {
+      setIndexingBusy(false);
+    }
+  };
+
   const runSearch = async () => {
     if (!canSubmit) {
       return;
@@ -795,6 +972,9 @@ export default function App() {
 
     setIsSearching(true);
     setLoading(true);
+    setSearchElapsedMs(0);
+    setLastSearchDurationMs(null);
+    searchStartedAtRef.current = performance.now();
     setError(null);
     setExpandedSourceKeys(new Set());
 
@@ -810,6 +990,13 @@ export default function App() {
       setRawAnswer("");
       setError(toUiErrorMessage(error));
     } finally {
+      const startedAt = searchStartedAtRef.current;
+      if (startedAt != null) {
+        const elapsed = performance.now() - startedAt;
+        setSearchElapsedMs(elapsed);
+        setLastSearchDurationMs(elapsed);
+      }
+      searchStartedAtRef.current = null;
       setLoading(false);
     }
   };
@@ -1277,7 +1464,7 @@ export default function App() {
                           className="absolute left-0 top-[calc(100%+10px)] z-40 w-[360px] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2 shadow-[0_20px_45px_rgba(0,0,0,0.5)] backdrop-blur"
                         >
                           <div className="mb-2 flex items-center justify-between px-1">
-                            <span className="text-[11px] font-mono tracking-[0.08em] text-[var(--text-secondary)]">
+                            <span className="text-[11px] tracking-[0.08em] text-[var(--text-secondary)]">
                               {t("scopeSelectTitle")}
                             </span>
                             <button
@@ -1427,9 +1614,14 @@ export default function App() {
                   className="no-scrollbar mx-auto h-full w-full max-w-4xl overflow-y-auto pt-36"
                 >
                   {loading && (
-                    <div className="flex items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-5 py-4 text-sm text-[var(--text-secondary)]">
-                      <LoaderCircle className="h-4 w-4 animate-spin text-[var(--accent)]" />
-                      {t("loading")}
+                    <div className="flex items-center justify-between px-1 py-3 text-sm text-[var(--text-secondary)]">
+                      <div className="flex items-center gap-3">
+                        <LoaderCircle className="h-4 w-4 animate-spin text-[var(--accent)]" />
+                        {t("loading")}
+                      </div>
+                      <span className="text-xs text-[var(--text-muted)]">
+                        {formatElapsed(searchElapsedMs)}
+                      </span>
                     </div>
                   )}
 
@@ -1442,11 +1634,18 @@ export default function App() {
                   {!loading && !error && parsed.synthesis && (
                     <article className="pb-8">
                       <div className="mb-6 border-l-2 border-[var(--accent)] pl-4">
-                        <div className="mb-3 flex items-center gap-2">
-                          <Sparkles className="h-4 w-4 text-[var(--accent)]" />
-                          <span className="text-xs font-mono font-bold tracking-widest text-[var(--accent)]">
-                            {t("synthesis")}
-                          </span>
+                        <div className="mb-3 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-[var(--accent)]" />
+                            <span className="text-xs font-bold tracking-widest text-[var(--accent)]">
+                              {t("synthesis")}
+                            </span>
+                          </div>
+                          {lastSearchDurationMs !== null ? (
+                            <span className="text-[11px] text-[var(--text-secondary)]">
+                              {t("elapsedTime", { time: formatElapsed(lastSearchDurationMs) })}
+                            </span>
+                          ) : null}
                         </div>
                         <div className="md-preview mt-1 break-words font-sans text-lg leading-relaxed text-[var(--text-primary)]">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -1588,6 +1787,20 @@ export default function App() {
                 onPullModel={onPullModel}
                 onPickLocalModelsRoot={onPickLocalModelsRoot}
                 onClearLocalModelsRoot={onClearLocalModelsRoot}
+                indexingMode={indexingMode}
+                resourceBudget={resourceBudget}
+                scheduleStart={scheduleStart}
+                scheduleEnd={scheduleEnd}
+                indexingStatus={indexingStatus}
+                indexingBusy={indexingBusy}
+                onIndexingModeChange={setIndexingMode}
+                onResourceBudgetChange={setResourceBudget}
+                onScheduleStartChange={setScheduleStart}
+                onScheduleEndChange={setScheduleEnd}
+                onSaveIndexingConfig={onSaveIndexingConfig}
+                onTriggerReindex={onTriggerReindex}
+                onPauseIndexing={onPauseIndexing}
+                onResumeIndexing={onResumeIndexing}
               />
             </motion.div>
           )}

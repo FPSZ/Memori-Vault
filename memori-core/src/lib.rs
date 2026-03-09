@@ -4,9 +4,10 @@ mod llm_generator;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{collections::HashMap, hash::Hash, hash::Hasher};
 
-use graph_extractor::{GraphData, extract_entities};
+use graph_extractor::extract_entities;
 use llm_generator::generate_answer as generate_llm_answer;
 pub use memori_parser::DocumentChunk;
 use memori_parser::{ParserStub, parse_and_chunk};
@@ -16,8 +17,9 @@ use memori_vault::{
     create_event_channel, spawn_memori_vault,
 };
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
+use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
 pub const DEFAULT_MODEL_PROVIDER: &str = "ollama_local";
@@ -34,6 +36,8 @@ pub const MEMORI_MODEL_API_KEY_ENV: &str = "MEMORI_MODEL_API_KEY";
 pub const MEMORI_CHAT_MODEL_ENV: &str = "MEMORI_CHAT_MODEL";
 pub const MEMORI_GRAPH_MODEL_ENV: &str = "MEMORI_GRAPH_MODEL";
 pub const MEMORI_EMBED_MODEL_ENV: &str = "MEMORI_EMBED_MODEL";
+const QUERY_EMBEDDING_CACHE_SIZE: usize = 256;
+const QUERY_EMBEDDING_CACHE_TTL_SECS: i64 = 300;
 
 /// 前端/CLI 可消费的 Vault 统计信息。
 #[derive(Debug, Clone, serde::Serialize)]
@@ -43,6 +47,110 @@ pub struct VaultStats {
     pub graph_node_count: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IndexingMode {
+    Continuous,
+    Manual,
+    Scheduled,
+}
+
+impl Default for IndexingMode {
+    fn default() -> Self {
+        Self::Continuous
+    }
+}
+
+impl IndexingMode {
+    pub fn from_value(text: &str) -> Self {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "manual" => Self::Manual,
+            "scheduled" => Self::Scheduled,
+            _ => Self::Continuous,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Continuous => "continuous",
+            Self::Manual => "manual",
+            Self::Scheduled => "scheduled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ResourceBudget {
+    Low,
+    Balanced,
+    Fast,
+}
+
+impl Default for ResourceBudget {
+    fn default() -> Self {
+        Self::Low
+    }
+}
+
+impl ResourceBudget {
+    pub fn from_value(text: &str) -> Self {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "balanced" => Self::Balanced,
+            "fast" => Self::Fast,
+            _ => Self::Low,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Balanced => "balanced",
+            Self::Fast => "fast",
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScheduleWindow {
+    pub start: String,
+    pub end: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct IndexingConfig {
+    pub mode: IndexingMode,
+    pub resource_budget: ResourceBudget,
+    pub schedule_window: Option<ScheduleWindow>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct IndexingStatus {
+    pub phase: String,
+    pub indexed_docs: u64,
+    pub indexed_chunks: u64,
+    pub graphed_chunks: u64,
+    pub graph_backlog: u64,
+    pub last_scan_at: Option<i64>,
+    pub last_error: Option<String>,
+    pub paused: bool,
+    pub mode: IndexingMode,
+    pub resource_budget: ResourceBudget,
+}
+
+#[derive(Debug, Clone)]
+struct EmbeddingCacheItem {
+    embedding: Vec<f32>,
+    cached_at: i64,
+}
+
+#[derive(Debug, Default, Clone)]
+struct IndexingRuntimeState {
+    phase: String,
+    last_scan_at: Option<i64>,
+    last_error: Option<String>,
+    paused: bool,
+    config: IndexingConfig,
+}
+
 /// 全局共享状态。
 /// 当前持有 parser 占位、SQLite 持久化存储与本地 Ollama 客户端。
 #[derive(Debug)]
@@ -50,6 +158,8 @@ pub struct AppState {
     pub parser: ParserStub,
     pub vector_store: Arc<SqliteStore>,
     pub embedding_client: OllamaEmbeddingClient,
+    query_embedding_cache: Arc<RwLock<HashMap<String, EmbeddingCacheItem>>>,
+    indexing_runtime: Arc<RwLock<IndexingRuntimeState>>,
 }
 
 impl AppState {
@@ -59,6 +169,14 @@ impl AppState {
             parser: ParserStub,
             vector_store,
             embedding_client: OllamaEmbeddingClient::default(),
+            query_embedding_cache: Arc::new(RwLock::new(HashMap::new())),
+            indexing_runtime: Arc::new(RwLock::new(IndexingRuntimeState {
+                phase: "idle".to_string(),
+                last_scan_at: None,
+                last_error: None,
+                paused: false,
+                config: IndexingConfig::default(),
+            })),
         })
     }
 }
@@ -369,8 +487,10 @@ pub struct MemoriEngine {
     state: Arc<AppState>,
     event_rx: Option<mpsc::Receiver<WatchEvent>>,
     daemon_task: Option<JoinHandle<Result<(), EngineError>>>,
+    graph_worker_task: Option<JoinHandle<Result<(), EngineError>>>,
     memori_vault_handle: Option<MemoriVaultHandle>,
     watch_root: Option<PathBuf>,
+    graph_notify_tx: Option<mpsc::Sender<()>>,
 }
 
 impl MemoriEngine {
@@ -380,8 +500,10 @@ impl MemoriEngine {
             state,
             event_rx: Some(event_rx),
             daemon_task: None,
+            graph_worker_task: None,
             memori_vault_handle: None,
             watch_root: None,
+            graph_notify_tx: None,
         }
     }
 
@@ -423,7 +545,42 @@ impl MemoriEngine {
             return Ok(Vec::new());
         }
 
-        let query_embedding = self.state.embedding_client.embed_text(query).await?;
+        let query_key = query.trim().to_string();
+        let now = unix_now_secs();
+        let cached = {
+            let cache_guard = self.state.query_embedding_cache.read().await;
+            cache_guard.get(&query_key).and_then(|item| {
+                if now - item.cached_at <= QUERY_EMBEDDING_CACHE_TTL_SECS {
+                    Some(item.embedding.clone())
+                } else {
+                    None
+                }
+            })
+        };
+
+        let query_embedding = if let Some(embedding) = cached {
+            embedding
+        } else {
+            let embedding = self.state.embedding_client.embed_text(query).await?;
+            let mut cache_guard = self.state.query_embedding_cache.write().await;
+            if cache_guard.len() >= QUERY_EMBEDDING_CACHE_SIZE {
+                let stale_key = cache_guard
+                    .iter()
+                    .min_by_key(|(_, item)| item.cached_at)
+                    .map(|(key, _)| key.clone());
+                if let Some(stale_key) = stale_key {
+                    cache_guard.remove(&stale_key);
+                }
+            }
+            cache_guard.insert(
+                query_key,
+                EmbeddingCacheItem {
+                    embedding: embedding.clone(),
+                    cached_at: now,
+                },
+            );
+            embedding
+        };
         let results = self
             .state
             .vector_store
@@ -496,11 +653,79 @@ impl MemoriEngine {
         })
     }
 
+    pub async fn get_indexing_status(&self) -> Result<IndexingStatus, EngineError> {
+        let runtime = self.state.indexing_runtime.read().await;
+        let indexed_docs = self.state.vector_store.count_documents().await?;
+        let indexed_chunks = self.state.vector_store.count_chunks().await?;
+        let graphed_chunks = self.state.vector_store.count_graphed_chunks().await?;
+        let graph_backlog = self.state.vector_store.count_graph_backlog().await?;
+
+        Ok(IndexingStatus {
+            phase: runtime.phase.clone(),
+            indexed_docs,
+            indexed_chunks,
+            graphed_chunks,
+            graph_backlog,
+            last_scan_at: runtime.last_scan_at,
+            last_error: runtime.last_error.clone(),
+            paused: runtime.paused,
+            mode: runtime.config.mode,
+            resource_budget: runtime.config.resource_budget,
+        })
+    }
+
+    pub async fn set_indexing_config(&self, config: IndexingConfig) {
+        let mut runtime = self.state.indexing_runtime.write().await;
+        runtime.config = config;
+    }
+
+    pub async fn pause_indexing(&self) {
+        let mut runtime = self.state.indexing_runtime.write().await;
+        runtime.paused = true;
+    }
+
+    pub async fn resume_indexing(&self) {
+        let mut runtime = self.state.indexing_runtime.write().await;
+        runtime.paused = false;
+    }
+
+    pub async fn trigger_reindex(&self) -> Result<(), EngineError> {
+        let Some(root) = self.watch_root.clone() else {
+            return Ok(());
+        };
+
+        {
+            let mut runtime = self.state.indexing_runtime.write().await;
+            runtime.phase = "scanning".to_string();
+            runtime.last_scan_at = Some(unix_now_secs());
+            runtime.last_error = None;
+        }
+
+        let files = collect_supported_text_files_recursively(root).await;
+        for path in files {
+            let event = WatchEvent {
+                kind: WatchEventKind::Modified,
+                path,
+                old_path: None,
+                observed_at: SystemTime::now(),
+            };
+            process_file_event(&self.state, &event, self.graph_notify_tx.as_ref()).await;
+        }
+
+        let mut runtime = self.state.indexing_runtime.write().await;
+        runtime.phase = "idle".to_string();
+        runtime.last_scan_at = Some(unix_now_secs());
+        Ok(())
+    }
+
     /// 启动异步守护任务，持续消费文件事件并触发解析、向量化与图谱提取流程。
     pub fn start_daemon(&mut self) -> Result<(), EngineError> {
         if self.daemon_task.is_some() {
             return Err(EngineError::DaemonAlreadyStarted);
         }
+
+        let (graph_notify_tx, graph_notify_rx) = mpsc::channel::<()>(32);
+        self.graph_notify_tx = Some(graph_notify_tx.clone());
 
         let mut event_rx = self
             .event_rx
@@ -508,6 +733,9 @@ impl MemoriEngine {
             .ok_or(EngineError::EventChannelUnavailable)?;
         let state = Arc::clone(&self.state);
         let watch_root = self.watch_root.clone();
+        let graph_worker_state = Arc::clone(&self.state);
+
+        let graph_task = tokio::spawn(async move { run_graph_worker(graph_worker_state, graph_notify_rx).await });
 
         let task = tokio::spawn(async move {
             info!("memori-core daemon started");
@@ -527,7 +755,18 @@ impl MemoriEngine {
                 }
             }
 
-            if let Some(root) = watch_root {
+            let runtime_cfg = { state.indexing_runtime.read().await.config.clone() };
+            if let Some(root) = watch_root.clone()
+                && runtime_cfg.mode != IndexingMode::Manual
+                && is_within_schedule_window(&runtime_cfg)
+            {
+                {
+                    let mut runtime = state.indexing_runtime.write().await;
+                    runtime.phase = "scanning".to_string();
+                    runtime.last_scan_at = Some(unix_now_secs());
+                    runtime.last_error = None;
+                }
+
                 let existing_files = collect_supported_text_files_recursively(root.clone()).await;
                 info!(
                     root = %root.display(),
@@ -542,16 +781,28 @@ impl MemoriEngine {
                         old_path: None,
                         observed_at: SystemTime::now(),
                     };
-                    process_file_event(&state, &event).await;
+                    process_file_event(&state, &event, Some(&graph_notify_tx)).await;
                 }
+
+                let mut runtime = state.indexing_runtime.write().await;
+                runtime.phase = "idle".to_string();
+                runtime.last_scan_at = Some(unix_now_secs());
             }
 
             while let Some(event) = event_rx.recv().await {
+                let (paused, cfg) = {
+                    let runtime = state.indexing_runtime.read().await;
+                    (runtime.paused, runtime.config.clone())
+                };
+                if paused || cfg.mode == IndexingMode::Manual || !is_within_schedule_window(&cfg) {
+                    continue;
+                }
+
                 match event.kind {
                     WatchEventKind::Created
                     | WatchEventKind::Modified
                     | WatchEventKind::Renamed => {
-                        process_file_event(&state, &event).await;
+                        process_file_event(&state, &event, Some(&graph_notify_tx)).await;
                     }
                     _ => {
                         debug!(
@@ -568,6 +819,7 @@ impl MemoriEngine {
         });
 
         self.daemon_task = Some(task);
+        self.graph_worker_task = Some(graph_task);
         Ok(())
     }
 
@@ -575,12 +827,17 @@ impl MemoriEngine {
     /// 1) 优先停止 memori-vault（关闭发送端）；
     /// 2) 等待 daemon 消费完剩余事件后退出。
     pub async fn shutdown(mut self) -> Result<(), EngineError> {
+        self.graph_notify_tx.take();
+
         if let Some(memori_vault_handle) = self.memori_vault_handle.take() {
             memori_vault_handle.join().await?;
         }
 
         if let Some(daemon_task) = self.daemon_task.take() {
             daemon_task.await??;
+        }
+        if let Some(graph_worker_task) = self.graph_worker_task.take() {
+            graph_worker_task.await??;
         }
 
         Ok(())
@@ -609,7 +866,52 @@ pub async fn generate_answer_with_context(
     generate_llm_answer(question, text_context, graph_context).await
 }
 
-async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {
+async fn process_file_event(
+    state: &Arc<AppState>,
+    event: &WatchEvent,
+    graph_notify_tx: Option<&mpsc::Sender<()>>,
+) {
+    {
+        let mut runtime = state.indexing_runtime.write().await;
+        runtime.phase = "scanning".to_string();
+        runtime.last_scan_at = Some(unix_now_secs());
+    }
+
+    let metadata = match tokio::fs::metadata(&event.path).await {
+        Ok(meta) => meta,
+        Err(err) => {
+            warn!(
+                path = %event.path.display(),
+                error = %err,
+                "读取文件元数据失败，跳过本次索引"
+            );
+            let mut runtime = state.indexing_runtime.write().await;
+            runtime.last_error = Some(err.to_string());
+            runtime.phase = "idle".to_string();
+            return;
+        }
+    };
+    let file_size = i64::try_from(metadata.len()).unwrap_or(i64::MAX);
+    let mtime_secs = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .and_then(|d| i64::try_from(d.as_secs()).ok())
+        .unwrap_or(0);
+    let previous_state = state
+        .vector_store
+        .get_file_index_state(&event.path)
+        .await
+        .ok()
+        .flatten();
+    if let Some(prev) = previous_state.as_ref()
+        && prev.file_size == file_size
+        && prev.mtime_secs == mtime_secs
+    {
+        debug!(path = %event.path.display(), "文件元数据未变化，跳过重建索引");
+        return;
+    }
+
     let raw_text = match tokio::fs::read_to_string(&event.path).await {
         Ok(text) => text,
         Err(err) => {
@@ -618,9 +920,30 @@ async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {
                 error = %err,
                 "文件读取失败（可能被占用），已跳过"
             );
+            let mut runtime = state.indexing_runtime.write().await;
+            runtime.last_error = Some(err.to_string());
+            runtime.phase = "idle".to_string();
             return;
         }
     };
+    let file_hash = hash_text(&raw_text);
+    if let Some(prev) = previous_state
+        && prev.content_hash == file_hash
+    {
+        debug!(path = %event.path.display(), "文件内容哈希未变化，跳过重建索引");
+        if let Err(err) = state
+            .vector_store
+            .upsert_file_index_state(&event.path, file_size, mtime_secs, &file_hash)
+            .await
+        {
+            warn!(
+                path = %event.path.display(),
+                error = %err,
+                "刷新文件索引元数据失败"
+            );
+        }
+        return;
+    }
 
     let chunks = match parse_and_chunk(&event.path, &raw_text) {
         Ok(chunks) => {
@@ -639,13 +962,23 @@ async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {
                 error = %err,
                 "解析失败，已跳过本次事件"
             );
+            let mut runtime = state.indexing_runtime.write().await;
+            runtime.last_error = Some(err.to_string());
+            runtime.phase = "idle".to_string();
             return;
         }
     };
 
     if chunks.is_empty() {
         debug!(path = %event.path.display(), "解析结果为空，跳过向量化与存储");
+        let mut runtime = state.indexing_runtime.write().await;
+        runtime.phase = "idle".to_string();
         return;
+    }
+
+    {
+        let mut runtime = state.indexing_runtime.write().await;
+        runtime.phase = "embedding".to_string();
     }
 
     let mut embeddings = Vec::with_capacity(chunks.len());
@@ -660,6 +993,9 @@ async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {
                     error = %err,
                     "无法连接本地大模型，请确保 Ollama 已启动"
                 );
+                let mut runtime = state.indexing_runtime.write().await;
+                runtime.last_error = Some(err.to_string());
+                runtime.phase = "idle".to_string();
                 return;
             }
         }
@@ -675,75 +1011,210 @@ async fn process_file_event(state: &Arc<AppState>, event: &WatchEvent) {
             error = %err,
             "向量落盘失败，本次事件已跳过但守护进程继续运行"
         );
+        let mut runtime = state.indexing_runtime.write().await;
+        runtime.last_error = Some(err.to_string());
+        runtime.phase = "idle".to_string();
         return;
     }
 
-    for chunk in &chunks {
-        let graph_data = match extract_entities(&chunk.content).await {
-            Ok(graph_data) => graph_data,
-            Err(err) => {
-                warn!(
-                    path = %chunk.file_path.display(),
-                    chunk_index = chunk.chunk_index,
-                    error = %err,
-                    "图谱抽取失败，本 Chunk 跳过关系写入"
-                );
-                GraphData::default()
-            }
-        };
+    if let Err(err) = state
+        .vector_store
+        .upsert_file_index_state(&event.path, file_size, mtime_secs, &file_hash)
+        .await
+    {
+        warn!(
+            path = %event.path.display(),
+            error = %err,
+            "更新文件索引元数据失败，不影响查询"
+        );
+    }
 
+    for chunk in chunks {
         let chunk_id = match state
             .vector_store
             .resolve_chunk_id(&chunk.file_path, chunk.chunk_index)
             .await
         {
             Ok(Some(id)) => id,
-            Ok(None) => {
+            Ok(None) => continue,
+            Err(err) => {
                 warn!(
                     path = %chunk.file_path.display(),
                     chunk_index = chunk.chunk_index,
-                    "已写入向量，但未找到对应 chunk_id，跳过图谱落盘"
-                );
-                continue;
-            }
-            Err(err) => {
-                error!(
-                    path = %chunk.file_path.display(),
-                    chunk_index = chunk.chunk_index,
                     error = %err,
-                    "查询 chunk_id 失败，跳过图谱落盘"
+                    "无法解析 chunk_id，跳过图谱任务入队"
                 );
                 continue;
             }
         };
-
-        let node_count = graph_data.nodes.len();
-        let edge_count = graph_data.edges.len();
-
+        let chunk_hash = hash_text(&chunk.content);
         if let Err(err) = state
             .vector_store
-            .insert_graph(chunk_id, graph_data.nodes, graph_data.edges)
+            .enqueue_graph_task(chunk_id, &chunk_hash, &chunk.content)
             .await
         {
-            error!(
+            warn!(
                 path = %chunk.file_path.display(),
                 chunk_index = chunk.chunk_index,
                 error = %err,
-                "图谱落盘失败，守护进程继续运行"
+                "图谱任务入队失败，后续可重试"
             );
+        }
+    }
+
+    if let Some(tx) = graph_notify_tx {
+        let _ = tx.send(()).await;
+    }
+
+    let mut runtime = state.indexing_runtime.write().await;
+    runtime.phase = "idle".to_string();
+    runtime.last_error = None;
+}
+
+async fn run_graph_worker(
+    state: Arc<AppState>,
+    mut notify_rx: mpsc::Receiver<()>,
+) -> Result<(), EngineError> {
+    info!("memori-core graph worker started");
+    let mut channel_closed = false;
+
+    loop {
+        let runtime = state.indexing_runtime.read().await.clone();
+        if runtime.paused || runtime.config.mode == IndexingMode::Manual || !is_within_schedule_window(&runtime.config) {
+            sleep(Duration::from_millis(500)).await;
+            if channel_closed && state.vector_store.count_graph_backlog().await.unwrap_or(0) == 0 {
+                break;
+            }
             continue;
         }
 
-        info!(
-            chunk_index = chunk.chunk_index,
-            node_count = node_count,
-            edge_count = edge_count,
-            "从 Chunk [{}] 中成功提取 [{}] 个节点和 [{}] 条关系",
-            chunk.chunk_index,
-            node_count,
-            edge_count
-        );
+        match state.vector_store.fetch_next_graph_task().await? {
+            Some(task) => {
+                {
+                    let mut runtime = state.indexing_runtime.write().await;
+                    runtime.phase = "graphing".to_string();
+                }
+                let graph_data = match extract_entities(&task.content).await {
+                    Ok(data) => data,
+                    Err(err) => {
+                        warn!(
+                            chunk_id = task.chunk_id,
+                            retry = task.retry_count + 1,
+                            error = %err,
+                            "图谱抽取失败，任务将重试"
+                        );
+                        state
+                            .vector_store
+                            .mark_graph_task_failed(task.task_id, task.retry_count + 1)
+                            .await?;
+                        let mut runtime = state.indexing_runtime.write().await;
+                        runtime.last_error = Some(err.to_string());
+                        continue;
+                    }
+                };
+
+                if let Err(err) = state
+                    .vector_store
+                    .insert_graph(task.chunk_id, graph_data.nodes, graph_data.edges)
+                    .await
+                {
+                    warn!(
+                        chunk_id = task.chunk_id,
+                        retry = task.retry_count + 1,
+                        error = %err,
+                        "图谱落盘失败，任务将重试"
+                    );
+                    state
+                        .vector_store
+                        .mark_graph_task_failed(task.task_id, task.retry_count + 1)
+                        .await?;
+                    let mut runtime = state.indexing_runtime.write().await;
+                    runtime.last_error = Some(err.to_string());
+                    continue;
+                }
+
+                state.vector_store.mark_graph_task_done(task.task_id).await?;
+                let mut runtime = state.indexing_runtime.write().await;
+                runtime.phase = "idle".to_string();
+                runtime.last_error = None;
+            }
+            None => {
+                if channel_closed {
+                    if state.vector_store.count_graph_backlog().await.unwrap_or(0) == 0 {
+                        break;
+                    }
+                } else {
+                    match notify_rx.recv().await {
+                        Some(_) => {}
+                        None => channel_closed = true,
+                    }
+                }
+                let cfg = state.indexing_runtime.read().await.config.clone();
+                sleep(graph_worker_idle_delay(cfg.resource_budget)).await;
+            }
+        }
     }
+
+    info!("memori-core graph worker exiting");
+    Ok(())
+}
+
+fn graph_worker_idle_delay(budget: ResourceBudget) -> Duration {
+    match budget {
+        ResourceBudget::Low => Duration::from_millis(650),
+        ResourceBudget::Balanced => Duration::from_millis(260),
+        ResourceBudget::Fast => Duration::from_millis(80),
+    }
+}
+
+fn is_within_schedule_window(config: &IndexingConfig) -> bool {
+    if config.mode != IndexingMode::Scheduled {
+        return true;
+    }
+    let Some(window) = config.schedule_window.as_ref() else {
+        return true;
+    };
+
+    let Some(start_minutes) = parse_hhmm_to_minutes(&window.start) else {
+        return true;
+    };
+    let Some(end_minutes) = parse_hhmm_to_minutes(&window.end) else {
+        return true;
+    };
+
+    let now = unix_now_secs();
+    let day_secs = 24 * 60 * 60;
+    let minute_now = ((now.rem_euclid(day_secs)) / 60) as i32;
+
+    if start_minutes <= end_minutes {
+        minute_now >= start_minutes && minute_now <= end_minutes
+    } else {
+        minute_now >= start_minutes || minute_now <= end_minutes
+    }
+}
+
+fn parse_hhmm_to_minutes(text: &str) -> Option<i32> {
+    let mut parts = text.trim().split(':');
+    let hour = parts.next()?.parse::<i32>().ok()?;
+    let minute = parts.next()?.parse::<i32>().ok()?;
+    if parts.next().is_some() || !(0..=23).contains(&hour) || !(0..=59).contains(&minute) {
+        return None;
+    }
+    Some(hour * 60 + minute)
+}
+
+fn hash_text(text: &str) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn unix_now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_secs()).ok())
+        .unwrap_or(0)
 }
 
 async fn collect_supported_text_files_recursively(root: PathBuf) -> Vec<PathBuf> {
