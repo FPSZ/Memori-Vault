@@ -25,7 +25,11 @@ plan.md
 UI.md
 AI.md
 RELEASE_NOTES_v0.1.0.md
+docs/RELEASE_PREP_NOTES.md
 
 # Local scripts only
 scripts/
+
+# Local AI assistant settings
+.claude/
 Logo/
