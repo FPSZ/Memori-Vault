@@ -175,7 +175,14 @@ async fn ask_vault(
     };
 
     let top_k = normalize_top_k(top_k);
-    let scope_paths = normalize_scope_paths(scope_paths);
+    let mut scope_paths = normalize_scope_paths(scope_paths);
+    if scope_paths.is_empty() {
+        if let Ok(settings) = load_app_settings()
+            && let Ok(watch_root) = resolve_watch_root_from_settings(&settings)
+        {
+            scope_paths.push(watch_root);
+        }
+    }
     let scope_refs = if scope_paths.is_empty() {
         None
     } else {
@@ -2005,13 +2012,84 @@ fn build_text_context(results: &[(DocumentChunk, f32)]) -> String {
     parts.join("\n\n")
 }
 
+fn build_reference_excerpt(file_path: &std::path::Path, chunk_content: &str) -> String {
+    const TARGET_EXCERPT_CHARS: usize = 1600;
+
+    let Ok(raw) = std::fs::read_to_string(file_path) else {
+        return chunk_content.to_string();
+    };
+
+    let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let paragraphs: Vec<&str> = normalized
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
+
+    if paragraphs.is_empty() {
+        return chunk_content.to_string();
+    }
+
+    let chunk_normalized = chunk_content.trim();
+    let anchor = chunk_normalized
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && line.chars().count() >= 8)
+        .unwrap_or(chunk_normalized);
+
+    let paragraph_index = paragraphs
+        .iter()
+        .position(|paragraph| paragraph.contains(chunk_normalized))
+        .or_else(|| paragraphs.iter().position(|paragraph| paragraph.contains(anchor)));
+
+    let Some(index) = paragraph_index else {
+        return chunk_content.to_string();
+    };
+
+    let mut start = index;
+    let mut end = index + 1;
+    let mut total_chars: usize = paragraphs[index].chars().count();
+
+    while total_chars < TARGET_EXCERPT_CHARS && (start > 0 || end < paragraphs.len()) {
+        let prev_len = if start > 0 {
+            paragraphs[start - 1].chars().count()
+        } else {
+            0
+        };
+        let next_len = if end < paragraphs.len() {
+            paragraphs[end].chars().count()
+        } else {
+            0
+        };
+
+        if next_len >= prev_len && end < paragraphs.len() {
+            total_chars += next_len;
+            end += 1;
+            continue;
+        }
+
+        if start > 0 {
+            start -= 1;
+            total_chars += prev_len;
+            continue;
+        }
+
+        if end < paragraphs.len() {
+            total_chars += next_len;
+            end += 1;
+        }
+    }
+
+    paragraphs[start..end].join("\n\n")
+}
+
 fn format_references(results: &[(DocumentChunk, f32)]) -> String {
     let mut lines = Vec::with_capacity(results.len() * 4);
     for (idx, (chunk, score)) in results.iter().enumerate() {
         lines.push(format!("#{}  相似度: {:.4}", idx + 1, score));
         lines.push(format!("来源: {}", chunk.file_path.display()));
         lines.push(format!("块序号: {}", chunk.chunk_index));
-        lines.push(chunk.content.clone());
+        lines.push(build_reference_excerpt(&chunk.file_path, &chunk.content));
         lines.push(String::from(
             "------------------------------------------------------------",
         ));

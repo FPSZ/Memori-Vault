@@ -856,6 +856,13 @@ fn resolve_db_path() -> Result<PathBuf, EngineError> {
         }
     }
 
+    if let Some(data_dir) = dirs::data_dir() {
+        // Stable per-user location for desktop/server deployments.
+        // Example (Windows): %APPDATA%/Memori-Vault/.memori.db
+        // Example (Linux): ~/.local/share/Memori-Vault/.memori.db
+        return Ok(data_dir.join("Memori-Vault").join(DEFAULT_DB_FILE_NAME));
+    }
+
     Ok(std::env::current_dir()
         .map_err(EngineError::CurrentDir)?
         .join(DEFAULT_DB_FILE_NAME))

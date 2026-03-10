@@ -16,6 +16,7 @@ reqwest = { version = "0.12.23", default-features = false, features = ["json", "
 memori-vault = { path = "../memori-vault" }
 memori-parser = { path = "../memori-parser" }
 memori-storage = { path = "../memori-storage" }
+dirs = "6.0.0"
 
 [dev-dependencies]
 tracing-subscriber = "0.3.20"

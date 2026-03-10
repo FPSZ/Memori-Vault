@@ -572,7 +572,7 @@ export function SettingsModal({
   const buttonClassByState = (key: ActionKey) => {
     const phase = actionState[key].phase;
     if (phase === "success") {
-      return "bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_0_16px_rgba(88,166,255,0.45)]";
+      return "bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_0_8px_rgba(88,166,255,0.2)]";
     }
     if (phase === "error") {
       return "bg-red-500/15 text-red-300 shadow-[0_0_14px_rgba(239,68,68,0.3)]";
@@ -582,6 +582,8 @@ export function SettingsModal({
     }
     return "bg-transparent text-[var(--text-primary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]";
   };
+  const stableActionButtonClass =
+    "inline-flex h-9 w-[170px] items-center justify-center gap-1.5 rounded-md px-3 text-sm whitespace-nowrap transition disabled:opacity-60";
 
   const onProviderSwitch = (provider: ModelProvider) => {
     onModelSettingsChange({
@@ -630,7 +632,7 @@ export function SettingsModal({
       return "bg-transparent text-[var(--text-primary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]";
     }
     if (indexingAction.phase === "success") {
-      return "bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_0_16px_rgba(88,166,255,0.45)]";
+      return "bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_0_8px_rgba(88,166,255,0.2)]";
     }
     if (indexingAction.phase === "error") {
       return "bg-red-500/15 text-red-300 shadow-[0_0_14px_rgba(239,68,68,0.3)]";
@@ -667,8 +669,8 @@ export function SettingsModal({
         </span>
       </div>
 
-      <div className="flex h-[calc(100%-44px)]">
-        <aside className="w-[28%] bg-[var(--bg-surface-2)] p-3 shadow-[10px_0_18px_-16px_rgba(88,166,255,0.28)]">
+      <div className="flex h-[calc(100%-44px)] min-h-0">
+        <aside className="h-full w-[28%] bg-[var(--bg-surface-2)] p-3 shadow-[10px_0_18px_-16px_rgba(88,166,255,0.28)]">
           <div className="mb-3 px-2 pt-1 text-xs tracking-[0.16em] text-[var(--text-secondary)] uppercase">
             {t("settings")}
           </div>
@@ -715,7 +717,7 @@ export function SettingsModal({
           )}
         </aside>
 
-        <section className="relative w-[72%] overflow-y-auto p-5">
+        <section className="settings-scrollbar relative min-h-0 w-[72%] overflow-y-auto px-5 py-5">
           <AnimatePresence mode="wait">
             {activeTab === "basic" ? (
               <motion.div
@@ -930,14 +932,14 @@ export function SettingsModal({
                   <div className="text-[var(--text-primary)]">{t("modelStatusTitle")}</div>
                   <div className="flex flex-wrap gap-2">
                     <motion.button
-                      key={`probe-${actionState.probe.tick}`}
+                      key="probe"
                       type="button"
                       onClick={() => void onModelAction("probe", onProbeModelProvider)}
                       disabled={modelBusy}
-                      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${buttonClassByState("probe")}`}
+                      className={`${stableActionButtonClass} ${buttonClassByState("probe")}`}
                       animate={
                         actionState.probe.phase === "success"
-                          ? { scale: [1, 1.04, 1] }
+                          ? { scale: [1, 1.015, 1] }
                           : { scale: 1 }
                       }
                       transition={{ duration: 0.35 }}
@@ -948,14 +950,14 @@ export function SettingsModal({
                       {buttonLabelByState("probe")}
                     </motion.button>
                     <motion.button
-                      key={`refresh-${actionState.refresh.tick}`}
+                      key="refresh"
                       type="button"
                       onClick={() => void onModelAction("refresh", onRefreshProviderModels)}
                       disabled={modelBusy}
-                      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${buttonClassByState("refresh")}`}
+                      className={`${stableActionButtonClass} ${buttonClassByState("refresh")}`}
                       animate={
                         actionState.refresh.phase === "success"
-                          ? { scale: [1, 1.04, 1] }
+                          ? { scale: [1, 1.015, 1] }
                           : { scale: 1 }
                       }
                       transition={{ duration: 0.35 }}
@@ -966,14 +968,14 @@ export function SettingsModal({
                       {buttonLabelByState("refresh")}
                     </motion.button>
                     <motion.button
-                      key={`save-${actionState.save.tick}`}
+                      key="save"
                       type="button"
                       onClick={() => void onModelAction("save", onSaveModelSettings)}
                       disabled={modelBusy}
-                      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${buttonClassByState("save")}`}
+                      className={`${stableActionButtonClass} ${buttonClassByState("save")}`}
                       animate={
                         actionState.save.phase === "success"
-                          ? { scale: [1, 1.04, 1] }
+                          ? { scale: [1, 1.015, 1] }
                           : { scale: 1 }
                       }
                       transition={{ duration: 0.35 }}
@@ -985,7 +987,7 @@ export function SettingsModal({
                     </motion.button>
                     {activeProvider === "ollama_local" ? (
                       <motion.button
-                        key={`pull-${actionState.pull.tick}`}
+                        key="pull"
                         type="button"
                         onClick={() => {
                           const candidates = modelAvailability?.missing_roles ?? [];
@@ -998,10 +1000,10 @@ export function SettingsModal({
                           }
                         }}
                         disabled={modelBusy || !modelAvailability?.missing_roles?.length}
-                        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${buttonClassByState("pull")}`}
+                        className={`${stableActionButtonClass} ${buttonClassByState("pull")}`}
                         animate={
                           actionState.pull.phase === "success"
-                            ? { scale: [1, 1.04, 1] }
+                            ? { scale: [1, 1.015, 1] }
                             : { scale: 1 }
                         }
                         transition={{ duration: 0.35 }}
@@ -1146,11 +1148,11 @@ export function SettingsModal({
                   <AnimatedPanel className="glass-panel-infer rounded-lg px-3 py-3">
                     <div className="flex flex-wrap gap-2">
                       <motion.button
-                        key={`save-indexing-${indexingAction.tick}`}
+                        key="save-indexing"
                         type="button"
                         disabled={indexingBusy}
                         onClick={() => void onIndexingAction("saveIndexing", onSaveIndexingConfig)}
-                        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${indexingButtonClass("saveIndexing")}`}
+                        className={`${stableActionButtonClass} ${indexingButtonClass("saveIndexing")}`}
                       >
                         {indexingAction.phase === "running" && indexingAction.key === "saveIndexing" ? (
                           <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
@@ -1158,11 +1160,11 @@ export function SettingsModal({
                         {t("saveIndexingConfig")}
                       </motion.button>
                       <motion.button
-                        key={`trigger-indexing-${indexingAction.tick}`}
+                        key="trigger-indexing"
                         type="button"
                         disabled={indexingBusy}
                         onClick={() => void onIndexingAction("triggerReindex", onTriggerReindex)}
-                        className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${indexingButtonClass("triggerReindex")}`}
+                        className={`${stableActionButtonClass} ${indexingButtonClass("triggerReindex")}`}
                       >
                         {indexingAction.phase === "running" && indexingAction.key === "triggerReindex" ? (
                           <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
@@ -1171,11 +1173,11 @@ export function SettingsModal({
                       </motion.button>
                       {indexingStatus?.paused ? (
                         <motion.button
-                          key={`resume-indexing-${indexingAction.tick}`}
+                          key="resume-indexing"
                           type="button"
                           disabled={indexingBusy}
                           onClick={() => void onIndexingAction("pauseResume", onResumeIndexing)}
-                          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${indexingButtonClass("pauseResume")}`}
+                          className={`${stableActionButtonClass} ${indexingButtonClass("pauseResume")}`}
                         >
                           {indexingAction.phase === "running" && indexingAction.key === "pauseResume" ? (
                             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
@@ -1184,11 +1186,11 @@ export function SettingsModal({
                         </motion.button>
                       ) : (
                         <motion.button
-                          key={`pause-indexing-${indexingAction.tick}`}
+                          key="pause-indexing"
                           type="button"
                           disabled={indexingBusy}
                           onClick={() => void onIndexingAction("pauseResume", onPauseIndexing)}
-                          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition disabled:opacity-60 ${indexingButtonClass("pauseResume")}`}
+                          className={`${stableActionButtonClass} ${indexingButtonClass("pauseResume")}`}
                         >
                           {indexingAction.phase === "running" && indexingAction.key === "pauseResume" ? (
                             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />

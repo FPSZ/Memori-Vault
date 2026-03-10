@@ -29,6 +29,10 @@ import {
   X
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {
   FontPreset,
@@ -97,6 +101,9 @@ const FONT_SCALE_STORAGE_KEY = "memori-font-scale";
 const RETRIEVE_TOP_K_STORAGE_KEY = "memori-retrieve-top-k";
 const MODEL_ACTION_TIMEOUT_MS = 20000;
 const INDEXING_ACTION_TIMEOUT_MS = 15000;
+const DEFAULT_FONT_SCALE: FontScale = "m";
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+const MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize, rehypeHighlight];
 
 const DEFAULT_MODEL_SETTINGS: ModelSettingsDto = {
   active_provider: "ollama_local",
@@ -162,13 +169,13 @@ function resolveInitialFontPreset(): FontPreset {
 
 function resolveInitialFontScale(): FontScale {
   if (typeof window === "undefined") {
-    return "m";
+    return DEFAULT_FONT_SCALE;
   }
   const saved = window.localStorage.getItem(FONT_SCALE_STORAGE_KEY);
   if (saved === "s" || saved === "l" || saved === "m") {
     return saved;
   }
-  return "m";
+  return DEFAULT_FONT_SCALE;
 }
 
 function resolveInitialRetrieveTopK(): number {
@@ -347,6 +354,23 @@ function formatElapsed(ms: number): string {
 
 function isMarkdownFile(path: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(path.trim());
+}
+
+function buildCollapsedMarkdownPreview(content: string): string {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return normalized;
+  }
+
+  const fenceMatch = normalized.match(/```[\w-]*\n[\s\S]*?\n```/);
+  if (fenceMatch) {
+    const fenceIndex = fenceMatch.index ?? 0;
+    const before = normalized.slice(0, fenceIndex).trim();
+    const beforeLines = before ? before.split("\n").slice(-6).join("\n") : "";
+    return beforeLines ? `${beforeLines}\n\n${fenceMatch[0]}` : fenceMatch[0];
+  }
+
+  return normalized.split("\n").slice(0, 8).join("\n");
 }
 
 function normalizeScopeKey(relativePath: string, fallback: string): string {
@@ -1486,7 +1510,7 @@ export default function App() {
                 top: isSearching ? (isSearchBarCollapsed ? "6px" : isSearchBarCompact ? "8px" : "20px") : "45%",
                 y: isSearching ? 0 : "-50%"
               }}
-              transition={{ type: "spring", stiffness: 180, damping: 24 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
             >
               <motion.div
                 onMouseEnter={() => {
@@ -1499,11 +1523,11 @@ export default function App() {
                     setIsSearchBarHovering(false);
                   }
                 }}
-                className={`relative mx-auto w-full transition-[box-shadow,background-color,max-width,padding,opacity] duration-200 ${
+                className={`relative mx-auto w-full transition-[max-width,opacity,box-shadow,background-color,border-color] duration-300 ease-out will-change-[max-width,opacity] ${
                   isSearchBarCompact ? "focus-within:shadow-none" : "focus-within:shadow-[var(--float-shadow-focus)]"
                 } ${
                   isSearchBarCollapsed
-                    ? "max-w-[300px] bg-transparent px-0 py-0 shadow-none ring-0"
+                    ? "max-w-[300px] rounded-full overflow-hidden border-0 bg-transparent px-0 py-0 shadow-none ring-0"
                     : isSearching && isSearchBarCompact
                     ? "max-w-3xl rounded-full px-4 py-2.5"
                     : "max-w-4xl rounded-xl px-6 py-5"
@@ -1525,7 +1549,7 @@ export default function App() {
                       requestAnimationFrame(() => searchInputRef.current?.focus());
                     }}
                     aria-label={t("askPlaceholder")}
-                    className="block h-1.5 w-full rounded-full bg-white/95 ring-1 ring-black/5 shadow-[0_2px_9px_rgba(15,23,42,0.16)]"
+                    className="block h-1.5 w-full appearance-none rounded-full border-0 bg-white/95 p-0 shadow-[0_2px_8px_rgba(15,23,42,0.12)] outline-none focus:border-0 focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0"
                   />
                 ) : (
                   <>
@@ -1766,7 +1790,10 @@ export default function App() {
                           ) : null}
                         </div>
                         <div className="md-preview mt-1 break-words font-sans text-lg leading-relaxed text-[var(--text-primary)]">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          <ReactMarkdown
+                            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                          >
                             {parsed.synthesis}
                           </ReactMarkdown>
                         </div>
@@ -1782,7 +1809,10 @@ export default function App() {
                             {visibleSources.map((source, index) => {
                               const sourceKey = `${source.path}-${index}`;
                               const expanded = expandedSourceKeys.has(sourceKey);
-                              const markdownPreview = expanded && isMarkdownFile(source.path);
+                              const markdownPreview = isMarkdownFile(source.path);
+                              const markdownContent = expanded
+                                ? source.content
+                                : buildCollapsedMarkdownPreview(source.content);
 
                               return (
                                 <motion.div
@@ -1796,25 +1826,32 @@ export default function App() {
                                   <LiquidOrb score={source.score} semanticLabel={t("semanticRelevance")} />
 
                                   <div className="min-w-0 flex-1 pr-5">
-                                    <div className="truncate font-mono text-xs text-[var(--text-secondary)]">
+                                    <div className="truncate font-mono text-xs text-[var(--text-secondary)]" title={source.path}>
                                       {source.path}
                                     </div>
                                     {markdownPreview ? (
-                                      <div className="md-preview mt-2 text-sm leading-6 text-[var(--text-secondary)]">
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                          {source.content}
+                                      <div
+                                        className={`md-preview md-preview-source mt-2 text-sm leading-6 text-[var(--text-secondary)] ${
+                                          expanded ? "" : "source-preview-scrollbar max-h-40 overflow-y-auto pr-2"
+                                        }`}
+                                      >
+                                        <ReactMarkdown
+                                          remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                                          rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                                        >
+                                          {markdownContent}
                                         </ReactMarkdown>
                                       </div>
                                     ) : (
-                                      <p
+                                      <div
                                         className={
                                           expanded
-                                            ? "mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--text-muted)]"
-                                            : "mt-2 overflow-hidden text-sm leading-6 text-[var(--text-muted)] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
+                                            ? "mt-2 whitespace-pre-wrap break-words font-mono text-[13px] leading-6 text-[var(--text-muted)]"
+                                            : "source-preview-scrollbar mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[13px] leading-6 text-[var(--text-muted)] pr-2"
                                         }
                                       >
                                         {source.content}
-                                      </p>
+                                      </div>
                                     )}
                                   </div>
 
