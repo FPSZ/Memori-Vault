@@ -29,6 +29,7 @@
   --glass-panel-shadow: 0 10px 20px -24px color-mix(in srgb, var(--accent) 24%, transparent);
   --glass-panel-inset: inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
   --glass-panel-highlight: rgba(255, 255, 255, 0.22);
+  --search-collapsed-bar: color-mix(in srgb, var(--text-primary) 16%, var(--bg-surface-2));
 }
 
 :root[data-theme="dark"] {
@@ -52,6 +53,7 @@
   --glass-panel-shadow: 0 8px 18px -24px color-mix(in srgb, var(--accent) 14%, transparent);
   --glass-panel-inset: inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent);
   --glass-panel-highlight: rgba(255, 255, 255, 0.2);
+  --search-collapsed-bar: color-mix(in srgb, var(--text-primary) 16%, var(--bg-surface-2));
 }
 
 :root[data-theme="light"] {
@@ -79,6 +81,7 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.72),
     inset 0 -1px 0 rgba(148, 163, 184, 0.14);
   --glass-panel-highlight: rgba(255, 255, 255, 0.8);
+  --search-collapsed-bar: color-mix(in srgb, #ffffff 82%, var(--bg-surface-2));
 }
 
 * {

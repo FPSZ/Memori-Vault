@@ -453,10 +453,10 @@ impl SqliteStore {
 
             let removed_state_rows = tx
                 .execute(
-                "DELETE FROM file_index_state WHERE file_path = ?1",
-                params![file_path_text.clone()],
-            )
-            .map_err(map_sqlite_error)?;
+                    "DELETE FROM file_index_state WHERE file_path = ?1",
+                    params![file_path_text.clone()],
+                )
+                .map_err(map_sqlite_error)?;
 
             let mut removed_doc_rows = 0usize;
             if let Some(doc_id) = doc_id {
@@ -539,7 +539,8 @@ impl SqliteStore {
         };
 
         if !removed_doc_ids.is_empty() {
-            let removed_doc_ids: std::collections::HashSet<i64> = removed_doc_ids.into_iter().collect();
+            let removed_doc_ids: std::collections::HashSet<i64> =
+                removed_doc_ids.into_iter().collect();
             let mut cache_guard = self.cache.write().await;
             cache_guard.retain(|item| !removed_doc_ids.contains(&item.doc_id));
         }
@@ -1308,8 +1309,8 @@ fn escape_like_pattern(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::SqliteStore;
-    use memori_parser::DocumentChunk;
     use crate::VectorStore;
+    use memori_parser::DocumentChunk;
 
     #[tokio::test]
     async fn purge_file_path_removes_document_chunks_and_index_state() {
@@ -1346,7 +1347,10 @@ mod tests {
             .await
             .expect("upsert file index state");
 
-        let purged = store.purge_file_path(&file_path).await.expect("purge file path");
+        let purged = store
+            .purge_file_path(&file_path)
+            .await
+            .expect("purge file path");
         assert!(purged);
 
         assert!(
@@ -1413,8 +1417,20 @@ mod tests {
             .expect("purge directory path");
         assert!(purged);
 
-        assert!(store.resolve_chunk_id(&nested_a, 0).await.expect("resolve nested a").is_none());
-        assert!(store.resolve_chunk_id(&nested_b, 0).await.expect("resolve nested b").is_none());
+        assert!(
+            store
+                .resolve_chunk_id(&nested_a, 0)
+                .await
+                .expect("resolve nested a")
+                .is_none()
+        );
+        assert!(
+            store
+                .resolve_chunk_id(&nested_b, 0)
+                .await
+                .expect("resolve nested b")
+                .is_none()
+        );
         assert!(
             store
                 .get_file_index_state(&nested_a)
@@ -1429,7 +1445,13 @@ mod tests {
                 .expect("state nested b")
                 .is_none()
         );
-        assert!(store.resolve_chunk_id(&outside, 0).await.expect("resolve outside").is_some());
+        assert!(
+            store
+                .resolve_chunk_id(&outside, 0)
+                .await
+                .expect("resolve outside")
+                .is_some()
+        );
 
         drop(store);
         let _ = std::fs::remove_file(&db_path);

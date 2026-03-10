@@ -2665,7 +2665,11 @@ fn build_reference_excerpt(file_path: &std::path::Path, chunk_content: &str) -> 
     let paragraph_index = paragraphs
         .iter()
         .position(|paragraph| paragraph.contains(chunk_normalized))
-        .or_else(|| paragraphs.iter().position(|paragraph| paragraph.contains(anchor)));
+        .or_else(|| {
+            paragraphs
+                .iter()
+                .position(|paragraph| paragraph.contains(anchor))
+        });
 
     let Some(index) = paragraph_index else {
         return chunk_content.to_string();

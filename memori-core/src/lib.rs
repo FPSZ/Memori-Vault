@@ -1494,9 +1494,30 @@ mod tests {
 
         process_file_event(&state, &event, None).await;
 
-        assert!(state.vector_store.resolve_chunk_id(&nested_a, 0).await.expect("resolve nested a").is_none());
-        assert!(state.vector_store.resolve_chunk_id(&nested_b, 0).await.expect("resolve nested b").is_none());
-        assert!(state.vector_store.resolve_chunk_id(&outside, 0).await.expect("resolve outside").is_some());
+        assert!(
+            state
+                .vector_store
+                .resolve_chunk_id(&nested_a, 0)
+                .await
+                .expect("resolve nested a")
+                .is_none()
+        );
+        assert!(
+            state
+                .vector_store
+                .resolve_chunk_id(&nested_b, 0)
+                .await
+                .expect("resolve nested b")
+                .is_none()
+        );
+        assert!(
+            state
+                .vector_store
+                .resolve_chunk_id(&outside, 0)
+                .await
+                .expect("resolve outside")
+                .is_some()
+        );
 
         drop(state);
         let _ = std::fs::remove_file(&db_path);

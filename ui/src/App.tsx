@@ -1549,7 +1549,7 @@ export default function App() {
                       requestAnimationFrame(() => searchInputRef.current?.focus());
                     }}
                     aria-label={t("askPlaceholder")}
-                    className="block h-1.5 w-full appearance-none rounded-full border-0 bg-white/95 p-0 shadow-[0_2px_8px_rgba(15,23,42,0.12)] outline-none focus:border-0 focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0"
+                    className="block h-1.5 w-full appearance-none rounded-full border-0 bg-[var(--search-collapsed-bar)] p-0 shadow-[0_2px_8px_rgba(15,23,42,0.12)] outline-none focus:border-0 focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0"
                   />
                 ) : (
                   <>

@@ -334,13 +334,18 @@ fn should_keep_event(event: &WatchEvent) -> bool {
             return true;
         }
     }
-    if matches!(event.kind, WatchEventKind::Removed | WatchEventKind::Renamed)
-        && path_has_no_extension(&event.path)
+    if matches!(
+        event.kind,
+        WatchEventKind::Removed | WatchEventKind::Renamed
+    ) && path_has_no_extension(&event.path)
     {
         return true;
     }
     if matches!(event.kind, WatchEventKind::Renamed)
-        && event.old_path.as_ref().is_some_and(|old| path_has_no_extension(old))
+        && event
+            .old_path
+            .as_ref()
+            .is_some_and(|old| path_has_no_extension(old))
     {
         return true;
     }
