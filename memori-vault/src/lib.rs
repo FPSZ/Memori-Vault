@@ -329,10 +329,10 @@ fn should_keep_event(event: &WatchEvent) -> bool {
     if is_supported_text_file(&event.path) {
         return true;
     }
-    if let Some(old) = &event.old_path {
-        if is_supported_text_file(old) {
-            return true;
-        }
+    if let Some(old) = &event.old_path
+        && is_supported_text_file(old)
+    {
+        return true;
     }
     if matches!(
         event.kind,
