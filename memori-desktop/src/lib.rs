@@ -176,12 +176,11 @@ async fn ask_vault(
 
     let top_k = normalize_top_k(top_k);
     let mut scope_paths = normalize_scope_paths(scope_paths);
-    if scope_paths.is_empty() {
-        if let Ok(settings) = load_app_settings()
-            && let Ok(watch_root) = resolve_watch_root_from_settings(&settings)
-        {
-            scope_paths.push(watch_root);
-        }
+    if scope_paths.is_empty()
+        && let Ok(settings) = load_app_settings()
+        && let Ok(watch_root) = resolve_watch_root_from_settings(&settings)
+    {
+        scope_paths.push(watch_root);
     }
     let scope_refs = if scope_paths.is_empty() {
         None

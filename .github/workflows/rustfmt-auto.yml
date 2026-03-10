@@ -1,0 +1,34 @@
+name: Rustfmt Auto
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rustfmt:
+    name: Apply rustfmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Run rustfmt
+        run: cargo fmt --all
+
+      - name: Commit changes
+        run: |
+          if git diff --quiet; then
+            echo "No formatting changes to commit."
+            exit 0
+          fi
+          git add .
+          git -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" commit -m "chore: apply rustfmt"
+          git push
