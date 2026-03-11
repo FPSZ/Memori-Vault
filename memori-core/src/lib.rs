@@ -275,6 +275,7 @@ struct DocumentCandidate {
     has_exact_signal: bool,
     has_exact_path_signal: bool,
     has_exact_symbol_signal: bool,
+    has_docs_phrase_signal: bool,
     has_filename_signal: bool,
     has_strict_lexical: bool,
     has_broad_lexical: bool,
@@ -288,6 +289,7 @@ struct MergedEvidence {
     document_rank: usize,
     document_raw_score: Option<f64>,
     document_has_exact_signal: bool,
+    document_has_docs_phrase_signal: bool,
     document_has_filename_signal: bool,
     document_has_strict_lexical: bool,
     lexical_strict_rank: Option<usize>,
@@ -319,15 +321,34 @@ impl QueryIntent {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueryFamily {
+    DocsExplanatory,
+    DocsApiLookup,
+    ImplementationLookup,
+}
+
+impl QueryFamily {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::DocsExplanatory => "docs_explanatory",
+            Self::DocsApiLookup => "docs_api_lookup",
+            Self::ImplementationLookup => "implementation_lookup",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct QueryAnalysis {
     normalized_query: String,
     lexical_query: String,
     document_routing_terms: Vec<String>,
+    docs_phrase_terms: Vec<String>,
     chunk_terms: Vec<String>,
     filename_like_terms: Vec<String>,
     identifier_terms: Vec<String>,
     query_intent: QueryIntent,
+    query_family: QueryFamily,
     flags: QueryFlags,
 }
 
@@ -1194,6 +1215,7 @@ impl MemoriEngine {
         scope_paths: &[PathBuf],
         metrics: &mut RetrievalMetrics,
     ) -> Result<Vec<DocumentCandidate>, EngineError> {
+        let doc_top_k = doc_top_k_for_query_family(analysis.query_family);
         let mut by_path = HashMap::<String, DocumentCandidate>::new();
         let file_scopes = scope_paths
             .iter()
@@ -1228,6 +1250,7 @@ impl MemoriEngine {
                             has_exact_signal: false,
                             has_exact_path_signal: false,
                             has_exact_symbol_signal: false,
+                            has_docs_phrase_signal: false,
                             has_filename_signal: false,
                             has_strict_lexical: true,
                             has_broad_lexical: true,
@@ -1250,11 +1273,28 @@ impl MemoriEngine {
             .vector_store
             .search_documents_signal(
                 &document_signal_query(analysis),
-                DEFAULT_DOC_TOP_K,
+                doc_top_k,
                 scope_paths,
             )
             .await?;
         metrics.doc_exact_ms = elapsed_ms_u64(doc_exact_started_at);
+
+        let phrase_docs = if analysis.docs_phrase_terms.is_empty() {
+            Vec::new()
+        } else {
+            let doc_phrase_started_at = Instant::now();
+            let docs = self
+                .state
+                .vector_store
+                .search_documents_phrase_signal(
+                    &analysis.normalized_query,
+                    doc_top_k,
+                    scope_paths,
+                )
+                .await?;
+            metrics.doc_exact_ms += elapsed_ms_u64(doc_phrase_started_at);
+            docs
+        };
 
         let doc_strict_started_at = Instant::now();
         let strict_docs = self
@@ -1262,7 +1302,7 @@ impl MemoriEngine {
             .vector_store
             .search_documents_fts_strict(
                 &query_string_for_terms(&analysis.document_routing_terms, &analysis.lexical_query),
-                DEFAULT_DOC_TOP_K,
+                doc_top_k,
                 scope_paths,
             )
             .await?;
@@ -1274,14 +1314,15 @@ impl MemoriEngine {
             .vector_store
             .search_documents_fts(
                 &query_string_for_terms(&analysis.document_routing_terms, &analysis.lexical_query),
-                DEFAULT_DOC_TOP_K,
+                doc_top_k,
                 scope_paths,
             )
             .await?;
         metrics.doc_lexical_ms = elapsed_ms_u64(doc_lexical_started_at);
 
         let merge_started_at = Instant::now();
-        let merged_docs = merge_document_candidates(analysis, exact_docs, strict_docs, routed_docs);
+        let merged_docs =
+            merge_document_candidates(analysis, exact_docs, phrase_docs, strict_docs, routed_docs);
         metrics.doc_merge_ms = elapsed_ms_u64(merge_started_at);
 
         for doc in merged_docs {
@@ -1736,6 +1777,15 @@ fn analyze_query(query: &str) -> QueryAnalysis {
         || !filename_terms.is_empty()
         || !identifier_terms.is_empty();
     let query_intent = classify_query_intent(&normalized_query, &flags);
+    let query_family = classify_query_family(
+        &normalized_query,
+        &raw_tokens,
+        &document_terms,
+        &filename_terms,
+        &identifier_terms,
+        &flags,
+    );
+    let docs_phrase_terms = extract_docs_phrase_terms(&raw_tokens, &document_terms, query_family);
 
     QueryAnalysis {
         normalized_query: normalized_query.clone(),
@@ -1745,10 +1795,12 @@ fn analyze_query(query: &str) -> QueryAnalysis {
         } else {
             document_terms
         },
+        docs_phrase_terms,
         chunk_terms: lexical_terms,
         filename_like_terms: filename_terms,
         identifier_terms,
         query_intent,
+        query_family,
         flags,
     }
 }
@@ -1936,6 +1988,57 @@ fn looks_like_identifier_term(term: &str, raw_token: &str) -> bool {
         || has_ascii_camel_case(raw_token)
 }
 
+fn extract_docs_phrase_terms(
+    raw_tokens: &[String],
+    document_terms: &[String],
+    query_family: QueryFamily,
+) -> Vec<String> {
+    if matches!(query_family, QueryFamily::ImplementationLookup) {
+        return Vec::new();
+    }
+
+    let filtered_tokens = raw_tokens
+        .iter()
+        .map(|token| normalize_ascii_token(token))
+        .filter(|token| is_valid_query_term(token) && !is_english_stopword(token))
+        .collect::<Vec<_>>();
+
+    let mut phrases = Vec::new();
+    let mut seen = HashMap::<String, ()>::new();
+
+    for term in document_terms {
+        if term.chars().count() >= 6
+            || term.chars().any(is_cjk)
+            || term.chars().any(|ch| matches!(ch, '.' | '/' | '\\' | '_' | '-'))
+        {
+            insert_unique_term(&mut seen, &mut phrases, term);
+        }
+    }
+
+    if filtered_tokens.is_empty() {
+        return phrases;
+    }
+
+    let max_window = filtered_tokens.len().min(4);
+    for window in (2..=max_window).rev() {
+        for slice in filtered_tokens.windows(window) {
+            let phrase = slice.join(" ");
+            if phrase.chars().count() >= 6 {
+                insert_unique_term(&mut seen, &mut phrases, &phrase);
+            }
+        }
+    }
+
+    if filtered_tokens.len() <= 6 {
+        let full_phrase = filtered_tokens.join(" ");
+        if full_phrase.chars().count() >= 6 {
+            insert_unique_term(&mut seen, &mut phrases, &full_phrase);
+        }
+    }
+
+    phrases
+}
+
 fn has_ascii_camel_case(token: &str) -> bool {
     let chars = token.chars().collect::<Vec<_>>();
     chars.windows(2).any(|pair| {
@@ -2008,8 +2111,9 @@ fn is_english_stopword(term: &str) -> bool {
     )
 }
 
-fn query_flags_as_labels(flags: &QueryFlags) -> Vec<String> {
+fn query_flags_as_labels(analysis: &QueryAnalysis) -> Vec<String> {
     let mut labels = Vec::new();
+    let flags = &analysis.flags;
     if flags.has_cjk {
         labels.push("cjk".to_string());
     }
@@ -2022,6 +2126,7 @@ fn query_flags_as_labels(flags: &QueryFlags) -> Vec<String> {
     if flags.is_lookup_like {
         labels.push("lookup_like".to_string());
     }
+    labels.push(format!("query_family:{}", analysis.query_family.as_str()));
     labels.push(format!("token_count:{}", flags.token_count));
     labels
 }
@@ -2037,24 +2142,41 @@ fn document_signal_query(analysis: &QueryAnalysis) -> String {
         insert_unique_term(&mut seen, &mut signal_terms, term);
     }
     for term in &analysis.document_routing_terms {
-        insert_unique_term(&mut seen, &mut signal_terms, term);
+        let should_include = matches!(analysis.query_family, QueryFamily::ImplementationLookup)
+            || term.chars().any(is_cjk)
+            || term.chars().any(|ch| ch.is_ascii_digit())
+            || term
+                .chars()
+                .any(|ch| matches!(ch, '.' | '/' | '\\' | '_' | '-'))
+            || term.chars().count() >= 5;
+        if should_include {
+            insert_unique_term(&mut seen, &mut signal_terms, term);
+        }
     }
 
-    if signal_terms.is_empty() && analysis.flags.is_lookup_like {
+    if signal_terms.is_empty() {
         analysis.normalized_query.clone()
     } else {
         signal_terms.join(" ")
     }
 }
 
+fn doc_top_k_for_query_family(query_family: QueryFamily) -> usize {
+    match query_family {
+        QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup => 16,
+        QueryFamily::ImplementationLookup => DEFAULT_DOC_TOP_K,
+    }
+}
+
 fn merge_document_candidates(
     analysis: &QueryAnalysis,
     exact_docs: Vec<memori_storage::DocumentSignalMatch>,
+    phrase_docs: Vec<memori_storage::DocumentSignalMatch>,
     strict_docs: Vec<memori_storage::FtsDocumentMatch>,
     broad_docs: Vec<memori_storage::FtsDocumentMatch>,
 ) -> Vec<DocumentCandidate> {
     let mut merged = HashMap::<String, DocumentCandidate>::new();
-    let implementation_lookup = is_implementation_lookup(analysis);
+    let query_family = analysis.query_family;
 
     for (index, doc) in exact_docs.into_iter().enumerate() {
         let is_code_document = is_code_document_path(&doc.relative_path);
@@ -2093,6 +2215,7 @@ fn merge_document_candidates(
                 entry.has_exact_signal |= is_exact;
                 entry.has_exact_path_signal |= is_exact_path;
                 entry.has_exact_symbol_signal |= is_exact_symbol;
+                entry.has_docs_phrase_signal |= false;
                 entry.has_filename_signal |= is_filename;
                 entry.document_final_score += score;
             })
@@ -2118,7 +2241,46 @@ fn merge_document_candidates(
                 has_exact_signal: is_exact,
                 has_exact_path_signal: is_exact_path,
                 has_exact_symbol_signal: is_exact_symbol,
+                has_docs_phrase_signal: false,
                 has_filename_signal: is_filename,
+                has_strict_lexical: false,
+                has_broad_lexical: false,
+            });
+    }
+
+    for (index, doc) in phrase_docs.into_iter().enumerate() {
+        let is_code_document = is_code_document_path(&doc.relative_path);
+        let score = 4.0 / (RRF_K + (index + 1) as f64);
+        merged
+            .entry(doc.file_path.clone())
+            .and_modify(|entry| {
+                entry.document_raw_score = Some(
+                    entry
+                        .document_raw_score
+                        .map(|current| current.max(doc.score as f64))
+                        .unwrap_or(doc.score as f64),
+                );
+                entry.has_docs_phrase_signal = true;
+                entry.document_final_score += score;
+            })
+            .or_insert(DocumentCandidate {
+                file_path: doc.file_path,
+                relative_path: doc.relative_path,
+                file_name: doc.file_name,
+                is_code_document,
+                document_reason: "docs_phrase".to_string(),
+                document_rank: index + 1,
+                document_raw_score: Some(doc.score as f64),
+                exact_signal_score: None,
+                exact_path_score: None,
+                exact_symbol_score: None,
+                document_filename_score: None,
+                document_final_score: score,
+                has_exact_signal: false,
+                has_exact_path_signal: false,
+                has_exact_symbol_signal: false,
+                has_docs_phrase_signal: true,
+                has_filename_signal: false,
                 has_strict_lexical: false,
                 has_broad_lexical: false,
             });
@@ -2155,6 +2317,7 @@ fn merge_document_candidates(
                 has_exact_signal: false,
                 has_exact_path_signal: false,
                 has_exact_symbol_signal: false,
+                has_docs_phrase_signal: false,
                 has_filename_signal: false,
                 has_strict_lexical: true,
                 has_broad_lexical: false,
@@ -2163,7 +2326,9 @@ fn merge_document_candidates(
 
     for (index, doc) in broad_docs.into_iter().enumerate() {
         let is_code_document = is_code_document_path(&doc.relative_path);
-        let score = if implementation_lookup && is_routing_noise_document(&doc.relative_path) {
+        let score = if matches!(query_family, QueryFamily::ImplementationLookup)
+            && is_routing_noise_document(&doc.relative_path)
+        {
             0.35 / (RRF_K + (index + 1) as f64)
         } else {
             1.0 / (RRF_K + (index + 1) as f64)
@@ -2193,6 +2358,7 @@ fn merge_document_candidates(
                 has_exact_signal: false,
                 has_exact_path_signal: false,
                 has_exact_symbol_signal: false,
+                has_docs_phrase_signal: false,
                 has_filename_signal: false,
                 has_strict_lexical: false,
                 has_broad_lexical: true,
@@ -2205,6 +2371,8 @@ fn merge_document_candidates(
             "exact_path".to_string()
         } else if doc.has_exact_symbol_signal {
             "exact_symbol".to_string()
+        } else if doc.has_docs_phrase_signal {
+            "docs_phrase".to_string()
         } else if doc.has_exact_signal && (doc.has_strict_lexical || doc.has_broad_lexical) {
             "mixed".to_string()
         } else if doc.has_filename_signal && (doc.has_strict_lexical || doc.has_broad_lexical) {
@@ -2218,14 +2386,14 @@ fn merge_document_candidates(
         };
     }
     docs.sort_by(|a, b| {
-        document_reason_priority(&b.document_reason, implementation_lookup)
+        document_reason_priority(&b.document_reason, query_family)
             .cmp(&document_reason_priority(
                 &a.document_reason,
-                implementation_lookup,
+                query_family,
             ))
             .then_with(|| {
-                document_type_priority(b.is_code_document, implementation_lookup).cmp(
-                    &document_type_priority(a.is_code_document, implementation_lookup),
+                document_type_priority(b.is_code_document, query_family).cmp(
+                    &document_type_priority(a.is_code_document, query_family),
                 )
             })
             .then_with(|| b.document_final_score.total_cmp(&a.document_final_score))
@@ -2274,44 +2442,54 @@ fn is_code_document_path(relative_path: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn document_type_priority(is_code_document: bool, implementation_lookup: bool) -> u8 {
-    if implementation_lookup {
-        u8::from(is_code_document)
-    } else {
-        u8::from(!is_code_document)
+fn document_type_priority(is_code_document: bool, query_family: QueryFamily) -> u8 {
+    match query_family {
+        QueryFamily::ImplementationLookup => u8::from(is_code_document),
+        QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup => u8::from(!is_code_document),
     }
 }
 
-fn document_reason_priority(reason: &str, implementation_lookup: bool) -> u8 {
-    if implementation_lookup {
-        match reason {
-            "exact_path" => 6,
-            "exact_symbol" => 5,
-            "mixed" => 4,
-            "filename" => 3,
-            "lexical_strict" => 2,
-            "lexical_broad" => 1,
-            _ => 0,
-        }
-    } else {
-        match reason {
-            "scope" => 7,
-            "exact_path" => 6,
+fn document_reason_priority(reason: &str, query_family: QueryFamily) -> u8 {
+    match query_family {
+        QueryFamily::ImplementationLookup => match reason {
+            "scope" => 8,
+            "exact_path" => 7,
+            "exact_symbol" => 6,
             "mixed" => 5,
             "filename" => 4,
             "lexical_strict" => 3,
-            "exact_symbol" => 2,
-            "lexical_broad" => 1,
+            "lexical_broad" => 2,
+            "docs_phrase" => 1,
             _ => 0,
-        }
+        },
+        QueryFamily::DocsApiLookup => match reason {
+            "scope" => 8,
+            "docs_phrase" => 7,
+            "mixed" => 6,
+            "lexical_strict" => 5,
+            "filename" => 4,
+            "exact_path" => 3,
+            "lexical_broad" => 2,
+            "exact_symbol" => 1,
+            _ => 0,
+        },
+        QueryFamily::DocsExplanatory => match reason {
+            "scope" => 8,
+            "docs_phrase" => 7,
+            "mixed" => 6,
+            "lexical_strict" => 5,
+            "filename" => 4,
+            "exact_path" => 3,
+            "lexical_broad" => 2,
+            "exact_symbol" => 1,
+            _ => 0,
+        },
     }
 }
 
+#[cfg(test)]
 fn is_implementation_lookup(analysis: &QueryAnalysis) -> bool {
-    matches!(analysis.query_intent, QueryIntent::RepoLookup)
-        && (analysis.flags.has_ascii_identifier
-            || analysis.flags.has_path_like_token
-            || !analysis.identifier_terms.is_empty())
+    matches!(analysis.query_family, QueryFamily::ImplementationLookup)
 }
 
 fn is_routing_noise_document(relative_path: &str) -> bool {
@@ -2338,6 +2516,7 @@ fn merge_chunk_evidence(
                 doc.document_rank,
                 doc.document_raw_score,
                 doc.has_exact_signal,
+                doc.has_docs_phrase_signal,
                 doc.has_filename_signal,
                 doc.has_strict_lexical,
             ),
@@ -2352,6 +2531,7 @@ fn merge_chunk_evidence(
             document_rank,
             document_raw_score,
             document_has_exact_signal,
+            document_has_docs_phrase_signal,
             document_has_filename_signal,
             document_has_strict_lexical,
         )) = doc_rank_by_path.get(&item.file_path).cloned()
@@ -2385,6 +2565,7 @@ fn merge_chunk_evidence(
                 document_rank,
                 document_raw_score,
                 document_has_exact_signal,
+                document_has_docs_phrase_signal,
                 document_has_filename_signal,
                 document_has_strict_lexical,
                 lexical_strict_rank: Some(index + 1),
@@ -2403,6 +2584,7 @@ fn merge_chunk_evidence(
             document_rank,
             document_raw_score,
             document_has_exact_signal,
+            document_has_docs_phrase_signal,
             document_has_filename_signal,
             document_has_strict_lexical,
         )) = doc_rank_by_path.get(&item.file_path).cloned()
@@ -2436,6 +2618,7 @@ fn merge_chunk_evidence(
                 document_rank,
                 document_raw_score,
                 document_has_exact_signal,
+                document_has_docs_phrase_signal,
                 document_has_filename_signal,
                 document_has_strict_lexical,
                 lexical_strict_rank: None,
@@ -2455,6 +2638,7 @@ fn merge_chunk_evidence(
             document_rank,
             document_raw_score,
             document_has_exact_signal,
+            document_has_docs_phrase_signal,
             document_has_filename_signal,
             document_has_strict_lexical,
         )) = doc_rank_by_path.get(&file_path).cloned()
@@ -2474,12 +2658,13 @@ fn merge_chunk_evidence(
                 chunk,
                 relative_path,
                 document_reason,
-                document_rank,
-                document_raw_score,
-                document_has_exact_signal,
-                document_has_filename_signal,
-                document_has_strict_lexical,
-                lexical_strict_rank: None,
+                    document_rank,
+                    document_raw_score,
+                    document_has_exact_signal,
+                    document_has_docs_phrase_signal,
+                    document_has_filename_signal,
+                    document_has_strict_lexical,
+                    lexical_strict_rank: None,
                 lexical_broad_rank: None,
                 lexical_raw_score: None,
                 dense_rank: Some(index + 1),
@@ -2566,6 +2751,16 @@ fn should_refuse_for_insufficient_evidence(
         return false;
     }
 
+    if matches!(
+        analysis.query_family,
+        QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup
+    ) && top.document_rank <= 3
+        && (top.document_has_docs_phrase_signal || top.document_has_strict_lexical)
+        && evidence.iter().take(2).any(|item| has_any_chunk_lexical(item))
+    {
+        return false;
+    }
+
     if analysis.flags.is_lookup_like
         && top.document_has_filename_signal
         && has_any_chunk_lexical(top)
@@ -2591,6 +2786,7 @@ fn has_any_chunk_lexical(item: &MergedEvidence) -> bool {
 
 fn has_strong_document_signal(item: &MergedEvidence) -> bool {
     item.document_has_exact_signal
+        || item.document_has_docs_phrase_signal
         || item.document_has_filename_signal
         || item.document_has_strict_lexical
         || item.document_reason == "scope"
@@ -2811,6 +3007,7 @@ fn build_merged_evidence_from_items(items: &[EvidenceItem]) -> Vec<MergedEvidenc
                 item.document_reason.as_str(),
                 "exact_path" | "exact_symbol"
             ),
+            document_has_docs_phrase_signal: item.document_reason == "docs_phrase",
             document_has_filename_signal: matches!(
                 item.document_reason.as_str(),
                 "filename" | "mixed"
@@ -2836,7 +3033,7 @@ fn prepare_query_for_retrieval(question: &str) -> QueryPreparation {
     let analysis = analyze_query(question);
     let mut metrics = RetrievalMetrics::default();
     metrics.query_analysis_ms = elapsed_ms_u64(query_analysis_started_at);
-    metrics.query_flags = query_flags_as_labels(&analysis.flags);
+    metrics.query_flags = query_flags_as_labels(&analysis);
     metrics
         .query_flags
         .push(format!("intent:{}", analysis.query_intent.as_str()));
@@ -3128,6 +3325,123 @@ fn is_lookup_like_query(query: &str) -> bool {
         return true;
     }
     query_token_count(trimmed) <= 3 && trimmed.chars().count() <= 48
+}
+
+fn classify_query_family(
+    query: &str,
+    raw_tokens: &[String],
+    document_terms: &[String],
+    filename_terms: &[String],
+    identifier_terms: &[String],
+    flags: &QueryFlags,
+) -> QueryFamily {
+    if looks_like_docs_api_lookup(query, raw_tokens) {
+        return QueryFamily::DocsApiLookup;
+    }
+
+    if looks_like_implementation_lookup(
+        query,
+        document_terms,
+        filename_terms,
+        identifier_terms,
+        flags,
+    ) {
+        return QueryFamily::ImplementationLookup;
+    }
+
+    QueryFamily::DocsExplanatory
+}
+
+fn looks_like_docs_api_lookup(query: &str, raw_tokens: &[String]) -> bool {
+    let lower = query.to_ascii_lowercase();
+    let has_http_path = has_http_method_and_path(raw_tokens);
+    let docs_api_markers = [
+        "return",
+        "returns",
+        "response",
+        "responses",
+        "metrics",
+        "api",
+        "返回",
+        "返回什么",
+        "返回哪些",
+        "指标",
+    ];
+    let implementation_markers = [
+        "which file",
+        "which entry",
+        "protocol",
+        "struct",
+        "enum",
+        "type",
+        "哪个文件",
+        "哪个入口",
+        "属于哪类查询",
+        "怎么处理",
+        "协议",
+        "结构体",
+        "枚举",
+        "类型",
+    ];
+
+    has_http_path
+        && docs_api_markers
+            .iter()
+            .any(|marker| lower.contains(marker) || query.contains(marker))
+        && !implementation_markers
+            .iter()
+            .any(|marker| lower.contains(marker) || query.contains(marker))
+}
+
+fn looks_like_implementation_lookup(
+    query: &str,
+    document_terms: &[String],
+    filename_terms: &[String],
+    identifier_terms: &[String],
+    flags: &QueryFlags,
+) -> bool {
+    let lower = query.to_ascii_lowercase();
+    let implementation_markers = [
+        "which file",
+        "which entry",
+        "implementation",
+        "field",
+        "fields",
+        "symbol",
+        "test",
+        "tests",
+        "query",
+        "哪个文件",
+        "哪个入口",
+        "属于哪类查询",
+        "怎么处理",
+        "实现",
+        "字段",
+        "符号",
+        "测试",
+        "入口",
+        "协议",
+    ];
+
+    implementation_markers
+        .iter()
+        .any(|marker| lower.contains(marker) || query.contains(marker))
+        || !identifier_terms.is_empty()
+        || (!filename_terms.is_empty()
+            && flags.has_path_like_token
+            && document_terms.len() <= 8)
+        || (flags.has_ascii_identifier && flags.is_lookup_like)
+}
+
+fn has_http_method_and_path(raw_tokens: &[String]) -> bool {
+    let has_method = raw_tokens.iter().any(|token| {
+        matches!(
+            token.to_ascii_lowercase().as_str(),
+            "get" | "post" | "put" | "patch" | "delete"
+        )
+    });
+    let has_path = raw_tokens.iter().any(|token| token.contains('/'));
+    has_method && has_path
 }
 
 fn query_token_count(query: &str) -> usize {
@@ -3840,9 +4154,10 @@ fn is_supported_text_file(path: &std::path::Path) -> bool {
 mod tests {
     use super::{
         AppState, AskStatus, EgressMode, EngineError, EnterpriseModelPolicy, MemoriEngine,
-        ModelProvider, QueryIntent, RuntimeModelConfig, WatchEvent, WatchEventKind, analyze_query,
-        is_implementation_lookup, merge_document_candidates, process_file_event,
-        should_refuse_for_insufficient_evidence, validate_runtime_model_settings,
+        ModelProvider, QueryFamily, QueryIntent, RuntimeModelConfig, WatchEvent, WatchEventKind,
+        analyze_query, document_signal_query, is_implementation_lookup,
+        merge_document_candidates, process_file_event, should_refuse_for_insufficient_evidence,
+        validate_runtime_model_settings,
     };
     use memori_parser::DocumentChunk;
     use memori_storage::RebuildState;
@@ -4226,6 +4541,35 @@ mod tests {
     }
 
     #[test]
+    fn classify_query_family_distinguishes_docs_api_and_implementation_queries() {
+        assert_eq!(
+            analyze_query("POST /api/auth/oidc/login return?").query_family,
+            QueryFamily::DocsApiLookup
+        );
+        assert_eq!(
+            analyze_query("GET /api/admin/metrics").query_family,
+            QueryFamily::DocsApiLookup
+        );
+        assert_eq!(
+            analyze_query("ask_vault_structured 是哪个入口？").query_family,
+            QueryFamily::ImplementationLookup
+        );
+        assert_eq!(
+            analyze_query("How do you start server mode?").query_family,
+            QueryFamily::DocsExplanatory
+        );
+    }
+
+    #[test]
+    fn document_signal_query_keeps_docs_terms_for_explanatory_queries() {
+        let analysis = analyze_query("What does the tutorial say if vault stats stay at 0?");
+        let query = document_signal_query(&analysis);
+        assert!(!query.trim().is_empty());
+        assert!(query.contains("tutorial"));
+        assert!(query.contains("stats"));
+    }
+
+    #[test]
     fn document_merge_prefers_filename_signal_when_scores_are_stronger() {
         let analysis = analyze_query("week8_report.md");
         let merged = merge_document_candidates(
@@ -4237,6 +4581,7 @@ mod tests {
                 matched_fields: vec!["file_name".to_string()],
                 score: 120,
             }],
+            Vec::new(),
             Vec::new(),
             vec![memori_storage::FtsDocumentMatch {
                 doc_id: 1,
@@ -4266,6 +4611,7 @@ mod tests {
                 score: 160,
             }],
             Vec::new(),
+            Vec::new(),
             vec![memori_storage::FtsDocumentMatch {
                 doc_id: 1,
                 file_path: "README.md".to_string(),
@@ -4282,8 +4628,37 @@ mod tests {
     }
 
     #[test]
+    fn document_merge_prefers_docs_phrase_for_docs_api_lookup() {
+        let analysis = analyze_query("POST /api/auth/oidc/login return?");
+        let merged = merge_document_candidates(
+            &analysis,
+            Vec::new(),
+            vec![memori_storage::DocumentSignalMatch {
+                file_path: "docs/enterprise.md".to_string(),
+                relative_path: "docs/enterprise.md".to_string(),
+                file_name: "enterprise.md".to_string(),
+                matched_fields: vec!["docs_phrase".to_string()],
+                score: 180,
+            }],
+            Vec::new(),
+            vec![memori_storage::FtsDocumentMatch {
+                doc_id: 1,
+                file_path: "memori-server/src/main.rs".to_string(),
+                relative_path: "memori-server/src/main.rs".to_string(),
+                file_name: "main.rs".to_string(),
+                score: 5.0,
+                heading_catalog_text: String::new(),
+                document_search_text: "POST /api/auth/oidc/login".to_string(),
+            }],
+        );
+
+        assert_eq!(merged[0].relative_path, "docs/enterprise.md");
+        assert_eq!(merged[0].document_reason, "docs_phrase");
+    }
+
+    #[test]
     fn implementation_lookup_query_classification_is_enabled_for_code_symbols() {
-        assert!(is_implementation_lookup(&analyze_query("POST /api/ask")));
+        assert!(is_implementation_lookup(&analyze_query("POST /api/ask 现在返回什么协议？")));
         assert!(is_implementation_lookup(&analyze_query(
             "ask_vault_structured"
         )));
@@ -4291,6 +4666,9 @@ mod tests {
             "query_analysis_ms"
         )));
         assert!(is_implementation_lookup(&analyze_query("week8_report.md")));
+        assert!(!is_implementation_lookup(&analyze_query(
+            "POST /api/auth/oidc/login return?"
+        )));
         assert!(!is_implementation_lookup(&analyze_query(
             "settings Advanced tab"
         )));
@@ -4313,6 +4691,7 @@ mod tests {
                 document_rank: 1,
                 document_raw_score: Some(1.0),
                 document_has_exact_signal: false,
+                document_has_docs_phrase_signal: false,
                 document_has_filename_signal: true,
                 document_has_strict_lexical: false,
                 lexical_strict_rank: Some(1),
@@ -4335,6 +4714,7 @@ mod tests {
                 document_rank: 1,
                 document_raw_score: Some(1.0),
                 document_has_exact_signal: false,
+                document_has_docs_phrase_signal: false,
                 document_has_filename_signal: true,
                 document_has_strict_lexical: false,
                 lexical_strict_rank: Some(2),
@@ -4367,6 +4747,7 @@ mod tests {
             document_rank: 1,
             document_raw_score: Some(0.2),
             document_has_exact_signal: false,
+            document_has_docs_phrase_signal: false,
             document_has_filename_signal: false,
             document_has_strict_lexical: false,
             lexical_strict_rank: None,
@@ -4398,6 +4779,7 @@ mod tests {
             document_rank: 1,
             document_raw_score: Some(0.1),
             document_has_exact_signal: false,
+            document_has_docs_phrase_signal: false,
             document_has_filename_signal: false,
             document_has_strict_lexical: false,
             lexical_strict_rank: None,

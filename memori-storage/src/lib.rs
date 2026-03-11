@@ -96,6 +96,7 @@ pub struct FileIndexState {
 pub struct CatalogEntry {
     pub file_path: String,
     pub relative_path: String,
+    pub parent_dir: String,
     pub file_name: String,
     pub file_ext: String,
     pub file_size: i64,
@@ -483,6 +484,11 @@ impl SqliteStore {
     ) -> Result<CatalogEntry, StorageError> {
         let file_path_text = normalize_storage_file_path_text(file_path);
         let relative_path = build_relative_path(file_path, watch_root);
+        let parent_dir = Path::new(&relative_path)
+            .parent()
+            .and_then(|path| path.to_str())
+            .unwrap_or_default()
+            .replace('\\', "/");
         let file_name = file_path
             .file_name()
             .and_then(|name| name.to_str())
@@ -498,11 +504,12 @@ impl SqliteStore {
         conn_guard
             .execute(
                 "INSERT INTO file_catalog(
-                    file_path, relative_path, file_name, file_ext, file_size, mtime_secs, discovered_at, removed_at
+                    file_path, relative_path, parent_dir, file_name, file_ext, file_size, mtime_secs, discovered_at, removed_at
                  )
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL)
                  ON CONFLICT(file_path) DO UPDATE SET
                     relative_path = excluded.relative_path,
+                    parent_dir = excluded.parent_dir,
                     file_name = excluded.file_name,
                     file_ext = excluded.file_ext,
                     file_size = excluded.file_size,
@@ -512,6 +519,7 @@ impl SqliteStore {
                 params![
                     file_path_text,
                     relative_path,
+                    parent_dir,
                     file_name,
                     file_ext,
                     file_size,
@@ -524,6 +532,7 @@ impl SqliteStore {
         Ok(CatalogEntry {
             file_path: file_path_text,
             relative_path,
+            parent_dir,
             file_name,
             file_ext,
             file_size,
@@ -541,7 +550,7 @@ impl SqliteStore {
         let conn_guard = self.lock_conn()?;
         conn_guard
             .query_row(
-                "SELECT file_path, relative_path, file_name, file_ext, file_size, mtime_secs, discovered_at, removed_at
+                "SELECT file_path, relative_path, parent_dir, file_name, file_ext, file_size, mtime_secs, discovered_at, removed_at
                  FROM file_catalog
                  WHERE file_path = ?1",
                 params![file_path_text],
@@ -549,12 +558,13 @@ impl SqliteStore {
                     Ok(CatalogEntry {
                         file_path: row.get(0)?,
                         relative_path: row.get(1)?,
-                        file_name: row.get(2)?,
-                        file_ext: row.get(3)?,
-                        file_size: row.get(4)?,
-                        mtime_secs: row.get(5)?,
-                        discovered_at: row.get(6)?,
-                        removed_at: row.get(7)?,
+                        parent_dir: row.get(2)?,
+                        file_name: row.get(3)?,
+                        file_ext: row.get(4)?,
+                        file_size: row.get(5)?,
+                        mtime_secs: row.get(6)?,
+                        discovered_at: row.get(7)?,
+                        removed_at: row.get(8)?,
                     })
                 },
             )
@@ -972,6 +982,85 @@ impl SqliteStore {
 
             let Some((score, matched_fields)) = score_document_signal_match(
                 &signal_terms,
+                &file_name,
+                &relative_path,
+                &heading_catalog_text,
+                &document_search_text,
+            ) else {
+                continue;
+            };
+
+            matches.push(DocumentSignalMatch {
+                file_path,
+                relative_path,
+                file_name,
+                matched_fields,
+                score,
+            });
+        }
+
+        matches.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then_with(|| a.file_name.len().cmp(&b.file_name.len()))
+                .then_with(|| a.relative_path.cmp(&b.relative_path))
+        });
+        matches.truncate(top_k);
+        Ok(matches)
+    }
+
+    pub async fn search_documents_phrase_signal(
+        &self,
+        query: &str,
+        top_k: usize,
+        scope_paths: &[PathBuf],
+    ) -> Result<Vec<DocumentSignalMatch>, StorageError> {
+        if top_k == 0 {
+            return Ok(Vec::new());
+        }
+
+        let phrase_terms = extract_phrase_signal_terms(query);
+        if phrase_terms.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let scope_matchers = build_scope_matchers(scope_paths);
+        let conn_guard = self.lock_conn()?;
+        let mut stmt = conn_guard
+            .prepare(
+                "SELECT d.file_path,
+                        d.relative_path,
+                        d.file_name,
+                        d.heading_catalog_text,
+                        d.document_search_text
+                 FROM documents d
+                 INNER JOIN file_catalog fc ON fc.file_path = d.file_path
+                 WHERE fc.removed_at IS NULL",
+            )
+            .map_err(map_sqlite_error)?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(map_sqlite_error)?;
+
+        let mut matches = Vec::new();
+        for row in rows {
+            let (file_path, relative_path, file_name, heading_catalog_text, document_search_text) =
+                row.map_err(map_sqlite_error)?;
+            if !matches_scopes(Path::new(&file_path), &scope_matchers) {
+                continue;
+            }
+
+            let Some((score, matched_fields)) = score_document_phrase_signal_match(
+                &phrase_terms,
                 &file_name,
                 &relative_path,
                 &heading_catalog_text,
@@ -2687,6 +2776,43 @@ fn extract_signal_terms(query: &str) -> Vec<String> {
     terms
 }
 
+fn extract_phrase_signal_terms(query: &str) -> Vec<String> {
+    let filtered_tokens = extract_query_tokens(query)
+        .into_iter()
+        .map(|token| normalize_ascii_term(&token))
+        .filter(|token| is_viable_search_term(token) && !is_english_stopword(token))
+        .collect::<Vec<_>>();
+
+    let mut phrases = Vec::new();
+    let mut seen = HashSet::new();
+    let max_window = filtered_tokens.len().min(4);
+
+    if filtered_tokens.len() == 1 {
+        let token = filtered_tokens[0].clone();
+        if is_viable_phrase_signal_term(&token) && seen.insert(token.clone()) {
+            phrases.push(token);
+        }
+    }
+
+    for window in (2..=max_window).rev() {
+        for slice in filtered_tokens.windows(window) {
+            let phrase = slice.join(" ");
+            if is_viable_phrase_signal_term(&phrase) && seen.insert(phrase.clone()) {
+                phrases.push(phrase);
+            }
+        }
+    }
+
+    if filtered_tokens.len() <= 6 {
+        let full_phrase = filtered_tokens.join(" ");
+        if is_viable_phrase_signal_term(&full_phrase) && seen.insert(full_phrase.clone()) {
+            phrases.push(full_phrase);
+        }
+    }
+
+    phrases
+}
+
 fn extract_query_tokens(query: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -2878,6 +3004,16 @@ fn is_viable_signal_term(term: &str) -> bool {
     trimmed.chars().count() >= 2 || trimmed.chars().all(|ch| ch.is_ascii_digit())
 }
 
+fn is_viable_phrase_signal_term(term: &str) -> bool {
+    let trimmed = term.trim();
+    !trimmed.is_empty()
+        && (trimmed.chars().count() >= 6
+            || trimmed.chars().any(is_cjk_char)
+            || trimmed
+                .chars()
+                .any(|ch| matches!(ch, '_' | '-' | '.' | '/' | '\\')))
+}
+
 fn is_query_term_char(ch: char) -> bool {
     is_cjk_char(ch) || ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '\\')
 }
@@ -2990,6 +3126,53 @@ fn score_document_signal_match(
                 };
                 push_unique_field(&mut matched_fields, "document_search_text");
             }
+        }
+    }
+
+    if score == 0 {
+        None
+    } else {
+        Some((score, matched_fields))
+    }
+}
+
+fn score_document_phrase_signal_match(
+    phrase_terms: &[String],
+    file_name: &str,
+    relative_path: &str,
+    heading_catalog_text: &str,
+    document_search_text: &str,
+) -> Option<(i64, Vec<String>)> {
+    let file_name_lower = file_name.to_ascii_lowercase();
+    let relative_path_lower = relative_path.to_ascii_lowercase();
+    let heading_lower = heading_catalog_text.to_ascii_lowercase();
+    let document_search_lower = document_search_text.to_ascii_lowercase();
+
+    let mut score = 0_i64;
+    let mut matched_fields = Vec::new();
+
+    for phrase in phrase_terms {
+        let needle = phrase.trim().to_ascii_lowercase();
+        if needle.is_empty() {
+            continue;
+        }
+
+        if file_name_lower.contains(&needle) || relative_path_lower.contains(&needle) {
+            score += 90;
+            push_unique_field(&mut matched_fields, "docs_phrase");
+        }
+        if heading_lower.contains(&needle) {
+            score += 120;
+            push_unique_field(&mut matched_fields, "docs_phrase");
+        }
+        if document_search_lower.contains(&needle) {
+            score += if needle.contains('/') || needle.contains('-') || needle.chars().any(is_cjk_char)
+            {
+                120
+            } else {
+                100
+            };
+            push_unique_field(&mut matched_fields, "docs_phrase");
         }
     }
 
@@ -3122,6 +3305,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
          CREATE TABLE IF NOT EXISTS file_catalog (
              file_path TEXT PRIMARY KEY,
              relative_path TEXT NOT NULL,
+             parent_dir TEXT NOT NULL DEFAULT '',
              file_name TEXT NOT NULL,
              file_ext TEXT NOT NULL,
              file_size INTEGER NOT NULL,
@@ -3169,18 +3353,31 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
          CREATE INDEX IF NOT EXISTS idx_chunk_nodes_chunk_id ON chunk_nodes(chunk_id);
          CREATE INDEX IF NOT EXISTS idx_chunk_nodes_node_id ON chunk_nodes(node_id);
          CREATE INDEX IF NOT EXISTS idx_graph_task_queue_status ON graph_task_queue(status, updated_at);
-         CREATE INDEX IF NOT EXISTS idx_file_index_state_indexed_at ON file_index_state(indexed_at);
-         CREATE INDEX IF NOT EXISTS idx_file_catalog_removed_at ON file_catalog(removed_at);
-         CREATE INDEX IF NOT EXISTS idx_file_catalog_relative_path ON file_catalog(relative_path);
-         CREATE INDEX IF NOT EXISTS idx_file_catalog_file_name ON file_catalog(file_name);",
+         CREATE INDEX IF NOT EXISTS idx_file_index_state_indexed_at ON file_index_state(indexed_at);",
     )
     .map_err(map_sqlite_error)?;
     ensure_graph_task_queue_schema(conn)?;
     ensure_documents_schema(conn)?;
     ensure_chunks_schema(conn)?;
     ensure_file_index_state_schema(conn)?;
+    ensure_file_catalog_schema(conn)?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_documents_relative_path ON documents(relative_path)",
+        [],
+    )
+    .map_err(map_sqlite_error)?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_file_catalog_removed_at ON file_catalog(removed_at)",
+        [],
+    )
+    .map_err(map_sqlite_error)?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_file_catalog_relative_path ON file_catalog(relative_path)",
+        [],
+    )
+    .map_err(map_sqlite_error)?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_file_catalog_file_name ON file_catalog(file_name)",
         [],
     )
     .map_err(map_sqlite_error)?;
@@ -3303,6 +3500,23 @@ fn ensure_file_index_state_schema(conn: &Connection) -> Result<(), StorageError>
         "index_format_version",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    Ok(())
+}
+
+fn ensure_file_catalog_schema(conn: &Connection) -> Result<(), StorageError> {
+    ensure_table_column(conn, "file_catalog", "relative_path", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_table_column(conn, "file_catalog", "parent_dir", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_table_column(conn, "file_catalog", "file_name", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_table_column(conn, "file_catalog", "file_ext", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_table_column(conn, "file_catalog", "file_size", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_table_column(conn, "file_catalog", "mtime_secs", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_table_column(
+        conn,
+        "file_catalog",
+        "discovered_at",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_table_column(conn, "file_catalog", "removed_at", "INTEGER")?;
     Ok(())
 }
 
@@ -3574,7 +3788,7 @@ fn escape_like_pattern(text: &str) -> String {
 mod tests {
     use super::{
         CatalogEntry, INDEX_FORMAT_VERSION, RebuildState, SqliteStore, build_document_search_text,
-        extract_fts_terms, extract_signal_terms,
+        extract_fts_terms, extract_phrase_signal_terms, extract_signal_terms,
     };
     use crate::VectorStore;
     use memori_parser::DocumentChunk;
@@ -3732,6 +3946,7 @@ mod tests {
         let catalog_entry = CatalogEntry {
             file_path: "notes/project/weekly.md".to_string(),
             relative_path: "project/weekly.md".to_string(),
+            parent_dir: "project".to_string(),
             file_name: "weekly.md".to_string(),
             file_ext: ".md".to_string(),
             file_size: 0,
@@ -3768,6 +3983,7 @@ mod tests {
         let catalog_entry = CatalogEntry {
             file_path: "memori-core/src/lib.rs".to_string(),
             relative_path: "memori-core/src/lib.rs".to_string(),
+            parent_dir: "memori-core/src".to_string(),
             file_name: "lib.rs".to_string(),
             file_ext: ".rs".to_string(),
             file_size: 0,
@@ -3876,6 +4092,78 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
+    #[tokio::test]
+    async fn search_documents_phrase_signal_prefers_docs_phrase_matches() {
+        let db_path = unique_db_path("memori_vault_storage_phrase_signal");
+        if db_path.exists() {
+            let _ = std::fs::remove_file(&db_path);
+        }
+
+        let store = SqliteStore::new(&db_path).expect("create sqlite store");
+        let watch_root = std::path::PathBuf::from(".");
+        let tutorial_file = std::path::PathBuf::from("docs/TUTORIAL.md");
+        let readme_file = std::path::PathBuf::from("README.md");
+
+        store
+            .replace_document_index(
+                &tutorial_file,
+                Some(&watch_root),
+                123,
+                "tutorial_hash",
+                vec![DocumentChunk {
+                    file_path: tutorial_file.clone(),
+                    content: "How to start server mode:\n\ncargo run -p memori-server"
+                        .to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["Server".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                }],
+                vec![vec![1.0_f32, 0.0_f32]],
+            )
+            .await
+            .expect("index tutorial file");
+
+        store
+            .replace_document_index(
+                &readme_file,
+                Some(&watch_root),
+                123,
+                "readme_hash",
+                vec![DocumentChunk {
+                    file_path: readme_file.clone(),
+                    content: "Server runtime overview and product summary.".to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["Overview".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                }],
+                vec![vec![0.0_f32, 1.0_f32]],
+            )
+            .await
+            .expect("index readme file");
+
+        let phrase_hits = store
+            .search_documents_phrase_signal("How do you start server mode?", 5, &[])
+            .await
+            .expect("search docs phrase signal");
+
+        assert!(
+            phrase_hits.iter().any(|item| {
+                item.file_path
+                    .replace('\\', "/")
+                    .to_ascii_lowercase()
+                    .ends_with("docs/tutorial.md")
+                    && item
+                        .matched_fields
+                        .iter()
+                        .any(|field| field == "docs_phrase")
+            }),
+            "phrase_hits={phrase_hits:?}"
+        );
+
+        drop(store);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
     #[test]
     fn fts_terms_keep_cjk_meaningful_phrase_and_identifiers() {
         let terms = extract_fts_terms("长跳转公式是什么 POST /api/ask week8_report.md");
@@ -3895,6 +4183,15 @@ mod tests {
         assert!(terms.iter().any(|term| term == "周报"));
         assert!(terms.iter().any(|term| term == "week8_report.md"));
         assert!(terms.iter().any(|term| term == "week8_report"));
+    }
+
+    #[test]
+    fn phrase_signal_terms_keep_docs_and_api_phrases() {
+        let terms = extract_phrase_signal_terms("What does POST /api/auth/oidc/login return?");
+        assert!(terms.iter().any(|term| term == "post /api/auth/oidc/login"));
+
+        let docs_terms = extract_phrase_signal_terms("How do you start server mode?");
+        assert!(docs_terms.iter().any(|term| term == "start server mode"));
     }
 
     #[tokio::test]
@@ -4142,6 +4439,48 @@ mod tests {
         assert_eq!(metadata.index_format_version, 0);
         assert_eq!(metadata.parser_format_version, 0);
 
+        drop(store);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn existing_legacy_file_catalog_is_upgraded_with_parent_dir_and_removed_at() {
+        let db_path = unique_db_path("memori_vault_legacy_file_catalog_columns");
+        if db_path.exists() {
+            let _ = std::fs::remove_file(&db_path);
+        }
+
+        let conn = Connection::open(&db_path).expect("open raw sqlite db");
+        conn.execute_batch(
+            "CREATE TABLE file_catalog (
+                 file_path TEXT PRIMARY KEY,
+                 relative_path TEXT NOT NULL,
+                 file_name TEXT NOT NULL,
+                 file_ext TEXT NOT NULL,
+                 file_size INTEGER NOT NULL,
+                 mtime_secs INTEGER NOT NULL,
+                 discovered_at INTEGER NOT NULL
+             );",
+        )
+        .expect("seed legacy file_catalog schema");
+        drop(conn);
+
+        let store = SqliteStore::new(&db_path).expect("create sqlite store");
+        let conn = store.lock_conn().expect("lock sqlite conn");
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(file_catalog)")
+            .expect("prepare pragma");
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query pragma")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect columns");
+
+        assert!(columns.iter().any(|column| column == "parent_dir"));
+        assert!(columns.iter().any(|column| column == "removed_at"));
+
+        drop(stmt);
+        drop(conn);
         drop(store);
         let _ = std::fs::remove_file(&db_path);
     }

@@ -26,8 +26,7 @@
       "mode": "answer",
       "scope_paths": [],
       "target_documents": [
-        "README.md",
-        "docs/PHASE2_STORAGE_DECISION.md"
+        "README.md"
       ],
       "target_clues": [
         "desktop-first"

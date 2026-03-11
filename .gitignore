@@ -29,8 +29,8 @@ docs/RELEASE_PREP_NOTES.md
 docs/NEXT_2_WEEKS.zh-CN.md
 docs/CODEX_HANDOFF_2026-03-10.md
 
-# Local scripts only
-scripts/
+# Local script runtime artifacts
+scripts/.last-smoke-session.json
 
 # Local AI assistant settings
 .claude/

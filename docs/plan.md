@@ -49,8 +49,8 @@ Overall Progress: 84%
   - `core_docs`：`6` 份文档，`267` 个 chunk
   - `repo_mixed`：`11` 份文档，`759` 个 chunk
 - 当前最新离线指标：
-  - `core_docs`：`Top-1=0.6970`、`Top-3=0.6970`、`Top-5=0.7576`、`citation validity=1.0`、`reject correctness=1.0`
-  - `repo_mixed`：`Top-1=0.4773`、`Top-3=0.4773`、`Top-5=0.5455`、`citation validity=1.0`、`reject correctness=0.94`
+  - `core_docs`：`Top-1=0.6667`、`Top-3=0.6667`、`Top-5=0.6970`、`citation validity=1.0`、`reject correctness=1.0`
+  - `repo_mixed`：`Top-1=0.5000`、`Top-3=0.5227`、`Top-5=0.5682`、`citation validity=1.0`、`reject correctness=0.96`
 - 这不是 50,000 文档规模的精度验证结果，只是当前 checked-in 小样本回归基线。
 - 当前可以确认的是“引用可信度强于文档排序质量”：
   - 有答案时，citation 仍然可信
@@ -204,10 +204,14 @@ Overall Progress: 84%
 - 已完成 suite drift reconciliation：当前 JSON suite 的 `answer` case 已通过“target document exists + target clue exists”机械核验
 - 当前 Phase 6 的核心阻塞已经从“样本漂移”转成“真实精度不足”：
   - `core_docs` 虽然可作为 docs-only 基线，但 `Top-1/Top-3` 仍未达到目标
-  - `repo_mixed` 当前最新结果只有 `Top-1=0.4773`，低于此前 `0.5682` 快照，也明显低于交付线
+  - `repo_mixed` 当前最新结果恢复到 `Top-1=0.5000`，但仍低于此前 `0.5682` 快照，也明显低于交付线
 - 当前真实 gap 主要集中在两类：
   - 描述型文档查询的 document routing 仍然不稳，例如 `R02`, `R05`, `R13`, `R21`, `R28`, `R35`, `R36`
   - mixed-token / implementation lookup 仍然大量排不到正确代码文件，例如 `R40`, `R42`, `R43`, `R44`, `R45`, `R46`, `R50`, `R51`
+- 2026-03-11 对 release-note 末尾的外部评审意见完成一次辩证收口：
+  - 已接受并落地：`document_signal_query(...)` 不应让 docs query 退成空输入；测试脚本需要升级为当前 runner / smoke 入口
+  - 暂不直接照搬：立刻引入 document-level dense；当前 recovery pass 仍先优先收词法/规则侧回退
+  - 继续观察后再决定：FTS5 tokenizer 重配；问题存在，但要和现有 CJK query expansion、索引重建成本一起评估
 - 当前计划文档里的 `50,000` 规模目标仍然是目标态，不应被解读为已经验证完成
 
 ## Change Log
@@ -233,3 +237,6 @@ Overall Progress: 84%
 - 2026-03-11: 完成 document routing 第二轮第一步提准：`document_search_text` 改为跨文档抽样 snippet，提升高辨识度 document signal 权重；离线回归提升到 `core_docs: Top-1=0.7273 / Top-3=0.7576 / Top-5=0.8485 / Reject=1.0000`，`repo_mixed: Top-1=0.5682 / Top-3=0.5909 / Top-5=0.6364 / Reject=0.9800`
 - 2026-03-11: 补入当前真实基线口径：最新离线回归更新为 `core_docs: Top-1=0.6970 / Top-3=0.6970 / Top-5=0.7576 / Reject=1.0000`，`repo_mixed: Top-1=0.4773 / Top-3=0.4773 / Top-5=0.5455 / Reject=0.9400`；明确这些结果仅来自 6/11 文档的小样本语料，不能表述成 50,000 文档规模精度结论
 - 2026-03-11: 更新文档口径为“企业本地优先运行时已收口，但 mixed corpus 检索质量仍未达交付线”，避免把本地优先策略成熟度误写成整体检索质量成熟度
+- 2026-03-11: 收口本地测试入口：取消 `scripts/` 整目录忽略，新增 `scripts/test-retrieval.ps1` 作为回归 runner 包装脚本，并把 `smoke-start.ps1` / `smoke-stop.ps1` 升级为支持 `desktop/server/both` 与 `-SkipModelCheck` 的当前 smoke 入口
+- 2026-03-11: 吸收 release-note 末尾评审中的有效部分：恢复 docs query 的 deterministic document signal 输入，避免 `document_signal_query(...)` 在描述型问题上退成空字符串；document-dense 与 FTS tokenizer 重配保留为后续精度议题，不在本轮 recovery pass 直接硬上
+- 2026-03-11: 使用新脚本重跑离线基线后，当前最新快照更新为 `core_docs: Top-1=0.6667 / Top-3=0.6667 / Top-5=0.6970 / Reject=1.0000`，`repo_mixed: Top-1=0.5000 / Top-3=0.5227 / Top-5=0.5682 / Reject=0.9600`；说明这轮修正有效但仍未恢复到 `repo_mixed Top-1=0.5682` 旧高点
