@@ -42,6 +42,12 @@ export type ModelSettingsDto = {
   remote_profile: RemoteModelProfileDto;
 };
 
+export type EnterprisePolicyDto = {
+  egress_mode: "local_only" | "allowlist";
+  allowed_model_endpoints: string[];
+  allowed_models: string[];
+};
+
 export type ProviderModelsDto = {
   from_folder: string[];
   from_service: string[];
@@ -67,6 +73,10 @@ export type IndexingStatusDto = {
   paused: boolean;
   mode: string;
   resource_budget: string;
+  rebuild_state: string;
+  rebuild_reason?: string | null;
+  index_format_version: number;
+  parser_format_version: number;
 };
 
 type SettingsModalProps = {
@@ -88,11 +98,15 @@ type SettingsModalProps = {
   themeMode: ThemeMode;
   onThemeModeChange: (mode: ThemeMode) => void;
   modelSettings: ModelSettingsDto;
+  enterprisePolicy: EnterprisePolicyDto;
   modelAvailability: ModelAvailabilityDto | null;
   providerModels: ProviderModelsDto;
   modelBusy: boolean;
+  enterpriseBusy: boolean;
   onModelSettingsChange: (next: ModelSettingsDto) => void;
+  onEnterprisePolicyChange: (next: EnterprisePolicyDto) => void;
   onSaveModelSettings: () => Promise<void>;
+  onSaveEnterprisePolicy: () => Promise<void>;
   onProbeModelProvider: () => Promise<void>;
   onRefreshProviderModels: () => Promise<void>;
   onPullModel: (model: string) => Promise<void>;
@@ -281,11 +295,15 @@ export function SettingsModal({
   themeMode,
   onThemeModeChange,
   modelSettings,
+  enterprisePolicy,
   modelAvailability,
   providerModels,
   modelBusy,
+  enterpriseBusy,
   onModelSettingsChange,
+  onEnterprisePolicyChange,
   onSaveModelSettings,
+  onSaveEnterprisePolicy,
   onProbeModelProvider,
   onRefreshProviderModels,
   onPullModel,
@@ -345,6 +363,48 @@ export function SettingsModal({
   const activeProvider = modelSettings.active_provider;
   const activeProfile =
     activeProvider === "ollama_local" ? modelSettings.local_profile : modelSettings.remote_profile;
+  const normalizePolicyEndpoint = (value: string) =>
+    value.trim().replace(/\/+$/, "").toLowerCase();
+  const normalizedRemoteEndpoint = normalizePolicyEndpoint(modelSettings.remote_profile.endpoint);
+  const normalizedAllowedEndpoints = enterprisePolicy.allowed_model_endpoints
+    .map(normalizePolicyEndpoint)
+    .filter(Boolean);
+  const normalizedAllowedModels = enterprisePolicy.allowed_models
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const activeProviderPolicyBlock = useMemo(() => {
+    if (modelSettings.active_provider === "ollama_local") {
+      return null;
+    }
+    if (enterprisePolicy.egress_mode === "local_only") {
+      return t("policyStatusLocalOnly");
+    }
+    if (
+      normalizedAllowedEndpoints.length > 0 &&
+      !normalizedAllowedEndpoints.includes(normalizedRemoteEndpoint)
+    ) {
+      return t("policyStatusEndpointBlocked");
+    }
+    if (
+      normalizedAllowedModels.length > 0 &&
+      [modelSettings.remote_profile.chat_model, modelSettings.remote_profile.graph_model, modelSettings.remote_profile.embed_model]
+        .map((item) => item.trim())
+        .some((item) => item && !normalizedAllowedModels.includes(item))
+    ) {
+      return t("policyStatusModelBlocked");
+    }
+    return null;
+  }, [
+    enterprisePolicy.egress_mode,
+    modelSettings.active_provider,
+    modelSettings.remote_profile.chat_model,
+    modelSettings.remote_profile.embed_model,
+    modelSettings.remote_profile.graph_model,
+    normalizedAllowedEndpoints,
+    normalizedAllowedModels,
+    normalizedRemoteEndpoint,
+    t
+  ]);
 
   const tabMeta = useMemo(
     () => [
@@ -600,6 +660,13 @@ export function SettingsModal({
     return t("indexingPhaseIdle");
   }, [indexingStatus?.phase, t]);
 
+  const indexingRebuildLabel = useMemo(() => {
+    const normalized = indexingStatus?.rebuild_state?.toLowerCase() ?? "ready";
+    if (normalized === "required") return t("indexingRebuildRequired");
+    if (normalized === "rebuilding") return t("indexingRebuildInProgress");
+    return t("indexingRebuildReady");
+  }, [indexingStatus?.rebuild_state, t]);
+
   const lastScanLabel = useMemo(() => {
     const ts = indexingStatus?.last_scan_at;
     if (!ts) {
@@ -821,6 +888,93 @@ export function SettingsModal({
                     ]}
                   />
                 </SettingCard>
+
+                <AnimatedPanel className="glass-panel-infer space-y-3 rounded-lg px-3 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm text-[var(--text-primary)]">{t("policyTitle")}</div>
+                      <div className="mt-1 text-xs text-[var(--text-secondary)]">
+                        {t("policyDesc")}
+                      </div>
+                    </div>
+                    <AnimatedPressButton
+                      type="button"
+                      onClick={() => void onSaveEnterprisePolicy()}
+                      disabled={enterpriseBusy}
+                      className="rounded-md border border-transparent bg-transparent px-3 py-1.5 text-sm text-[var(--text-secondary)] transition hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] disabled:opacity-60"
+                    >
+                      {t("policySave")}
+                    </AnimatedPressButton>
+                  </div>
+                  <SelectionChips
+                    value={enterprisePolicy.egress_mode}
+                    onChange={(value) =>
+                      onEnterprisePolicyChange({
+                        ...enterprisePolicy,
+                        egress_mode: value
+                      })
+                    }
+                    options={[
+                      { value: "local_only", label: t("policyModeLocalOnly") },
+                      { value: "allowlist", label: t("policyModeAllowlist") }
+                    ]}
+                  />
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <div className="mb-1 text-xs text-[var(--text-secondary)]">
+                        {t("policyAllowedEndpoints")}
+                      </div>
+                      <textarea
+                        value={enterprisePolicy.allowed_model_endpoints.join("\n")}
+                        onChange={(event) =>
+                          onEnterprisePolicyChange({
+                            ...enterprisePolicy,
+                            allowed_model_endpoints: event.target.value
+                              .split(/\r?\n/)
+                              .map((item) => item.trim())
+                              .filter(Boolean)
+                          })
+                        }
+                        className="min-h-[96px] w-full rounded-lg border border-transparent bg-transparent px-3 py-2 text-xs text-[var(--text-primary)] outline-none transition hover:bg-[var(--accent-soft)] focus:bg-[var(--accent-soft)] focus:ring-1 focus:ring-[var(--line-soft-focus)]"
+                        placeholder="https://models.company.local/v1"
+                      />
+                    </div>
+                    <div>
+                      <div className="mb-1 text-xs text-[var(--text-secondary)]">
+                        {t("policyAllowedModels")}
+                      </div>
+                      <textarea
+                        value={enterprisePolicy.allowed_models.join("\n")}
+                        onChange={(event) =>
+                          onEnterprisePolicyChange({
+                            ...enterprisePolicy,
+                            allowed_models: event.target.value
+                              .split(/\r?\n/)
+                              .map((item) => item.trim())
+                              .filter(Boolean)
+                          })
+                        }
+                        className="min-h-[96px] w-full rounded-lg border border-transparent bg-transparent px-3 py-2 text-xs text-[var(--text-primary)] outline-none transition hover:bg-[var(--accent-soft)] focus:bg-[var(--accent-soft)] focus:ring-1 focus:ring-[var(--line-soft-focus)]"
+                        placeholder="nomic-embed-text:latest"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-2 text-xs text-[var(--text-secondary)] md:grid-cols-2">
+                    <div>
+                      {t("policyCurrentMode", {
+                        mode:
+                          enterprisePolicy.egress_mode === "local_only"
+                            ? t("policyModeLocalOnly")
+                            : t("policyModeAllowlist")
+                      })}
+                    </div>
+                    <div>{t("policyEndpointCount", { count: enterprisePolicy.allowed_model_endpoints.length })}</div>
+                    <div>{t("policyModelCount", { count: enterprisePolicy.allowed_models.length })}</div>
+                    <div className={activeProviderPolicyBlock ? "text-amber-300" : "text-[var(--text-secondary)]"}>
+                      {activeProviderPolicyBlock ?? t("policyStatusAllowed")}
+                    </div>
+                  </div>
+                </AnimatedPanel>
 
                 <SettingCard title={t("modelEndpoint")}>
                   <div className="w-[320px]">
@@ -1141,6 +1295,20 @@ export function SettingsModal({
                       <div>{t("indexingLastError")}</div>
                       <div className="text-[var(--text-primary)]">
                         {indexingStatus?.last_error?.trim() || t("indexingNoError")}
+                      </div>
+                      <div>{t("indexingRebuildState")}</div>
+                      <div className="text-[var(--text-primary)]">{indexingRebuildLabel}</div>
+                      <div>{t("indexingRebuildReason")}</div>
+                      <div className="text-[var(--text-primary)]">
+                        {indexingStatus?.rebuild_reason?.trim() || t("indexingNoError")}
+                      </div>
+                      <div>{t("indexingIndexVersion")}</div>
+                      <div className="text-[var(--text-primary)]">
+                        {indexingStatus?.index_format_version ?? 0}
+                      </div>
+                      <div>{t("indexingParserVersion")}</div>
+                      <div className="text-[var(--text-primary)]">
+                        {indexingStatus?.parser_format_version ?? 0}
                       </div>
                     </div>
                   </AnimatedPanel>

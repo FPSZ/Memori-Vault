@@ -6,11 +6,13 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use memori_core::{
-    DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL, DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER,
-    DEFAULT_OLLAMA_EMBED_MODEL, DocumentChunk, IndexingConfig, IndexingMode, IndexingStatus,
+    AskResponseStructured, AskStatus, DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL,
+    DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER, DEFAULT_OLLAMA_EMBED_MODEL, EgressMode,
+    EngineError, EnterpriseModelPolicy, IndexingConfig, IndexingMode, IndexingStatus,
     MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_MODEL_ENV,
     MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,
-    ModelProvider, ResourceBudget, ScheduleWindow, VaultStats,
+    ModelProvider, ResourceBudget, RuntimeModelConfig, ScheduleWindow, VaultStats,
+    normalize_policy_endpoint, validate_provider_request, validate_runtime_model_settings,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, PhysicalPosition, PhysicalSize, Position, Size, State, WindowEvent};
@@ -18,7 +20,6 @@ use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 use tracing::{error, info, warn};
 
-const DEFAULT_RETRIEVE_TOP_K: usize = 20;
 const ENGINE_SHUTDOWN_TIMEOUT_SECS: u64 = 8;
 const PROVIDER_HTTP_TIMEOUT_SECS: u64 = 15;
 const SETTINGS_APP_DIR_NAME: &str = "Memori-Vault";
@@ -52,6 +53,9 @@ struct AppSettings {
     remote_chat_model: Option<String>,
     remote_graph_model: Option<String>,
     remote_embed_model: Option<String>,
+    enterprise_egress_mode: Option<String>,
+    enterprise_allowed_model_endpoints: Option<Vec<String>>,
+    enterprise_allowed_models: Option<Vec<String>>,
     window_x: Option<i32>,
     window_y: Option<i32>,
     window_width: Option<u32>,
@@ -109,6 +113,13 @@ struct ModelSettingsDto {
     remote_profile: RemoteModelProfileDto,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EnterprisePolicyDto {
+    egress_mode: EgressMode,
+    allowed_model_endpoints: Vec<String>,
+    allowed_models: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct ModelErrorItem {
     code: String,
@@ -153,16 +164,24 @@ struct SearchScopeItem {
 }
 
 #[tauri::command]
-async fn ask_vault(
+async fn ask_vault_structured(
     query: String,
     lang: Option<String>,
     top_k: Option<usize>,
     scope_paths: Option<Vec<String>>,
     state: State<'_, DesktopState>,
-) -> Result<String, String> {
+) -> Result<AskResponseStructured, String> {
     let query = query.trim().to_string();
     if query.is_empty() {
-        return Ok("请输入一个非空问题。".to_string());
+        return Ok(AskResponseStructured {
+            status: AskStatus::InsufficientEvidence,
+            answer: String::new(),
+            question: query,
+            scope_paths: Vec::new(),
+            citations: Vec::new(),
+            evidence: Vec::new(),
+            metrics: Default::default(),
+        });
     }
 
     let engine_guard = state.engine.lock().await;
@@ -174,51 +193,35 @@ async fn ask_vault(
         return Err("引擎尚在初始化中，请稍后重试。".to_string());
     };
 
-    let top_k = normalize_top_k(top_k);
-    let mut scope_paths = normalize_scope_paths(scope_paths);
-    if scope_paths.is_empty()
+    let mut normalized_scope_paths = normalize_scope_paths(scope_paths);
+    if normalized_scope_paths.is_empty()
         && let Ok(settings) = load_app_settings()
         && let Ok(watch_root) = resolve_watch_root_from_settings(&settings)
     {
-        scope_paths.push(watch_root);
+        normalized_scope_paths.push(watch_root);
     }
-    let scope_refs = if scope_paths.is_empty() {
+    let scope_refs = if normalized_scope_paths.is_empty() {
         None
     } else {
-        Some(scope_paths.as_slice())
+        Some(normalized_scope_paths.as_slice())
     };
 
-    let results = engine
-        .search(&query, top_k, scope_refs)
+    engine
+        .ask_structured(&query, lang.as_deref(), scope_refs, top_k)
         .await
-        .map_err(|err| err.to_string())?;
-    if results.is_empty() {
-        return Ok("未检索到相关记忆。".to_string());
-    }
+        .map_err(describe_engine_error)
+}
 
-    let text_context = build_text_context(&results);
-    let graph_context = match engine.get_graph_context_for_results(&results).await {
-        Ok(context) => context,
-        Err(err) => {
-            warn!(error = %err, "图谱上下文构建失败，降级为纯文本上下文回答");
-            String::new()
-        }
-    };
-
-    let answer_question = build_answer_question(&query, lang.as_deref());
-    let references = format_references(&results);
-    match engine
-        .generate_answer(&answer_question, &text_context, &graph_context)
-        .await
-    {
-        Ok(answer) => Ok(format!("{answer}\n\n---\n参考来源：\n{references}")),
-        Err(err) => {
-            warn!(error = %err, "答案合成失败，降级返回向量检索结果");
-            Ok(format!(
-                "本地大模型答案生成失败，以下是检索到的相关片段：\n\n{references}"
-            ))
-        }
-    }
+#[tauri::command]
+async fn ask_vault(
+    query: String,
+    lang: Option<String>,
+    top_k: Option<usize>,
+    scope_paths: Option<Vec<String>>,
+    state: State<'_, DesktopState>,
+) -> Result<String, String> {
+    let response = ask_vault_structured(query, lang, top_k, scope_paths, state).await?;
+    Ok(format_legacy_answer(&response))
 }
 
 #[tauri::command]
@@ -325,7 +328,7 @@ async fn trigger_reindex(state: State<'_, DesktopState>) -> Result<String, Strin
     engine
         .trigger_reindex()
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(describe_engine_error)?;
     Ok(task_id)
 }
 
@@ -379,12 +382,65 @@ async fn get_model_settings() -> Result<ModelSettingsDto, String> {
 }
 
 #[tauri::command]
+async fn get_enterprise_policy() -> Result<EnterprisePolicyDto, String> {
+    let settings = load_app_settings()?;
+    Ok(resolve_enterprise_policy(&settings))
+}
+
+#[tauri::command]
+async fn set_enterprise_policy(
+    payload: EnterprisePolicyDto,
+    state: State<'_, DesktopState>,
+) -> Result<EnterprisePolicyDto, String> {
+    let mut settings = load_app_settings()?;
+    settings.enterprise_egress_mode = Some(
+        match payload.egress_mode {
+            EgressMode::LocalOnly => "local_only",
+            EgressMode::Allowlist => "allowlist",
+        }
+        .to_string(),
+    );
+    settings.enterprise_allowed_model_endpoints = Some(
+        payload
+            .allowed_model_endpoints
+            .iter()
+            .map(|item| normalize_policy_endpoint(item))
+            .filter(|item| !item.is_empty())
+            .collect(),
+    );
+    settings.enterprise_allowed_models = Some(
+        payload
+            .allowed_models
+            .iter()
+            .map(|item| item.trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect(),
+    );
+    save_app_settings(&settings)?;
+    let watch_root = resolve_watch_root_from_settings(&settings)?;
+    replace_engine(
+        &state.engine,
+        &state.init_error,
+        watch_root,
+        "settings_policy_update",
+    )
+    .await?;
+    Ok(resolve_enterprise_policy(&settings))
+}
+
+#[tauri::command]
 async fn set_model_settings(
     payload: ModelSettingsDto,
     state: State<'_, DesktopState>,
 ) -> Result<ModelSettingsDto, String> {
     let mut settings = load_app_settings()?;
     let normalized = normalize_model_settings_payload(payload)?;
+    let policy = resolve_enterprise_policy(&settings);
+    validate_runtime_model_settings(
+        &to_model_policy(&policy),
+        &to_runtime_model_config(&resolve_active_runtime_settings(&normalized)),
+    )
+    .map_err(|violation| violation.message)?;
     settings.active_provider = Some(normalized.active_provider.clone());
     settings.local_endpoint = Some(normalized.local_profile.endpoint.clone());
     settings.local_models_root = normalized.local_profile.models_root.clone();
@@ -397,7 +453,6 @@ async fn set_model_settings(
     settings.remote_graph_model = Some(normalized.remote_profile.graph_model.clone());
     settings.remote_embed_model = Some(normalized.remote_profile.embed_model.clone());
     save_app_settings(&settings)?;
-    apply_model_settings_to_env(resolve_active_runtime_settings(&normalized));
 
     let watch_root = resolve_watch_root_from_settings(&settings)?;
     replace_engine(
@@ -418,10 +473,14 @@ async fn list_provider_models(
     api_key: Option<String>,
     models_root: Option<String>,
 ) -> Result<ProviderModelsDto, String> {
+    let settings = load_app_settings()?;
+    let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&provider);
     let endpoint = normalize_endpoint(provider, &endpoint);
     let api_key = normalize_optional_text(api_key);
     let models_root = normalize_optional_text(models_root);
+    validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[])
+        .map_err(|violation| violation.message)?;
     if provider == ModelProvider::OllamaLocal {
         let from_folder = models_root
             .as_deref()
@@ -450,10 +509,14 @@ async fn probe_model_provider(
     api_key: Option<String>,
     models_root: Option<String>,
 ) -> Result<ModelAvailabilityDto, String> {
+    let settings = load_app_settings()?;
+    let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&provider);
     let endpoint = normalize_endpoint(provider, &endpoint);
     let api_key = normalize_optional_text(api_key);
     let models_root = normalize_optional_text(models_root);
+    validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[])
+        .map_err(|violation| violation.message)?;
     let result = fetch_provider_models(
         provider,
         &endpoint,
@@ -487,6 +550,9 @@ async fn validate_model_setup() -> Result<ModelAvailabilityDto, String> {
     let settings = load_app_settings()?;
     let model_settings = resolve_model_settings(&settings);
     let active = resolve_active_runtime_settings(&model_settings);
+    let policy = resolve_enterprise_policy(&settings);
+    validate_runtime_model_settings(&to_model_policy(&policy), &to_runtime_model_config(&active))
+        .map_err(|violation| violation.message)?;
     let provider = active.provider;
     let models = fetch_provider_models(
         provider,
@@ -547,6 +613,10 @@ async fn pull_model(
         return Err("仅本地 Ollama 模式支持拉取模型".to_string());
     }
     let endpoint = normalize_endpoint(provider, &endpoint);
+    let settings = load_app_settings()?;
+    let policy = resolve_enterprise_policy(&settings);
+    validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[])
+        .map_err(|violation| violation.message)?;
     let api_key = normalize_optional_text(api_key);
     pull_ollama_model(&endpoint, &model, api_key.as_deref()).await?;
     validate_model_setup().await
@@ -831,8 +901,6 @@ pub fn run() {
             PathBuf::from(".")
         }
     };
-    let model_settings = resolve_model_settings(&settings);
-    apply_model_settings_to_env(resolve_active_runtime_settings(&model_settings));
 
     let shared_engine = Arc::new(Mutex::new(None));
     let daemon_engine = Arc::clone(&shared_engine);
@@ -896,6 +964,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            ask_vault_structured,
             ask_vault,
             get_vault_stats,
             get_indexing_status,
@@ -905,6 +974,8 @@ pub fn run() {
             resume_indexing,
             get_app_settings,
             get_model_settings,
+            get_enterprise_policy,
+            set_enterprise_policy,
             set_model_settings,
             list_provider_models,
             probe_model_provider,
@@ -954,31 +1025,50 @@ async fn replace_engine(
         }
     }
 
-    let mut new_engine =
-        MemoriEngine::bootstrap(watch_root.clone()).map_err(|err| err.to_string())?;
-    if let Ok(settings) = load_app_settings() {
+    let result: Result<(), String> = async {
+        let settings = load_app_settings()?;
+        let policy = resolve_enterprise_policy(&settings);
+        let model_settings = resolve_model_settings(&settings);
+        let active_runtime = resolve_active_runtime_settings(&model_settings);
+        validate_runtime_model_settings(
+            &to_model_policy(&policy),
+            &to_runtime_model_config(&active_runtime),
+        )
+        .map_err(|violation| violation.message)?;
+        apply_model_settings_to_env(active_runtime);
+
+        let mut new_engine =
+            MemoriEngine::bootstrap(watch_root.clone()).map_err(|err| err.to_string())?;
         new_engine
             .set_indexing_config(resolve_indexing_config(&settings))
             .await;
-    }
-    new_engine.start_daemon().map_err(|err| err.to_string())?;
+        new_engine.start_daemon().map_err(|err| err.to_string())?;
 
-    {
-        let mut guard = engine_slot.lock().await;
-        *guard = Some(new_engine);
+        {
+            let mut guard = engine_slot.lock().await;
+            *guard = Some(new_engine);
+        }
+        {
+            let mut init_guard = init_error.lock().await;
+            *init_guard = None;
+        }
+
+        info!(
+            reason = reason,
+            watch_root = %watch_root.display(),
+            "memori-desktop daemon started"
+        );
+
+        Ok(())
     }
-    {
+    .await;
+
+    if let Err(err) = &result {
         let mut init_guard = init_error.lock().await;
-        *init_guard = None;
+        *init_guard = Some(err.clone());
     }
 
-    info!(
-        reason = reason,
-        watch_root = %watch_root.display(),
-        "memori-desktop daemon started"
-    );
-
-    Ok(())
+    result
 }
 
 fn app_settings_file_path() -> Result<PathBuf, String> {
@@ -986,6 +1076,18 @@ fn app_settings_file_path() -> Result<PathBuf, String> {
     Ok(config_root
         .join(SETTINGS_APP_DIR_NAME)
         .join(SETTINGS_FILE_NAME))
+}
+
+fn describe_engine_error(err: EngineError) -> String {
+    match err {
+        EngineError::IndexUnavailable { .. } => {
+            "Index upgrade required. Search is temporarily unavailable until a full reindex completes.（索引需要升级，完成全量重建前暂不可检索）".to_string()
+        }
+        EngineError::IndexRebuildInProgress { .. } => {
+            "Index upgrade in progress. Search is temporarily unavailable until reindex completes.（索引升级中，重建完成前暂不可检索）".to_string()
+        }
+        other => other.to_string(),
+    }
 }
 
 fn restore_main_window_state(
@@ -1185,6 +1287,57 @@ struct ActiveRuntimeModelSettings {
     chat_model: String,
     graph_model: String,
     embed_model: String,
+}
+
+fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> RuntimeModelConfig {
+    RuntimeModelConfig {
+        provider: settings.provider,
+        endpoint: settings.endpoint.clone(),
+        api_key: settings.api_key.clone(),
+        chat_model: settings.chat_model.clone(),
+        graph_model: settings.graph_model.clone(),
+        embed_model: settings.embed_model.clone(),
+    }
+}
+
+fn resolve_enterprise_policy(settings: &AppSettings) -> EnterprisePolicyDto {
+    let allowed_model_endpoints = settings
+        .enterprise_allowed_model_endpoints
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| normalize_policy_endpoint(&item))
+        .filter(|item| !item.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let allowed_models = settings
+        .enterprise_allowed_models
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    EnterprisePolicyDto {
+        egress_mode: settings
+            .enterprise_egress_mode
+            .as_deref()
+            .map(EgressMode::from_value)
+            .unwrap_or_default(),
+        allowed_model_endpoints,
+        allowed_models,
+    }
+}
+
+fn to_model_policy(policy: &EnterprisePolicyDto) -> EnterpriseModelPolicy {
+    EnterpriseModelPolicy {
+        egress_mode: policy.egress_mode,
+        allowed_model_endpoints: policy.allowed_model_endpoints.clone(),
+        allowed_models: policy.allowed_models.clone(),
+    }
 }
 
 fn provider_to_string(provider: ModelProvider) -> String {
@@ -1808,14 +1961,6 @@ fn model_exists(models: &[String], expected: &str) -> bool {
         || (!expected.contains(':') && models.iter().any(|m| m == &format!("{expected}:latest")))
 }
 
-fn build_answer_question(query: &str, lang: Option<&str>) -> String {
-    match normalize_language(lang) {
-        Some("zh-CN") => format!("{query}\n\n请仅使用中文回答。"),
-        Some("en-US") => format!("{query}\n\nPlease answer in English only."),
-        _ => query.to_string(),
-    }
-}
-
 fn normalize_language(lang: Option<&str>) -> Option<&'static str> {
     let lang = lang?;
     let lower = lang.trim().to_ascii_lowercase();
@@ -1825,13 +1970,6 @@ fn normalize_language(lang: Option<&str>) -> Option<&'static str> {
         Some("en-US")
     } else {
         None
-    }
-}
-
-fn normalize_top_k(top_k: Option<usize>) -> usize {
-    match top_k {
-        Some(value) if (1..=50).contains(&value) => value,
-        _ => DEFAULT_RETRIEVE_TOP_K,
     }
 }
 
@@ -1996,103 +2134,41 @@ fn is_supported_text_file(path: &std::path::Path) -> bool {
     ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("txt")
 }
 
-fn build_text_context(results: &[(DocumentChunk, f32)]) -> String {
-    let mut parts = Vec::with_capacity(results.len());
-    for (idx, (chunk, score)) in results.iter().enumerate() {
-        parts.push(format!(
-            "片段#{idx}\n来源: {}\n块序号: {}\n相似度: {:.4}\n内容:\n{}",
-            chunk.file_path.display(),
-            chunk.chunk_index,
-            score,
-            chunk.content,
-            idx = idx + 1
+fn format_legacy_answer(response: &AskResponseStructured) -> String {
+    match response.status {
+        AskStatus::Answered => {
+            let references = format_legacy_references(response);
+            if references.is_empty() {
+                response.answer.clone()
+            } else {
+                format!("{}\n\n---\n参考来源：\n{}", response.answer, references)
+            }
+        }
+        AskStatus::InsufficientEvidence => "证据不足，当前无法可靠回答这个问题。".to_string(),
+        AskStatus::ModelFailedWithEvidence => {
+            let references = format_legacy_references(response);
+            if references.is_empty() {
+                "本地大模型答案生成失败，且没有可展示的证据片段。".to_string()
+            } else {
+                format!("本地大模型答案生成失败，以下是检索到的相关片段：\n\n{references}")
+            }
+        }
+    }
+}
+
+fn format_legacy_references(response: &AskResponseStructured) -> String {
+    let mut lines = Vec::new();
+    for evidence in &response.evidence {
+        lines.push(format!(
+            "#{}  命中原因: {}  文档排序: #{}  片段排序: #{}",
+            lines.len() / 5 + 1,
+            evidence.reason,
+            evidence.document_rank,
+            evidence.chunk_rank
         ));
-    }
-    parts.join("\n\n")
-}
-
-fn build_reference_excerpt(file_path: &std::path::Path, chunk_content: &str) -> String {
-    const TARGET_EXCERPT_CHARS: usize = 1600;
-
-    let Ok(raw) = std::fs::read_to_string(file_path) else {
-        return chunk_content.to_string();
-    };
-
-    let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
-    let paragraphs: Vec<&str> = normalized
-        .split("\n\n")
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .collect();
-
-    if paragraphs.is_empty() {
-        return chunk_content.to_string();
-    }
-
-    let chunk_normalized = chunk_content.trim();
-    let anchor = chunk_normalized
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && line.chars().count() >= 8)
-        .unwrap_or(chunk_normalized);
-
-    let paragraph_index = paragraphs
-        .iter()
-        .position(|paragraph| paragraph.contains(chunk_normalized))
-        .or_else(|| {
-            paragraphs
-                .iter()
-                .position(|paragraph| paragraph.contains(anchor))
-        });
-
-    let Some(index) = paragraph_index else {
-        return chunk_content.to_string();
-    };
-
-    let mut start = index;
-    let mut end = index + 1;
-    let mut total_chars: usize = paragraphs[index].chars().count();
-
-    while total_chars < TARGET_EXCERPT_CHARS && (start > 0 || end < paragraphs.len()) {
-        let prev_len = if start > 0 {
-            paragraphs[start - 1].chars().count()
-        } else {
-            0
-        };
-        let next_len = if end < paragraphs.len() {
-            paragraphs[end].chars().count()
-        } else {
-            0
-        };
-
-        if next_len >= prev_len && end < paragraphs.len() {
-            total_chars += next_len;
-            end += 1;
-            continue;
-        }
-
-        if start > 0 {
-            start -= 1;
-            total_chars += prev_len;
-            continue;
-        }
-
-        if end < paragraphs.len() {
-            total_chars += next_len;
-            end += 1;
-        }
-    }
-
-    paragraphs[start..end].join("\n\n")
-}
-
-fn format_references(results: &[(DocumentChunk, f32)]) -> String {
-    let mut lines = Vec::with_capacity(results.len() * 4);
-    for (idx, (chunk, score)) in results.iter().enumerate() {
-        lines.push(format!("#{}  相似度: {:.4}", idx + 1, score));
-        lines.push(format!("来源: {}", chunk.file_path.display()));
-        lines.push(format!("块序号: {}", chunk.chunk_index));
-        lines.push(build_reference_excerpt(&chunk.file_path, &chunk.content));
+        lines.push(format!("来源: {}", evidence.file_path));
+        lines.push(format!("块序号: {}", evidence.chunk_index));
+        lines.push(evidence.content.clone());
         lines.push(String::from(
             "------------------------------------------------------------",
         ));

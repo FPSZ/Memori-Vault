@@ -14,11 +14,14 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use memori_core::{
-    DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL, DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER,
-    DEFAULT_OLLAMA_EMBED_MODEL, DocumentChunk, IndexingConfig, IndexingMode, IndexingStatus,
+    AskResponseStructured, AskStatus, DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL,
+    DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER, DEFAULT_OLLAMA_EMBED_MODEL, EgressMode,
+    EngineError, EnterpriseModelPolicy, IndexingConfig, IndexingMode, IndexingStatus,
     MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_MODEL_ENV,
     MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,
-    ModelProvider, ResourceBudget, ScheduleWindow, VaultStats,
+    ModelProvider, ResourceBudget, RuntimeModelConfig, ScheduleWindow, VaultStats,
+    normalize_policy_endpoint, resolve_runtime_model_config_from_env, validate_provider_request,
+    validate_runtime_model_settings,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -77,23 +80,6 @@ struct AppSettings {
     chat_model: Option<String>,
     graph_model: Option<String>,
     embed_model: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-enum EgressMode {
-    #[default]
-    LocalOnly,
-    Allowlist,
-}
-
-impl EgressMode {
-    fn from_value(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "allowlist" => Self::Allowlist,
-            _ => Self::LocalOnly,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -259,11 +245,6 @@ struct AskRequest {
     scope_paths: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct AskResponse {
-    answer: String,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct SetWatchRootRequest {
     path: String,
@@ -395,6 +376,20 @@ impl ApiError {
             message: message.into(),
         }
     }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: message.into(),
+        }
+    }
+
+    fn service_unavailable(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -406,6 +401,18 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response()
+    }
+}
+
+fn map_engine_api_error(err: EngineError) -> ApiError {
+    match err {
+        EngineError::IndexUnavailable { .. } => ApiError::conflict(
+            "Index upgrade required. Search is temporarily unavailable until a full reindex completes.",
+        ),
+        EngineError::IndexRebuildInProgress { .. } => ApiError::service_unavailable(
+            "Index upgrade in progress. Search is temporarily unavailable until reindex completes.",
+        ),
+        other => ApiError::internal(other.to_string()),
     }
 }
 
@@ -432,8 +439,6 @@ async fn main() {
             PathBuf::from(".")
         }
     };
-    let model_settings = resolve_model_settings(&settings);
-    apply_model_settings_to_env(resolve_active_runtime_settings(&model_settings));
 
     let engine = Arc::new(Mutex::new(None));
     let init_error = Arc::new(Mutex::new(None));
@@ -477,6 +482,7 @@ async fn main() {
         .route("/api/indexing/pause", post(pause_indexing_handler))
         .route("/api/indexing/resume", post(resume_indexing_handler))
         .route("/api/ask", post(ask_handler))
+        .route("/api/ask_legacy", post(ask_legacy_handler))
         .route("/api/settings", get(get_app_settings_handler))
         .route("/api/model-settings", get(get_model_settings_handler))
         .route("/api/model-settings", post(set_model_settings_handler))
@@ -706,6 +712,15 @@ async fn update_enterprise_policy_handler(
     settings.indexing_mode = Some(payload.indexing_default_mode.clone());
     settings.resource_budget = Some(payload.resource_budget_default.clone());
     save_app_settings(&settings).map_err(ApiError::internal)?;
+    let watch_root = resolve_watch_root_from_settings(&settings).map_err(ApiError::internal)?;
+    replace_engine(
+        &state.engine,
+        &state.init_error,
+        watch_root,
+        "policy_update",
+    )
+    .await
+    .map_err(ApiError::internal)?;
 
     let policy = resolve_enterprise_policy(&settings);
     append_audit_event(
@@ -823,7 +838,7 @@ async fn ask_handler(
     State(state): State<ServerState>,
     headers: HeaderMap,
     Json(payload): Json<AskRequest>,
-) -> Result<Json<AskResponse>, ApiError> {
+) -> Result<Json<AskResponseStructured>, ApiError> {
     state.metrics.total_requests.fetch_add(1, Ordering::Relaxed);
     state.metrics.ask_requests.fetch_add(1, Ordering::Relaxed);
     let ask_started_at = std::time::Instant::now();
@@ -835,14 +850,34 @@ async fn ask_handler(
             .failed_requests
             .fetch_add(1, Ordering::Relaxed);
         state.metrics.ask_failed.fetch_add(1, Ordering::Relaxed);
-        return Ok(Json(AskResponse {
-            answer: "请输入一个非空问题。".to_string(),
+        return Ok(Json(AskResponseStructured {
+            status: AskStatus::InsufficientEvidence,
+            answer: String::new(),
+            question: query,
+            scope_paths: Vec::new(),
+            citations: Vec::new(),
+            evidence: Vec::new(),
+            metrics: Default::default(),
         }));
     }
 
     let actor = resolve_actor_subject(&state, &headers).await;
     let policy = resolve_enterprise_policy(&load_app_settings().map_err(ApiError::internal)?);
-    enforce_policy_for_active_runtime(&policy).map_err(ApiError::forbidden)?;
+    if let Err(violation) =
+        validate_runtime_model_settings(&to_model_policy(&policy), &resolve_runtime_model_config_from_env())
+    {
+        append_policy_violation_audit(
+            &state,
+            actor.clone(),
+            "ask",
+            None,
+            None,
+            &[],
+            &violation.message,
+        )
+        .await;
+        return Err(ApiError::forbidden(violation.message));
+    }
 
     let init_error_message = state.init_error.lock().await.clone();
     let engine_guard = state.engine.lock().await;
@@ -866,8 +901,8 @@ async fn ask_handler(
         Some(scope_paths.as_slice())
     };
 
-    let results = engine
-        .search(&query, top_k, scope_refs)
+    let response = engine
+        .ask_structured(&query, payload.lang.as_deref(), scope_refs, payload.top_k)
         .await
         .map_err(|err| {
             state
@@ -875,36 +910,8 @@ async fn ask_handler(
                 .failed_requests
                 .fetch_add(1, Ordering::Relaxed);
             state.metrics.ask_failed.fetch_add(1, Ordering::Relaxed);
-            ApiError::internal(err.to_string())
+            map_engine_api_error(err)
         })?;
-
-    if results.is_empty() {
-        return Ok(Json(AskResponse {
-            answer: "未检索到相关记忆。".to_string(),
-        }));
-    }
-
-    let text_context = build_text_context(&results);
-    let graph_context = match engine.get_graph_context_for_results(&results).await {
-        Ok(context) => context,
-        Err(err) => {
-            warn!(error = %err, "图谱上下文构建失败，降级为纯文本上下文回答");
-            String::new()
-        }
-    };
-
-    let answer_question = build_answer_question(&query, payload.lang.as_deref());
-    let references = format_references(&results);
-    let answer = match engine
-        .generate_answer(&answer_question, &text_context, &graph_context)
-        .await
-    {
-        Ok(answer) => format!("{answer}\n\n---\n参考来源：\n{references}"),
-        Err(err) => {
-            warn!(error = %err, "答案合成失败，降级返回向量检索结果");
-            format!("本地大模型答案生成失败，以下是检索到的相关片段：\n\n{references}")
-        }
-    };
 
     let elapsed_ms = ask_started_at.elapsed().as_millis() as u64;
     state
@@ -922,14 +929,32 @@ async fn ask_handler(
             metadata: serde_json::json!({
                 "top_k": top_k,
                 "scope_count": scope_paths.len(),
-                "result_chunks": results.len(),
+                "status": response.status,
+                "doc_candidate_count": response.metrics.doc_candidate_count,
+                "final_evidence_count": response.metrics.final_evidence_count,
                 "elapsed_ms": elapsed_ms
             }),
         },
     )
     .await;
 
-    Ok(Json(AskResponse { answer }))
+    Ok(Json(response))
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AskLegacyResponse {
+    answer: String,
+}
+
+async fn ask_legacy_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<AskRequest>,
+) -> Result<Json<AskLegacyResponse>, ApiError> {
+    let response = ask_handler(State(state), headers, Json(payload)).await?;
+    Ok(Json(AskLegacyResponse {
+        answer: format_legacy_answer(&response.0),
+    }))
 }
 
 async fn get_vault_stats_handler(
@@ -1033,7 +1058,7 @@ async fn trigger_reindex_handler(
     engine
         .trigger_reindex()
         .await
-        .map_err(|err| ApiError::internal(err.to_string()))?;
+        .map_err(map_engine_api_error)?;
     Ok(Json(serde_json::json!({
         "task_id": format!("reindex-{}", chrono_like_now_token())
     })))
@@ -1095,7 +1120,27 @@ async fn set_model_settings_handler(
     let mut settings = load_app_settings().map_err(ApiError::internal)?;
     let normalized = normalize_model_settings_payload(payload).map_err(ApiError::bad_request)?;
     let policy = resolve_enterprise_policy(&settings);
-    enforce_policy_for_model_settings(&policy, &normalized).map_err(ApiError::forbidden)?;
+    let active_runtime = resolve_active_runtime_settings(&normalized);
+    if let Err(violation) = validate_runtime_model_settings(
+        &to_model_policy(&policy),
+        &to_runtime_model_config(&active_runtime),
+    ) {
+        append_policy_violation_audit(
+            &state,
+            "anonymous".to_string(),
+            "set_model_settings",
+            Some(active_runtime.provider),
+            Some(&active_runtime.endpoint),
+            &[
+                active_runtime.chat_model.clone(),
+                active_runtime.graph_model.clone(),
+                active_runtime.embed_model.clone(),
+            ],
+            &violation.message,
+        )
+        .await;
+        return Err(ApiError::forbidden(violation.message));
+    }
     settings.active_provider = Some(normalized.active_provider.clone());
     settings.local_endpoint = Some(normalized.local_profile.endpoint.clone());
     settings.local_models_root = normalized.local_profile.models_root.clone();
@@ -1123,12 +1168,32 @@ async fn set_model_settings_handler(
     Ok(Json(normalized))
 }
 
-async fn validate_model_setup_handler() -> Result<Json<ModelAvailabilityDto>, ApiError> {
+async fn validate_model_setup_handler(
+    State(state): State<ServerState>,
+) -> Result<Json<ModelAvailabilityDto>, ApiError> {
     let settings = load_app_settings().map_err(ApiError::internal)?;
     let model_settings = resolve_model_settings(&settings);
     let active = resolve_active_runtime_settings(&model_settings);
     let policy = resolve_enterprise_policy(&settings);
-    enforce_policy_for_runtime_settings(&policy, &active).map_err(ApiError::forbidden)?;
+    if let Err(violation) =
+        validate_runtime_model_settings(&to_model_policy(&policy), &to_runtime_model_config(&active))
+    {
+        append_policy_violation_audit(
+            &state,
+            "anonymous".to_string(),
+            "validate_model_setup",
+            Some(active.provider),
+            Some(&active.endpoint),
+            &[
+                active.chat_model.clone(),
+                active.graph_model.clone(),
+                active.embed_model.clone(),
+            ],
+            &violation.message,
+        )
+        .await;
+        return Err(ApiError::forbidden(violation.message));
+    }
     let provider = active.provider;
     let models = fetch_provider_models(
         provider,
@@ -1173,6 +1238,7 @@ async fn validate_model_setup_handler() -> Result<Json<ModelAvailabilityDto>, Ap
 }
 
 async fn list_provider_models_handler(
+    State(state): State<ServerState>,
     Json(payload): Json<ListProviderModelsRequest>,
 ) -> Result<Json<ProviderModelsDto>, ApiError> {
     let settings = load_app_settings().map_err(ApiError::internal)?;
@@ -1181,8 +1247,19 @@ async fn list_provider_models_handler(
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
     let api_key = normalize_optional_text(payload.api_key);
     let models_root = normalize_optional_text(payload.models_root);
-    enforce_policy_for_provider_request(&policy, provider, &endpoint)
-        .map_err(ApiError::forbidden)?;
+    if let Err(violation) = validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[]) {
+        append_policy_violation_audit(
+            &state,
+            "anonymous".to_string(),
+            "list_provider_models",
+            Some(provider),
+            Some(&endpoint),
+            &[],
+            &violation.message,
+        )
+        .await;
+        return Err(ApiError::forbidden(violation.message));
+    }
     if provider == ModelProvider::OllamaLocal {
         let from_folder = models_root
             .as_deref()
@@ -1206,6 +1283,7 @@ async fn list_provider_models_handler(
 }
 
 async fn probe_model_provider_handler(
+    State(state): State<ServerState>,
     Json(payload): Json<ProbeProviderRequest>,
 ) -> Result<Json<ModelAvailabilityDto>, ApiError> {
     let settings = load_app_settings().map_err(ApiError::internal)?;
@@ -1214,8 +1292,19 @@ async fn probe_model_provider_handler(
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
     let api_key = normalize_optional_text(payload.api_key);
     let models_root = normalize_optional_text(payload.models_root);
-    enforce_policy_for_provider_request(&policy, provider, &endpoint)
-        .map_err(ApiError::forbidden)?;
+    if let Err(violation) = validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[]) {
+        append_policy_violation_audit(
+            &state,
+            "anonymous".to_string(),
+            "probe_model_provider",
+            Some(provider),
+            Some(&endpoint),
+            &[],
+            &violation.message,
+        )
+        .await;
+        return Err(ApiError::forbidden(violation.message));
+    }
     let result = fetch_provider_models(
         provider,
         &endpoint,
@@ -1245,6 +1334,7 @@ async fn probe_model_provider_handler(
 }
 
 async fn pull_model_handler(
+    State(state): State<ServerState>,
     Json(payload): Json<PullModelRequest>,
 ) -> Result<Json<ModelAvailabilityDto>, ApiError> {
     let model = payload.model.trim().to_string();
@@ -1257,13 +1347,24 @@ async fn pull_model_handler(
     }
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
     let policy = resolve_enterprise_policy(&load_app_settings().map_err(ApiError::internal)?);
-    enforce_policy_for_provider_request(&policy, provider, &endpoint)
-        .map_err(ApiError::forbidden)?;
+    if let Err(violation) = validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[]) {
+        append_policy_violation_audit(
+            &state,
+            "anonymous".to_string(),
+            "pull_model",
+            Some(provider),
+            Some(&endpoint),
+            &[],
+            &violation.message,
+        )
+        .await;
+        return Err(ApiError::forbidden(violation.message));
+    }
     let api_key = normalize_optional_text(payload.api_key);
     pull_ollama_model(&endpoint, &model, api_key.as_deref())
         .await
         .map_err(ApiError::internal)?;
-    validate_model_setup_handler().await
+    validate_model_setup_handler(State(state)).await
 }
 
 async fn set_local_models_root_handler(
@@ -1489,31 +1590,50 @@ async fn replace_engine(
         }
     }
 
-    let mut new_engine =
-        MemoriEngine::bootstrap(watch_root.clone()).map_err(|err| err.to_string())?;
-    if let Ok(settings) = load_app_settings() {
+    let result: Result<(), String> = async {
+        let settings = load_app_settings()?;
+        let policy = resolve_enterprise_policy(&settings);
+        let model_settings = resolve_model_settings(&settings);
+        let active_runtime = resolve_active_runtime_settings(&model_settings);
+        validate_runtime_model_settings(
+            &to_model_policy(&policy),
+            &to_runtime_model_config(&active_runtime),
+        )
+        .map_err(|violation| violation.message)?;
+        apply_model_settings_to_env(active_runtime);
+
+        let mut new_engine =
+            MemoriEngine::bootstrap(watch_root.clone()).map_err(|err| err.to_string())?;
         new_engine
             .set_indexing_config(resolve_indexing_config(&settings))
             .await;
-    }
-    new_engine.start_daemon().map_err(|err| err.to_string())?;
+        new_engine.start_daemon().map_err(|err| err.to_string())?;
 
-    {
-        let mut guard = engine_slot.lock().await;
-        *guard = Some(new_engine);
+        {
+            let mut guard = engine_slot.lock().await;
+            *guard = Some(new_engine);
+        }
+        {
+            let mut init_guard = init_error.lock().await;
+            *init_guard = None;
+        }
+
+        info!(
+            reason = reason,
+            watch_root = %watch_root.display(),
+            "memori-server daemon started"
+        );
+
+        Ok(())
     }
-    {
+    .await;
+
+    if let Err(err) = &result {
         let mut init_guard = init_error.lock().await;
-        *init_guard = None;
+        *init_guard = Some(err.clone());
     }
 
-    info!(
-        reason = reason,
-        watch_root = %watch_root.display(),
-        "memori-server daemon started"
-    );
-
-    Ok(())
+    result
 }
 
 fn resolve_bind_addr() -> SocketAddr {
@@ -1591,6 +1711,25 @@ struct ActiveRuntimeModelSettings {
     chat_model: String,
     graph_model: String,
     embed_model: String,
+}
+
+fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> RuntimeModelConfig {
+    RuntimeModelConfig {
+        provider: settings.provider,
+        endpoint: settings.endpoint.clone(),
+        api_key: settings.api_key.clone(),
+        chat_model: settings.chat_model.clone(),
+        graph_model: settings.graph_model.clone(),
+        embed_model: settings.embed_model.clone(),
+    }
+}
+
+fn to_model_policy(policy: &EnterprisePolicyDto) -> EnterpriseModelPolicy {
+    EnterpriseModelPolicy {
+        egress_mode: policy.egress_mode,
+        allowed_model_endpoints: policy.allowed_model_endpoints.clone(),
+        allowed_models: policy.allowed_models.clone(),
+    }
 }
 
 fn provider_to_string(provider: ModelProvider) -> String {
@@ -2219,7 +2358,7 @@ fn resolve_enterprise_policy(settings: &AppSettings) -> EnterprisePolicyDto {
         .clone()
         .unwrap_or_default()
         .into_iter()
-        .map(|item| normalize_endpoint_allowlist_item(&item))
+        .map(|item| normalize_policy_endpoint(&item))
         .filter(|item| !item.is_empty())
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -2263,119 +2402,6 @@ fn resolve_enterprise_policy(settings: &AppSettings) -> EnterprisePolicyDto {
                 .unwrap_or_else(|| "roles".to_string()),
         },
     }
-}
-
-fn enforce_policy_for_active_runtime(policy: &EnterprisePolicyDto) -> Result<(), String> {
-    let provider = std::env::var(MEMORI_MODEL_PROVIDER_ENV)
-        .ok()
-        .map(|v| ModelProvider::from_value(&v))
-        .unwrap_or(ModelProvider::from_value(DEFAULT_MODEL_PROVIDER));
-    let endpoint = normalize_endpoint(
-        provider,
-        &std::env::var(MEMORI_MODEL_ENDPOINT_ENV).unwrap_or_else(|_| {
-            if provider == ModelProvider::OpenAiCompatible {
-                memori_core::DEFAULT_MODEL_ENDPOINT_OPENAI.to_string()
-            } else {
-                DEFAULT_MODEL_ENDPOINT_OLLAMA.to_string()
-            }
-        }),
-    );
-    let chat_model =
-        std::env::var(MEMORI_CHAT_MODEL_ENV).unwrap_or_else(|_| DEFAULT_CHAT_MODEL.to_string());
-    let graph_model =
-        std::env::var(MEMORI_GRAPH_MODEL_ENV).unwrap_or_else(|_| DEFAULT_GRAPH_MODEL.to_string());
-    let embed_model = std::env::var(MEMORI_EMBED_MODEL_ENV)
-        .unwrap_or_else(|_| DEFAULT_OLLAMA_EMBED_MODEL.to_string());
-    enforce_policy_for_provider_models(
-        policy,
-        provider,
-        &endpoint,
-        &[chat_model, graph_model, embed_model],
-    )
-}
-
-fn enforce_policy_for_model_settings(
-    policy: &EnterprisePolicyDto,
-    settings: &ModelSettingsDto,
-) -> Result<(), String> {
-    let active = resolve_active_runtime_settings(settings);
-    enforce_policy_for_runtime_settings(policy, &active)?;
-    let remote_endpoint = normalize_endpoint(
-        ModelProvider::OpenAiCompatible,
-        &settings.remote_profile.endpoint,
-    );
-    enforce_policy_for_provider_models(
-        policy,
-        ModelProvider::OpenAiCompatible,
-        &remote_endpoint,
-        &[
-            settings.remote_profile.chat_model.clone(),
-            settings.remote_profile.graph_model.clone(),
-            settings.remote_profile.embed_model.clone(),
-        ],
-    )
-}
-
-fn enforce_policy_for_runtime_settings(
-    policy: &EnterprisePolicyDto,
-    runtime: &ActiveRuntimeModelSettings,
-) -> Result<(), String> {
-    enforce_policy_for_provider_models(
-        policy,
-        runtime.provider,
-        &runtime.endpoint,
-        &[
-            runtime.chat_model.clone(),
-            runtime.graph_model.clone(),
-            runtime.embed_model.clone(),
-        ],
-    )
-}
-
-fn enforce_policy_for_provider_request(
-    policy: &EnterprisePolicyDto,
-    provider: ModelProvider,
-    endpoint: &str,
-) -> Result<(), String> {
-    enforce_policy_for_provider_models(policy, provider, endpoint, &[])
-}
-
-fn enforce_policy_for_provider_models(
-    policy: &EnterprisePolicyDto,
-    provider: ModelProvider,
-    endpoint: &str,
-    models: &[String],
-) -> Result<(), String> {
-    if provider == ModelProvider::OllamaLocal {
-        return Ok(());
-    }
-    if policy.egress_mode == EgressMode::LocalOnly {
-        return Err("企业策略禁止外连模型服务（egress_mode=local_only）".to_string());
-    }
-    let normalized_endpoint = normalize_endpoint_allowlist_item(endpoint);
-    if !policy.allowed_model_endpoints.is_empty()
-        && !policy
-            .allowed_model_endpoints
-            .contains(&normalized_endpoint)
-    {
-        return Err(format!("远程模型服务地址不在白名单内: {}", endpoint.trim()));
-    }
-    if !models.is_empty() && !policy.allowed_models.is_empty() {
-        for model in models {
-            let trimmed = model.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            if !policy
-                .allowed_models
-                .iter()
-                .any(|allowed| allowed == trimmed)
-            {
-                return Err(format!("模型不在白名单内: {trimmed}"));
-            }
-        }
-    }
-    Ok(())
 }
 
 async fn require_session(
@@ -2437,6 +2463,35 @@ async fn append_audit_event(state: &ServerState, event: AuditEventDto) {
     if let Err(err) = writeln!(file, "{line}") {
         warn!(error = %err, path = %path.display(), "写入审计日志失败");
     }
+}
+
+async fn append_policy_violation_audit(
+    state: &ServerState,
+    actor: String,
+    action: &str,
+    provider: Option<ModelProvider>,
+    endpoint: Option<&str>,
+    models: &[String],
+    message: &str,
+) {
+    append_audit_event(
+        state,
+        AuditEventDto {
+            actor,
+            action: "policy_violation".to_string(),
+            resource: "model_runtime".to_string(),
+            timestamp: unix_now_secs(),
+            result: "blocked".to_string(),
+            metadata: serde_json::json!({
+                "source_action": action,
+                "provider": provider.map(provider_to_string),
+                "endpoint": endpoint.map(|value| value.trim()),
+                "models": models,
+                "message": message,
+            }),
+        },
+    )
+    .await;
 }
 
 fn read_audit_events() -> Result<Vec<AuditEventDto>, String> {
@@ -2531,10 +2586,6 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     }
 }
 
-fn normalize_endpoint_allowlist_item(endpoint: &str) -> String {
-    endpoint.trim().trim_end_matches('/').to_ascii_lowercase()
-}
-
 fn audit_log_file_path() -> Result<PathBuf, String> {
     let config_root = dirs::config_dir().ok_or_else(|| "无法获取用户配置目录".to_string())?;
     Ok(config_root
@@ -2542,11 +2593,10 @@ fn audit_log_file_path() -> Result<PathBuf, String> {
         .join(AUDIT_LOG_FILE_NAME))
 }
 
-fn build_answer_question(query: &str, lang: Option<&str>) -> String {
-    match normalize_language(lang) {
-        Some("zh-CN") => format!("{query}\n\n请仅使用中文回答。"),
-        Some("en-US") => format!("{query}\n\nPlease answer in English only."),
-        _ => query.to_string(),
+fn normalize_top_k(top_k: Option<usize>) -> usize {
+    match top_k {
+        Some(value) if (1..=50).contains(&value) => value,
+        _ => DEFAULT_RETRIEVE_TOP_K,
     }
 }
 
@@ -2559,13 +2609,6 @@ fn normalize_language(lang: Option<&str>) -> Option<&'static str> {
         Some("en-US")
     } else {
         None
-    }
-}
-
-fn normalize_top_k(top_k: Option<usize>) -> usize {
-    match top_k {
-        Some(value) if (1..=50).contains(&value) => value,
-        _ => DEFAULT_RETRIEVE_TOP_K,
     }
 }
 
@@ -2622,103 +2665,41 @@ fn normalize_scope_paths(scope_paths: Option<Vec<String>>) -> Vec<PathBuf> {
     result
 }
 
-fn build_text_context(results: &[(DocumentChunk, f32)]) -> String {
-    let mut parts = Vec::with_capacity(results.len());
-    for (idx, (chunk, score)) in results.iter().enumerate() {
-        parts.push(format!(
-            "片段#{idx}\n来源: {}\n块序号: {}\n相似度: {:.4}\n内容:\n{}",
-            chunk.file_path.display(),
-            chunk.chunk_index,
-            score,
-            chunk.content,
-            idx = idx + 1
+fn format_legacy_answer(response: &AskResponseStructured) -> String {
+    match response.status {
+        AskStatus::Answered => {
+            let references = format_legacy_references(response);
+            if references.is_empty() {
+                response.answer.clone()
+            } else {
+                format!("{}\n\n---\n参考来源：\n{}", response.answer, references)
+            }
+        }
+        AskStatus::InsufficientEvidence => "证据不足，当前无法可靠回答这个问题。".to_string(),
+        AskStatus::ModelFailedWithEvidence => {
+            let references = format_legacy_references(response);
+            if references.is_empty() {
+                "本地大模型答案生成失败，且没有可展示的证据片段。".to_string()
+            } else {
+                format!("本地大模型答案生成失败，以下是检索到的相关片段：\n\n{references}")
+            }
+        }
+    }
+}
+
+fn format_legacy_references(response: &AskResponseStructured) -> String {
+    let mut lines = Vec::new();
+    for (index, evidence) in response.evidence.iter().enumerate() {
+        lines.push(format!(
+            "#{}  命中原因: {}  文档排序: #{}  片段排序: #{}",
+            index + 1,
+            evidence.reason,
+            evidence.document_rank,
+            evidence.chunk_rank
         ));
-    }
-    parts.join("\n\n")
-}
-
-fn build_reference_excerpt(file_path: &std::path::Path, chunk_content: &str) -> String {
-    const TARGET_EXCERPT_CHARS: usize = 1600;
-
-    let Ok(raw) = std::fs::read_to_string(file_path) else {
-        return chunk_content.to_string();
-    };
-
-    let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
-    let paragraphs: Vec<&str> = normalized
-        .split("\n\n")
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .collect();
-
-    if paragraphs.is_empty() {
-        return chunk_content.to_string();
-    }
-
-    let chunk_normalized = chunk_content.trim();
-    let anchor = chunk_normalized
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && line.chars().count() >= 8)
-        .unwrap_or(chunk_normalized);
-
-    let paragraph_index = paragraphs
-        .iter()
-        .position(|paragraph| paragraph.contains(chunk_normalized))
-        .or_else(|| {
-            paragraphs
-                .iter()
-                .position(|paragraph| paragraph.contains(anchor))
-        });
-
-    let Some(index) = paragraph_index else {
-        return chunk_content.to_string();
-    };
-
-    let mut start = index;
-    let mut end = index + 1;
-    let mut total_chars: usize = paragraphs[index].chars().count();
-
-    while total_chars < TARGET_EXCERPT_CHARS && (start > 0 || end < paragraphs.len()) {
-        let prev_len = if start > 0 {
-            paragraphs[start - 1].chars().count()
-        } else {
-            0
-        };
-        let next_len = if end < paragraphs.len() {
-            paragraphs[end].chars().count()
-        } else {
-            0
-        };
-
-        if next_len >= prev_len && end < paragraphs.len() {
-            total_chars += next_len;
-            end += 1;
-            continue;
-        }
-
-        if start > 0 {
-            start -= 1;
-            total_chars += prev_len;
-            continue;
-        }
-
-        if end < paragraphs.len() {
-            total_chars += next_len;
-            end += 1;
-        }
-    }
-
-    paragraphs[start..end].join("\n\n")
-}
-
-fn format_references(results: &[(DocumentChunk, f32)]) -> String {
-    let mut lines = Vec::with_capacity(results.len() * 4);
-    for (idx, (chunk, score)) in results.iter().enumerate() {
-        lines.push(format!("#{}  相似度: {:.4}", idx + 1, score));
-        lines.push(format!("来源: {}", chunk.file_path.display()));
-        lines.push(format!("块序号: {}", chunk.chunk_index));
-        lines.push(build_reference_excerpt(&chunk.file_path, &chunk.content));
+        lines.push(format!("来源: {}", evidence.file_path));
+        lines.push(format!("块序号: {}", evidence.chunk_index));
+        lines.push(evidence.content.clone());
         lines.push(String::from(
             "------------------------------------------------------------",
         ));

@@ -1,7 +1,7 @@
 import {
-  CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   UIEvent as ReactUIEvent,
+  WheelEvent as ReactWheelEvent,
   useEffect,
   useMemo,
   useRef,
@@ -37,6 +37,7 @@ import remarkGfm from "remark-gfm";
 import {
   FontPreset,
   FontScale,
+  EnterprisePolicyDto,
   IndexingMode,
   IndexingStatusDto,
   ModelAvailabilityDto,
@@ -64,15 +65,57 @@ type VaultStatsRaw = Partial<
   }
 >;
 
-type Source = {
-  score: number;
-  path: string;
+type AskStatus = "answered" | "insufficient_evidence" | "model_failed_with_evidence";
+
+type CitationItem = {
+  index: number;
+  file_path: string;
+  relative_path: string;
+  chunk_index: number;
+  heading_path: string[];
+  excerpt: string;
+};
+
+type EvidenceItem = {
+  file_path: string;
+  relative_path: string;
+  chunk_index: number;
+  heading_path: string[];
+  block_kind: string;
+  document_reason: "lexical" | "filename" | "both" | "scope" | string;
+  reason: "lexical" | "dense" | "both" | "unknown" | string;
+  document_rank: number;
+  chunk_rank: number;
+  document_raw_score?: number | null;
+  lexical_raw_score?: number | null;
+  dense_raw_score?: number | null;
+  final_score: number;
   content: string;
 };
 
-type ParsedResponse = {
-  synthesis: string;
-  sources: Source[];
+type RetrievalMetrics = {
+  query_analysis_ms: number;
+  doc_recall_ms: number;
+  doc_lexical_ms: number;
+  doc_merge_ms: number;
+  chunk_lexical_ms: number;
+  chunk_dense_ms: number;
+  merge_ms: number;
+  answer_ms: number;
+  doc_candidate_count: number;
+  chunk_candidate_count: number;
+  final_evidence_count: number;
+  query_flags: string[];
+};
+
+type AskResponseStructured = {
+  status: AskStatus;
+  answer: string;
+  question: string;
+  scope_paths: string[];
+  citations: CitationItem[];
+  evidence: EvidenceItem[];
+  metrics: RetrievalMetrics;
 };
 
 type AppSettingsDto = {
@@ -90,6 +133,15 @@ type SearchScopeItem = {
   relative_path: string;
   is_dir: boolean;
   depth: number;
+};
+
+type FileMatch = {
+  file_path: string;
+  file_name: string;
+  parent_dir: string;
+  ext: string;
+  mtime_secs: number;
+  file_size: number;
 };
 
 const TAURI_HOST_MISSING_MESSAGE = "未检测到 Tauri 宿主环境，请使用 cargo tauri dev 启动";
@@ -121,6 +173,12 @@ const DEFAULT_MODEL_SETTINGS: ModelSettingsDto = {
     graph_model: "gpt-4o-mini",
     embed_model: "text-embedding-3-small"
   }
+};
+
+const DEFAULT_ENTERPRISE_POLICY: EnterprisePolicyDto = {
+  egress_mode: "local_only",
+  allowed_model_endpoints: [],
+  allowed_models: []
 };
 
 function detectDefaultLanguage(): Language {
@@ -261,86 +319,6 @@ function normalizeStats(raw: VaultStatsRaw): VaultStats {
   };
 }
 
-function parseResponse(raw: string): ParsedResponse {
-  const normalized = raw.replace(/\r\n/g, "\n");
-  const parts = normalized.split("---");
-  let synthesis = (parts.shift() ?? "").trim();
-  let sourceSection = parts.join("---").replace(/参考来源[:：]/g, "").trim();
-
-  // Fallback format: answer generation failed and backend directly returns
-  // "本地大模型答案生成失败... + references" without the '---' separator.
-  if (!sourceSection) {
-    const firstRefIndex = normalized.search(/^\s*#\d+\s+相似度[:：]/m);
-    if (firstRefIndex >= 0) {
-      synthesis = normalized.slice(0, firstRefIndex).trim();
-      sourceSection = normalized.slice(firstRefIndex).trim();
-    }
-  }
-
-  if (!sourceSection) {
-    return { synthesis, sources: [] };
-  }
-
-  const chunkBlocks = sourceSection
-    .split(/(?=\n?#\d+\s+相似度[:：])/)
-    .map((block) => block.trim())
-    .filter((block) => block.length > 0);
-
-  const sources: Source[] = [];
-
-  for (const block of chunkBlocks) {
-    const scoreMatch = block.match(/相似度[:：]\s*([0-9]*\.?[0-9]+)/);
-    const pathMatch = block.match(/来源[:：]\s*(.+)/);
-    const labeledContentMatch = block.match(/内容[:：]?\s*\n([\s\S]*)/);
-
-    if (!scoreMatch || !pathMatch) {
-      continue;
-    }
-
-    const score = Number.parseFloat(scoreMatch[1]);
-    if (!Number.isFinite(score)) {
-      continue;
-    }
-
-    const path = pathMatch[1].trim();
-    let content = "";
-    if (labeledContentMatch) {
-      content = labeledContentMatch[1].trim();
-    } else {
-      // Current backend format has no explicit "内容:" label.
-      // Strip metadata lines and keep the remaining text as snippet.
-      content = block
-        .split("\n")
-        .filter((line) => {
-          const trimmed = line.trim();
-          if (!trimmed) return false;
-          if (/^#\d+\s+相似度[:：]/.test(trimmed)) return false;
-          if (/^来源[:：]/.test(trimmed)) return false;
-          if (/^块序号[:：]/.test(trimmed)) return false;
-          if (/^-{8,}$/.test(trimmed)) return false;
-          return true;
-        })
-        .join("\n")
-        .trim();
-    }
-
-    if (!path || !content) {
-      continue;
-    }
-
-    sources.push({ score, path, content });
-  }
-
-  return { synthesis, sources };
-}
-
-function clampScore(score: number): number {
-  if (!Number.isFinite(score)) {
-    return 0;
-  }
-  return Math.max(0, Math.min(1, score));
-}
-
 function formatElapsed(ms: number): string {
   const safe = Math.max(0, ms);
   if (safe < 60_000) {
@@ -373,6 +351,48 @@ function buildCollapsedMarkdownPreview(content: string): string {
   return normalized.split("\n").slice(0, 8).join("\n");
 }
 
+function formatEvidenceReason(reason: EvidenceItem["reason"], t: ReturnType<typeof useI18n>["t"]): string {
+  switch (reason) {
+    case "both":
+      return t("evidenceReasonBoth");
+    case "lexical":
+      return t("evidenceReasonLexical");
+    case "dense":
+      return t("evidenceReasonDense");
+    default:
+      return reason;
+  }
+}
+
+function formatDocumentReason(
+  reason: EvidenceItem["document_reason"],
+  t: ReturnType<typeof useI18n>["t"]
+): string {
+  switch (reason) {
+    case "both":
+      return t("documentReasonBoth");
+    case "lexical":
+      return t("documentReasonLexical");
+    case "filename":
+      return t("documentReasonFilename");
+    case "scope":
+      return t("documentReasonScope");
+    default:
+      return reason;
+  }
+}
+
+function statusToneClasses(status: AskStatus): string {
+  switch (status) {
+    case "answered":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+    case "model_failed_with_evidence":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+    default:
+      return "border-[var(--border-strong)] bg-[var(--bg-surface-2)] text-[var(--text-secondary)]";
+  }
+}
+
 function normalizeScopeKey(relativePath: string, fallback: string): string {
   const normalized = relativePath.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
   if (normalized) {
@@ -381,39 +401,10 @@ function normalizeScopeKey(relativePath: string, fallback: string): string {
   return fallback.replaceAll("\\", "/");
 }
 
-function LiquidOrb({ score, semanticLabel }: { score: number; semanticLabel: string }) {
-  const normalized = clampScore(score);
-  const percentage = Math.round(normalized * 100);
-  const liquidTop = `${100 - percentage}%`;
-
-  return (
-    <div className="flex items-center gap-3">
-      <div className="glass-orb" style={{ "--liquid-top": liquidTop } as CSSProperties}>
-        <span className="glass-orb-light" />
-        <div className="glass-orb-fluid">
-          <span className="glass-orb-liquid">
-            <span className="glass-orb-foam" />
-          </span>
-          <span className="glass-orb-liquid glass-orb-liquid-back">
-            <span className="glass-orb-foam" />
-          </span>
-        </div>
-      </div>
-
-      <div className="flex flex-col items-start gap-1 leading-none">
-        <span className="text-sm font-bold text-[var(--accent)]">
-          {percentage}%
-        </span>
-        <span className="text-[10px] tracking-[0.08em] text-[var(--text-secondary)]">{semanticLabel}</span>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const { lang: uiLang, setLang: setUiLang, t } = useI18n();
   const [query, setQuery] = useState("");
-  const [rawAnswer, setRawAnswer] = useState("");
+  const [answerResponse, setAnswerResponse] = useState<AskResponseStructured | null>(null);
   const [loading, setLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [isSearchBarCompact, setIsSearchBarCompact] = useState(false);
@@ -436,10 +427,14 @@ export default function App() {
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
   const [scopeItems, setScopeItems] = useState<SearchScopeItem[]>([]);
   const [scopeLoading, setScopeLoading] = useState(false);
+  const [fileMatches, setFileMatches] = useState<FileMatch[]>([]);
+  const [fileMatchesOpen, setFileMatchesOpen] = useState(false);
   const [selectedScopePaths, setSelectedScopePaths] = useState<string[]>([]);
   const [expandedScopeDirs, setExpandedScopeDirs] = useState<Set<string>>(() => new Set());
   const [expandedSourceKeys, setExpandedSourceKeys] = useState<Set<string>>(() => new Set());
   const [modelSettings, setModelSettings] = useState<ModelSettingsDto>(DEFAULT_MODEL_SETTINGS);
+  const [enterprisePolicy, setEnterprisePolicy] =
+    useState<EnterprisePolicyDto>(DEFAULT_ENTERPRISE_POLICY);
   const [modelAvailability, setModelAvailability] = useState<ModelAvailabilityDto | null>(null);
   const [providerModels, setProviderModels] = useState<ProviderModelsDto>({
     from_folder: [],
@@ -447,6 +442,7 @@ export default function App() {
     merged: []
   });
   const [modelBusy, setModelBusy] = useState(false);
+  const [enterpriseBusy, setEnterpriseBusy] = useState(false);
   const [indexingMode, setIndexingMode] = useState<IndexingMode>("continuous");
   const [resourceBudget, setResourceBudget] = useState<ResourceBudget>("low");
   const [scheduleStart, setScheduleStart] = useState("00:00");
@@ -459,16 +455,21 @@ export default function App() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchStartedAtRef = useRef<number | null>(null);
   const compactHoverUnlockTimerRef = useRef<number | null>(null);
+  const fileMatchesCloseTimerRef = useRef<number | null>(null);
+  const reachedTopWhileCompactRef = useRef(false);
 
-  const parsed = useMemo(() => parseResponse(rawAnswer), [rawAnswer]);
-  const visibleSources = useMemo(
-    () => parsed.sources.slice(0, retrieveTopK),
-    [parsed.sources, retrieveTopK]
+  const visibleEvidence = useMemo(
+    () => answerResponse?.evidence.slice(0, retrieveTopK) ?? [],
+    [answerResponse, retrieveTopK]
+  );
+  const visibleCitations = useMemo(
+    () => answerResponse?.citations.slice(0, retrieveTopK) ?? [],
+    [answerResponse, retrieveTopK]
   );
   const canSubmit = useMemo(() => query.trim().length > 0 && !loading, [loading, query]);
   const showSearchDone = useMemo(
-    () => isSearching && !loading && !error && rawAnswer.trim().length > 0,
-    [error, isSearching, loading, rawAnswer]
+    () => isSearching && !loading && !error && answerResponse !== null,
+    [answerResponse, error, isSearching, loading]
   );
   const selectedScopeLabel = useMemo(() => {
     if (selectedScopePaths.length === 0) {
@@ -711,6 +712,19 @@ export default function App() {
       }
     };
 
+    const loadEnterprisePolicy = async () => {
+      try {
+        const policy = await invoke<EnterprisePolicyDto>("get_enterprise_policy");
+        if (active) {
+          setEnterprisePolicy(policy);
+        }
+      } catch (error) {
+        if (active) {
+          setError(toUiErrorMessage(error));
+        }
+      }
+    };
+
     const validateModelSetup = async () => {
       try {
         const availability = await invoke<ModelAvailabilityDto>("validate_model_setup");
@@ -731,6 +745,7 @@ export default function App() {
     void loadStats();
     void loadSettings();
     void loadIndexingStatus();
+    void loadEnterprisePolicy();
     void loadModelSettings().then(() => {
       void validateModelSetup();
     });
@@ -1020,7 +1035,7 @@ export default function App() {
     }
   };
 
-  const runSearch = async () => {
+  const runSearch = async (overrideScopePaths?: string[]) => {
     if (!canSubmit) {
       return;
     }
@@ -1037,18 +1052,21 @@ export default function App() {
     setLastSearchDurationMs(null);
     searchStartedAtRef.current = performance.now();
     setError(null);
+    setAnswerResponse(null);
     setExpandedSourceKeys(new Set());
+    setFileMatchesOpen(false);
 
     try {
-      const text = await invoke<string>("ask_vault", {
+      const scopePaths = overrideScopePaths ?? selectedScopePaths;
+      const response = await invoke<AskResponseStructured>("ask_vault_structured", {
         query: query.trim(),
         lang: aiLang,
         topK: retrieveTopK,
-        scopePaths: selectedScopePaths
+        scopePaths
       });
-      setRawAnswer(text);
+      setAnswerResponse(response);
     } catch (error) {
-      setRawAnswer("");
+      setAnswerResponse(null);
       setError(toUiErrorMessage(error));
     } finally {
       const startedAt = searchStartedAtRef.current;
@@ -1068,6 +1086,55 @@ export default function App() {
       void runSearch();
     }
   };
+
+  useEffect(() => {
+    if (!isTauriHostAvailable()) {
+      return;
+    }
+
+    if (!isSearchInputFocused || scopeMenuOpen) {
+      setFileMatchesOpen(false);
+      return;
+    }
+
+    const q = query.trim();
+    if (q.length < 2 || isSearchBarCollapsed) {
+      setFileMatches([]);
+      setFileMatchesOpen(false);
+      return;
+    }
+
+    let canceled = false;
+      const timer = window.setTimeout(async () => {
+        try {
+          const matches = await invoke<FileMatch[]>("search_files", {
+            query: q,
+            limit: 20,
+            // File suggestions should not be constrained by the current scope selection;
+            // otherwise selecting one file makes it impossible to discover and multi-select others.
+            scopePaths: undefined
+          });
+          if (canceled) return;
+          setFileMatches(matches);
+          setFileMatchesOpen(matches.length > 0);
+        } catch {
+        if (canceled) return;
+        setFileMatches([]);
+        setFileMatchesOpen(false);
+      }
+    }, 70);
+
+    return () => {
+      canceled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    isSearchBarCollapsed,
+    isSearchInputFocused,
+    query,
+    scopeMenuOpen,
+    // Intentionally not depending on selectedScopePaths; suggestions remain global.
+  ]);
 
   const onMinimize = async () => {
     try {
@@ -1210,6 +1277,37 @@ export default function App() {
       throw err;
     } finally {
       setModelBusy(false);
+    }
+  };
+
+  const onSaveEnterprisePolicy = async () => {
+    setEnterpriseBusy(true);
+    try {
+      const saved = await withTimeout(
+        invoke<EnterprisePolicyDto>("set_enterprise_policy", {
+          payload: enterprisePolicy
+        }),
+        MODEL_ACTION_TIMEOUT_MS,
+        uiLang === "zh-CN" ? "保存企业策略超时，请重试。" : "Saving enterprise policy timed out."
+      );
+      setEnterprisePolicy(saved);
+      try {
+        const availability = await withTimeout(
+          invoke<ModelAvailabilityDto>("validate_model_setup"),
+          MODEL_ACTION_TIMEOUT_MS,
+          uiLang === "zh-CN" ? "模型校验超时，请重试。" : "Model validation timed out."
+        );
+        setModelAvailability(availability);
+      } catch (err) {
+        setModelAvailability(null);
+        setError(toUiErrorMessage(err));
+      }
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      throw err;
+    } finally {
+      setEnterpriseBusy(false);
     }
   };
 
@@ -1409,6 +1507,7 @@ export default function App() {
     const scrollTop = event.currentTarget.scrollTop;
     const shouldCompact = scrollTop > 2;
     if (shouldCompact) {
+      reachedTopWhileCompactRef.current = false;
       setAllowCompactHoverExpand(false);
       if (compactHoverUnlockTimerRef.current !== null) {
         window.clearTimeout(compactHoverUnlockTimerRef.current);
@@ -1420,8 +1519,20 @@ export default function App() {
       setIsSearchBarHovering(false);
       setIsSearchInputFocused(false);
       searchInputRef.current?.blur();
+      setIsSearchBarCompact((prev) => (prev === shouldCompact ? prev : shouldCompact));
+      return;
     }
-    setIsSearchBarCompact((prev) => (prev === shouldCompact ? prev : shouldCompact));
+    reachedTopWhileCompactRef.current = true;
+  };
+
+  const onResultWheel = (event: ReactWheelEvent<HTMLElement>) => {
+    if (!isSearchBarCompact) {
+      return;
+    }
+    if (event.deltaY < 0 && event.currentTarget.scrollTop <= 2 && reachedTopWhileCompactRef.current) {
+      reachedTopWhileCompactRef.current = false;
+      setIsSearchBarCompact(false);
+    }
   };
 
   return (
@@ -1523,11 +1634,9 @@ export default function App() {
                     setIsSearchBarHovering(false);
                   }
                 }}
-                className={`relative mx-auto w-full transition-[max-width,opacity,box-shadow,background-color,border-color] duration-300 ease-out will-change-[max-width,opacity] ${
-                  isSearchBarCompact ? "focus-within:shadow-none" : "focus-within:shadow-[var(--float-shadow-focus)]"
-                } ${
+                className={`relative mx-auto w-full transition-[max-width,opacity,box-shadow,background-color,border-color] duration-300 ease-out will-change-[max-width,opacity] focus-within:ring-1 focus-within:ring-[var(--line-soft)] focus-within:shadow-[var(--float-shadow-focus)] ${
                   isSearchBarCollapsed
-                    ? "max-w-[300px] rounded-full overflow-hidden border-0 bg-transparent px-0 py-0 shadow-none ring-0"
+                    ? "max-w-[300px] rounded-full overflow-hidden border-0 bg-transparent px-0 py-0 shadow-none ring-0 focus-within:ring-0"
                     : isSearching && isSearchBarCompact
                     ? "max-w-3xl rounded-full px-4 py-2.5"
                     : "max-w-4xl rounded-xl px-6 py-5"
@@ -1537,8 +1646,8 @@ export default function App() {
                     : isSearching && isSearchBarCompact
                     ? "bg-[var(--bg-surface-1)] ring-0 shadow-[0_2px_10px_rgba(15,23,42,0.08)]"
                     : isSearching
-                    ? "bg-[var(--bg-surface-1)] ring-1 ring-[var(--line-soft)] shadow-[var(--float-shadow)]"
-                    : "bg-[var(--bg-surface-1)] ring-1 ring-transparent shadow-[var(--float-shadow)] hover:ring-[var(--line-soft)]"
+                    ? "bg-[var(--bg-surface-1)] ring-0 shadow-[var(--float-shadow)]"
+                    : "bg-[var(--bg-surface-1)] ring-0 shadow-[var(--float-shadow)]"
                 }`}
               >
                 {isSearchBarCollapsed ? (
@@ -1701,17 +1810,99 @@ export default function App() {
                       if (isSearchBarCompact) {
                         setIsSearchBarHovering(true);
                       }
+                      if (fileMatchesCloseTimerRef.current != null) {
+                        window.clearTimeout(fileMatchesCloseTimerRef.current);
+                        fileMatchesCloseTimerRef.current = null;
+                      }
                     }}
                     onBlur={() => {
                       setIsSearchInputFocused(false);
                       if (isSearchBarCompact && !scopeMenuOpen) {
                         setIsSearchBarHovering(false);
                       }
+                      fileMatchesCloseTimerRef.current = window.setTimeout(() => {
+                        setFileMatchesOpen(false);
+                      }, 120);
                     }}
                     placeholder={t("askPlaceholder")}
                     className="w-full flex-1 border-none bg-transparent pr-10 text-xl text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-0"
                   />
                 </div>
+                  <AnimatePresence>
+                    {fileMatchesOpen && fileMatches.length > 0 && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.18, ease: "easeOut" }}
+                        onMouseDown={(event) => event.preventDefault()}
+                      className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl bg-[var(--bg-surface-1)] ring-1 ring-[var(--line-soft)] shadow-[var(--float-shadow)]"
+                      >
+                        <div className="px-3 py-2 text-[11px] text-[var(--text-muted)]">
+                        {uiLang === "zh-CN" ? "相关文件" : "Relevant files"}
+                        </div>
+                      <div className="settings-scrollbar max-h-72 overflow-y-auto pr-1">
+                        {fileMatches.slice(0, 20).map((item) => {
+                          const isSelected = selectedScopeSet.has(item.file_path);
+                          const parent = item.parent_dir || "";
+                          const relative =
+                            watchRoot && parent.toLowerCase().startsWith(watchRoot.toLowerCase())
+                              ? parent.slice(watchRoot.length).replace(/^[/\\\\]/, "")
+                              : parent;
+                          return (
+                            <button
+                              key={item.file_path}
+                              type="button"
+                              aria-pressed={isSelected}
+                              onClick={() => {
+                                setSelectedScopePaths((prev) => {
+                                  if (prev.includes(item.file_path)) {
+                                    return prev.filter((p) => p !== item.file_path);
+                                  }
+                                  return [...prev, item.file_path];
+                                });
+                                // Selecting a file here should only set scope, not trigger a query.
+                                requestAnimationFrame(() => searchInputRef.current?.focus());
+                              }}
+                              className={`group flex w-full items-center gap-3 px-3 py-2 text-left transition-[background-color,transform] duration-180 ease-out active:scale-[0.995] ${
+                                isSelected
+                                  ? "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]"
+                                  : "hover:bg-[color-mix(in_srgb,var(--accent)_6%,transparent)]"
+                              }`}
+                            >
+                              <FileText
+                                className={`h-4 w-4 shrink-0 ${
+                                  isSelected ? "text-[var(--accent)]" : "text-[var(--text-secondary)]"
+                                }`}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm text-[var(--text-primary)]">
+                                  {item.file_name || item.file_path}
+                                </span>
+                                <span className="block truncate text-[11px] text-[var(--text-muted)]">
+                                  {relative || item.parent_dir}
+                                </span>
+                              </span>
+                              <span
+                                className={`ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors duration-180 ease-out ${
+                                  isSelected
+                                    ? "bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)]"
+                                    : "bg-[color-mix(in_srgb,var(--text-muted)_6%,transparent)] text-[color-mix(in_srgb,var(--text-muted)_20%,transparent)] group-hover:bg-[color-mix(in_srgb,var(--accent)_8%,transparent)]"
+                                }`}
+                              >
+                                <Check
+                                  className={`h-3.5 w-3.5 transition-[opacity,transform] duration-180 ease-out ${
+                                    isSelected ? "opacity-100 scale-100" : "opacity-0 scale-75"
+                                  }`}
+                                />
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 <AnimatePresence>
                   {isSearching && loading && (
                     <motion.div
@@ -1754,6 +1945,7 @@ export default function App() {
                   transition={{ duration: 0.24, ease: "easeOut" }}
                   className="no-scrollbar mx-auto h-full w-full max-w-4xl overflow-y-auto"
                   onScroll={onResultScroll}
+                  onWheel={onResultWheel}
                 >
                   {loading && (
                     <div className="flex items-center justify-between px-1 py-3 text-sm text-[var(--text-secondary)]">
@@ -1773,14 +1965,18 @@ export default function App() {
                     </div>
                   )}
 
-                  {!loading && !error && parsed.synthesis && (
+                  {!loading && !error && answerResponse && (
                     <article className="pb-8">
-                      <div className="mb-6 border-l-2 border-[var(--accent)] pl-4">
-                        <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className={`mb-5 rounded-xl border px-4 py-3 text-sm ${statusToneClasses(answerResponse.status)}`}>
+                        <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
-                            <Sparkles className="h-4 w-4 text-[var(--accent)]" />
-                            <span className="text-xs font-bold tracking-widest text-[var(--accent)]">
-                              {t("synthesis")}
+                            <Sparkles className="h-4 w-4" />
+                            <span className="font-semibold">
+                              {answerResponse.status === "answered"
+                                ? t("answerStatusAnswered")
+                                : answerResponse.status === "model_failed_with_evidence"
+                                  ? t("answerStatusModelFailed")
+                                  : t("answerStatusInsufficient")}
                             </span>
                           </div>
                           {lastSearchDurationMs !== null ? (
@@ -1789,27 +1985,89 @@ export default function App() {
                             </span>
                           ) : null}
                         </div>
-                        <div className="md-preview mt-1 break-words font-sans text-lg leading-relaxed text-[var(--text-primary)]">
-                          <ReactMarkdown
-                            remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-                            rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                          >
-                            {parsed.synthesis}
-                          </ReactMarkdown>
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--text-secondary)]">
+                          <span>{t("docCandidateCount", { count: answerResponse.metrics.doc_candidate_count })}</span>
+                          <span>{t("chunkCandidateCount", { count: answerResponse.metrics.chunk_candidate_count })}</span>
+                          <span>{t("finalEvidenceCount", { count: answerResponse.metrics.final_evidence_count })}</span>
                         </div>
                       </div>
 
-                      {visibleSources.length > 0 && (
+                      {answerResponse.answer.trim().length > 0 && (
+                        <div className="mb-6 border-l-2 border-[var(--accent)] pl-4">
+                          <div className="mb-3 flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-[var(--accent)]" />
+                            <span className="text-xs font-bold tracking-widest text-[var(--accent)]">
+                              {t("synthesis")}
+                            </span>
+                          </div>
+                          <div className="md-preview mt-1 break-words font-sans text-lg leading-relaxed text-[var(--text-primary)]">
+                            <ReactMarkdown
+                              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                              rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                            >
+                              {answerResponse.answer}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      )}
+
+                      {visibleCitations.length > 0 && (
+                        <section className="mt-6">
+                          <div className="mb-3 text-[11px] tracking-[0.16em] text-[var(--text-secondary)] uppercase">
+                            {t("citationsTitle")}
+                          </div>
+                          <div className="space-y-3">
+                            {visibleCitations.map((citation) => (
+                              <div
+                                key={`${citation.file_path}-${citation.chunk_index}`}
+                                className="rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-4 py-3"
+                              >
+                                <div className="mb-2 flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-semibold text-[var(--accent)]">
+                                      [{citation.index}] {citation.relative_path || citation.file_path}
+                                    </div>
+                                    {citation.heading_path.length > 0 ? (
+                                      <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                                        {citation.heading_path.join(" > ")}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => void onOpenSourceLocation(citation.file_path)}
+                                    className="p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
+                                    aria-label={t("openSourceLocation")}
+                                    title={t("openSourceLocation")}
+                                  >
+                                    <FolderOpen className="h-4 w-4" />
+                                  </button>
+                                </div>
+                                <div className="md-preview md-preview-source text-sm leading-6 text-[var(--text-secondary)]">
+                                  <ReactMarkdown
+                                    remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                                    rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                                  >
+                                    {citation.excerpt}
+                                  </ReactMarkdown>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {visibleEvidence.length > 0 && (
                         <section className="mt-8">
                           <div className="mb-3 text-[11px] tracking-[0.16em] text-[var(--text-secondary)] uppercase">
-                            {t("contextSources")}
+                            {t("evidenceTitle")}
                           </div>
 
                           <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-2">
-                            {visibleSources.map((source, index) => {
-                              const sourceKey = `${source.path}-${index}`;
+                            {visibleEvidence.map((source, index) => {
+                              const sourceKey = `${source.file_path}-${source.chunk_index}-${index}`;
                               const expanded = expandedSourceKeys.has(sourceKey);
-                              const markdownPreview = isMarkdownFile(source.path);
+                              const markdownPreview = isMarkdownFile(source.file_path);
                               const markdownContent = expanded
                                 ? source.content
                                 : buildCollapsedMarkdownPreview(source.content);
@@ -1823,11 +2081,27 @@ export default function App() {
                                     expanded ? "md:col-span-2" : ""
                                   }`}
                                 >
-                                  <LiquidOrb score={source.score} semanticLabel={t("semanticRelevance")} />
-
                                   <div className="min-w-0 flex-1 pr-5">
-                                    <div className="truncate font-mono text-xs text-[var(--text-secondary)]" title={source.path}>
-                                      {source.path}
+                                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                      <span className="rounded-full bg-[var(--bg-surface-2)] px-2 py-0.5 text-[var(--text-secondary)]">
+                                        {formatDocumentReason(source.document_reason, t)}
+                                      </span>
+                                      <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[var(--accent)]">
+                                        {formatEvidenceReason(source.reason, t)}
+                                      </span>
+                                      <span className="text-[var(--text-secondary)]">
+                                        {t("documentRankLabel", { count: source.document_rank })}
+                                      </span>
+                                      <span className="text-[var(--text-secondary)]">
+                                        {t("chunkRankLabel", { count: source.chunk_rank })}
+                                      </span>
+                                    </div>
+                                    <div className="mt-2 truncate font-mono text-xs text-[var(--text-secondary)]" title={source.file_path}>
+                                      {source.relative_path || source.file_path}
+                                    </div>
+                                    <div className="mt-1 text-[11px] text-[var(--text-muted)]">
+                                      {source.block_kind}
+                                      {source.heading_path.length > 0 ? ` · ${source.heading_path.join(" > ")}` : ""}
                                     </div>
                                     {markdownPreview ? (
                                       <div
@@ -1857,7 +2131,7 @@ export default function App() {
 
                                   <button
                                     type="button"
-                                    onClick={() => void onOpenSourceLocation(source.path)}
+                                    onClick={() => void onOpenSourceLocation(source.file_path)}
                                     className="absolute top-3 right-8 p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
                                     aria-label={t("openSourceLocation")}
                                     title={t("openSourceLocation")}
@@ -1884,6 +2158,54 @@ export default function App() {
                           </div>
                         </section>
                       )}
+
+                      <section className="mt-8">
+                        <div className="mb-3 text-[11px] tracking-[0.16em] text-[var(--text-secondary)] uppercase">
+                          {t("retrievalMetricsTitle")}
+                        </div>
+                        {answerResponse.metrics.query_flags.length > 0 ? (
+                          <div className="mb-3 flex flex-wrap gap-2 text-[11px]">
+                            {answerResponse.metrics.query_flags.map((flag) => (
+                              <span
+                                key={flag}
+                                className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-0.5 text-[var(--text-secondary)]"
+                              >
+                                {flag}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className="grid grid-cols-2 gap-3 text-xs text-[var(--text-secondary)] md:grid-cols-4">
+                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
+                            <div>{t("metricQueryAnalysis")}</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.query_analysis_ms}ms</div>
+                          </div>
+                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
+                            <div>{t("metricDocRecall")}</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.doc_recall_ms}ms</div>
+                          </div>
+                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
+                            <div>{t("metricDocLexical")}</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.doc_lexical_ms}ms</div>
+                          </div>
+                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
+                            <div>{t("metricDocMerge")}</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.doc_merge_ms}ms</div>
+                          </div>
+                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
+                            <div>{t("metricChunkLexical")}</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.chunk_lexical_ms}ms</div>
+                          </div>
+                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
+                            <div>{t("metricChunkDense")}</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.chunk_dense_ms}ms</div>
+                          </div>
+                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
+                            <div>{t("metricMerge")}</div>
+                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.merge_ms}ms</div>
+                          </div>
+                        </div>
+                      </section>
                     </article>
                   )}
                 </motion.section>
@@ -1936,11 +2258,15 @@ export default function App() {
                 themeMode={themeMode}
                 onThemeModeChange={setThemeMode}
                 modelSettings={modelSettings}
+                enterprisePolicy={enterprisePolicy}
                 modelAvailability={modelAvailability}
                 providerModels={providerModels}
                 modelBusy={modelBusy}
+                enterpriseBusy={enterpriseBusy}
                 onModelSettingsChange={setModelSettings}
+                onEnterprisePolicyChange={setEnterprisePolicy}
                 onSaveModelSettings={onSaveModelSettings}
+                onSaveEnterprisePolicy={onSaveEnterprisePolicy}
                 onProbeModelProvider={onProbeModelProvider}
                 onRefreshProviderModels={onRefreshProviderModels}
                 onPullModel={onPullModel}

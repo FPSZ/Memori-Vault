@@ -20,8 +20,8 @@ Thumbs.db
 ui/node_modules/
 ui/dist/
 
-# Plan
-plan.md
+# Local planning scratchpads
+/plan.md
 UI.md
 AI.md
 RELEASE_NOTES_v0.1.0.md

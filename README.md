@@ -15,7 +15,7 @@ It combines semantic chunking, vector retrieval, and asynchronous Graph-RAG extr
 ## Highlights (Current)
 
 - Local-first ingestion pipeline (`.md` / `.txt`) with watcher + semantic chunking.
-- Hybrid retrieval: vector similarity + graph context.
+- Structured retrieval pipeline with document routing, chunk retrieval, citations, and evidence output.
 - Async indexing refactor:
   - fast path for searchable chunks first
   - deferred graph build in background queue
@@ -36,6 +36,23 @@ It combines semantic chunking, vector retrieval, and asynchronous Graph-RAG extr
   - markdown preview for `.md`
   - expand/collapse
   - open file location
+
+## Current Validation Status
+
+- Local-first runtime and enterprise policy gates are implemented.
+- Citation validity is currently strong in the checked-in offline regression corpus.
+- Retrieval precision is not yet at a strong mixed-corpus bar.
+  - `core_docs` offline baseline: `Top-1=0.6970` on 6 indexed documents
+  - `repo_mixed` offline baseline: `Top-1=0.4773` on 11 indexed documents
+- These are small checked-in regression baselines, not a validated 50k-document accuracy result.
+- Live local-model validation is still blocked on local Ollama / embedding availability on the current machine.
+
+Current posture:
+
+- docs-only retrieval is usable as an internal baseline
+- mixed-corpus retrieval should still be treated as beta/internal validation, not as a finished accuracy claim
+
+Details: [docs/RETRIEVAL_BASELINE.md](./docs/RETRIEVAL_BASELINE.md)
 
 ## Runtime Modes
 

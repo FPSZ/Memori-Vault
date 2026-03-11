@@ -7,4 +7,5 @@ authors.workspace = true
 description = "Memori-Vault 解析模块占位骨架"
 
 [dependencies]
+pulldown-cmark = "0.13.0"
 thiserror.workspace = true
