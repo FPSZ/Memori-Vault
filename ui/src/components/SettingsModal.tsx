@@ -55,11 +55,14 @@ export type ProviderModelsDto = {
 };
 
 export type ModelAvailabilityDto = {
+  configured: boolean;
   reachable: boolean;
   models: string[];
   missing_roles: string[];
   errors: Array<{ code: string; message: string }>;
   checked_provider?: string | null;
+  status_code?: string | null;
+  status_message?: string | null;
 };
 
 export type IndexingStatusDto = {

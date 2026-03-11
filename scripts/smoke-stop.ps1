@@ -21,12 +21,16 @@ if (-not (Test-Path $sessionFile)) {
 $uiPid = $null
 $desktopPid = $null
 $serverPid = $null
+$uiPort = 1420
 
 if (Test-Path $sessionFile) {
     $session = Get-Content $sessionFile -Raw | ConvertFrom-Json
     $uiPid = $session.uiPid
     $desktopPid = $session.desktopPid
     $serverPid = $session.serverPid
+    if ($session.uiPort) {
+        $uiPort = [int]$session.uiPort
+    }
 }
 
 Stop-IfRunning -ProcessId $desktopPid -Name "memori-desktop"
@@ -34,12 +38,12 @@ Stop-IfRunning -ProcessId $serverPid -Name "memori-server"
 Stop-IfRunning -ProcessId $uiPid -Name "ui dev server"
 
 try {
-    $rows = netstat -ano | Select-String ":1420"
+    $rows = netstat -ano | Select-String ":$uiPort"
     foreach ($row in $rows) {
         $line = $row.ToString().Trim()
         if ($line -match "LISTENING\s+(\d+)$") {
             $portPid = [int]$matches[1]
-            Stop-IfRunning -ProcessId $portPid -Name "ui(1420)"
+            Stop-IfRunning -ProcessId $portPid -Name "ui($uiPort)"
         }
     }
 }

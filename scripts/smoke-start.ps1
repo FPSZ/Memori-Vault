@@ -1,6 +1,7 @@
 param(
-    [string]$WatchRoot = "D:\AI\memori-smoke",
+    [string]$WatchRoot = "",
     [string]$DbPath = "",
+    [string]$OllamaModelsRoot = "",
     [string]$UiHost = "127.0.0.1",
     [int]$UiPort = 1420,
     [string]$ServerAddr = "127.0.0.1:3757",
@@ -26,9 +27,16 @@ function Write-WarnMsg([string]$Message) {
 }
 
 function Find-OllamaExe {
-    $candidate = "D:\AI\Ollama\ollama.exe"
-    if (Test-Path $candidate) {
-        return $candidate
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
+        (Join-Path $env:ProgramFiles "Ollama\ollama.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Ollama\ollama.exe")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
     }
 
     $cmd = Get-Command ollama -ErrorAction SilentlyContinue
@@ -94,8 +102,12 @@ if (-not (Test-Path (Join-Path $repoRoot "Cargo.toml"))) {
     throw "Cannot find Cargo.toml in repo root. Run this script from <repo>\scripts\smoke-start.ps1."
 }
 
+if ([string]::IsNullOrWhiteSpace($WatchRoot)) {
+    $WatchRoot = Join-Path $repoRoot "target\smoke\watch-root"
+}
+
 if ([string]::IsNullOrWhiteSpace($DbPath)) {
-    $DbPath = Join-Path $repoRoot ".memori.db"
+    $DbPath = Join-Path $repoRoot "target\smoke\memori-smoke.db"
 }
 
 $uiDir = Join-Path $repoRoot "ui"
@@ -103,15 +115,32 @@ if (-not (Test-Path (Join-Path $uiDir "package.json"))) {
     throw "Cannot find ui/package.json."
 }
 
+if ($DbPath -match "[/\\]") {
+    $dbParent = Split-Path -Parent $DbPath
+    if (-not [string]::IsNullOrWhiteSpace($dbParent)) {
+        New-Item -ItemType Directory -Force $dbParent | Out-Null
+    }
+}
 New-Item -ItemType Directory -Force $WatchRoot | Out-Null
 
 $ollamaExe = $null
-$ollamaModels = $env:OLLAMA_MODELS
+$ollamaModels = $OllamaModelsRoot
+if ([string]::IsNullOrWhiteSpace($ollamaModels)) {
+    $ollamaModels = $env:OLLAMA_MODELS
+}
 if ([string]::IsNullOrWhiteSpace($ollamaModels)) {
     $ollamaModels = [Environment]::GetEnvironmentVariable("OLLAMA_MODELS", "User")
 }
+if ([string]::IsNullOrWhiteSpace($ollamaModels)) {
+    $ollamaModels = [Environment]::GetEnvironmentVariable("OLLAMA_MODELS", "Machine")
+}
+if (-not [string]::IsNullOrWhiteSpace($ollamaModels) -and -not (Test-Path $ollamaModels)) {
+    throw "Configured Ollama models directory does not exist: $ollamaModels"
+}
+
 if (-not [string]::IsNullOrWhiteSpace($ollamaModels)) {
-    $env:OLLAMA_MODELS = $ollamaModels
+    $env:OLLAMA_MODELS = (Resolve-Path $ollamaModels).Path
+    $ollamaModels = $env:OLLAMA_MODELS
 }
 
 Write-Info ("Repo: " + $repoRoot)
@@ -125,6 +154,9 @@ if (-not $SkipModelCheck) {
     Write-Info ("Ollama: " + $ollamaExe)
     if (-not [string]::IsNullOrWhiteSpace($ollamaModels)) {
         Write-Info ("OLLAMA_MODELS: " + $ollamaModels)
+    }
+    else {
+        Write-WarnMsg "Ollama models directory is not set. Start the app first and pick it in Settings, or pass -OllamaModelsRoot for script-driven smoke."
     }
 
     $modelList = & $ollamaExe list | Out-String

@@ -28,6 +28,8 @@ const DEFAULT_WINDOW_WIDTH: u32 = 1480;
 const DEFAULT_WINDOW_HEIGHT: u32 = 920;
 const MIN_WINDOW_WIDTH: u32 = 900;
 const MIN_WINDOW_HEIGHT: u32 = 620;
+const MODEL_NOT_CONFIGURED_CODE: &str = "model_not_configured";
+const MODEL_NOT_CONFIGURED_MESSAGE: &str = "未配置模型，请在 设置 > 模型 中配置";
 
 struct DesktopState {
     engine: Arc<Mutex<Option<MemoriEngine>>>,
@@ -128,11 +130,14 @@ struct ModelErrorItem {
 
 #[derive(Debug, Clone, Serialize)]
 struct ModelAvailabilityDto {
+    configured: bool,
     reachable: bool,
     models: Vec<String>,
     missing_roles: Vec<String>,
     errors: Vec<ModelErrorItem>,
     checked_provider: Option<String>,
+    status_code: Option<String>,
+    status_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -230,9 +235,20 @@ async fn get_vault_stats(state: State<'_, DesktopState>) -> Result<VaultStats, S
     let init_error_guard = state.init_error.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
         if let Some(message) = init_error_guard.as_ref() {
+            if is_model_not_configured_message(message) {
+                return Ok(VaultStats {
+                    document_count: 0,
+                    chunk_count: 0,
+                    graph_node_count: 0,
+                });
+            }
             return Err(format!("引擎初始化失败: {message}"));
         }
-        return Err("引擎尚在初始化中，请稍后重试。".to_string());
+        return Ok(VaultStats {
+            document_count: 0,
+            chunk_count: 0,
+            graph_node_count: 0,
+        });
     };
     engine
         .get_vault_stats()
@@ -246,9 +262,14 @@ async fn get_indexing_status(state: State<'_, DesktopState>) -> Result<IndexingS
     let init_error_guard = state.init_error.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
         if let Some(message) = init_error_guard.as_ref() {
+            if is_model_not_configured_message(message) {
+                let settings = load_app_settings()?;
+                return Ok(default_indexing_status(&settings));
+            }
             return Err(format!("引擎初始化失败: {message}"));
         }
-        return Err("引擎尚在初始化中，请稍后重试。".to_string());
+        let settings = load_app_settings()?;
+        return Ok(default_indexing_status(&settings));
     };
     engine
         .get_indexing_status()
@@ -526,13 +547,17 @@ async fn probe_model_provider(
     .await;
     match result {
         Ok(models) => Ok(ModelAvailabilityDto {
+            configured: true,
             reachable: true,
             models: models.merged,
             missing_roles: Vec::new(),
             errors: Vec::new(),
             checked_provider: Some(provider_to_string(provider)),
+            status_code: None,
+            status_message: None,
         }),
         Err(err) => Ok(ModelAvailabilityDto {
+            configured: true,
             reachable: false,
             models: Vec::new(),
             missing_roles: Vec::new(),
@@ -541,6 +566,8 @@ async fn probe_model_provider(
                 message: err.message,
             }],
             checked_provider: Some(provider_to_string(provider)),
+            status_code: None,
+            status_message: None,
         }),
     }
 }
@@ -548,8 +575,22 @@ async fn probe_model_provider(
 #[tauri::command]
 async fn validate_model_setup() -> Result<ModelAvailabilityDto, String> {
     let settings = load_app_settings()?;
-    let model_settings = resolve_model_settings(&settings);
-    let active = resolve_active_runtime_settings(&model_settings);
+    let Some(active) = resolve_configured_active_runtime_settings(&settings) else {
+        let checked_provider = resolve_explicit_provider(&settings).map(provider_to_string);
+        return Ok(ModelAvailabilityDto {
+            configured: false,
+            reachable: false,
+            models: Vec::new(),
+            missing_roles: Vec::new(),
+            errors: vec![ModelErrorItem {
+                code: MODEL_NOT_CONFIGURED_CODE.to_string(),
+                message: MODEL_NOT_CONFIGURED_MESSAGE.to_string(),
+            }],
+            checked_provider,
+            status_code: Some(MODEL_NOT_CONFIGURED_CODE.to_string()),
+            status_message: Some(MODEL_NOT_CONFIGURED_MESSAGE.to_string()),
+        });
+    };
     let policy = resolve_enterprise_policy(&settings);
     validate_runtime_model_settings(&to_model_policy(&policy), &to_runtime_model_config(&active))
         .map_err(|violation| violation.message)?;
@@ -566,6 +607,7 @@ async fn validate_model_setup() -> Result<ModelAvailabilityDto, String> {
         Ok(models) => {
             let merged = models.merged;
             let mut missing_roles = Vec::new();
+            let mut errors = Vec::new();
             if !model_exists(&merged, &active.chat_model) {
                 missing_roles.push("chat".to_string());
             }
@@ -575,16 +617,35 @@ async fn validate_model_setup() -> Result<ModelAvailabilityDto, String> {
             if !model_exists(&merged, &active.embed_model) {
                 missing_roles.push("embed".to_string());
             }
+            if provider == ModelProvider::OpenAiCompatible
+                && !missing_roles.iter().any(|role| role == "embed")
+                && let Err(err) = probe_openai_compatible_embedding(
+                    &active.endpoint,
+                    active.api_key.as_deref(),
+                    &active.embed_model,
+                )
+                .await
+            {
+                missing_roles.push("embed".to_string());
+                errors.push(ModelErrorItem {
+                    code: err.code,
+                    message: err.message,
+                });
+            }
 
             Ok(ModelAvailabilityDto {
-                reachable: true,
+                configured: true,
+                reachable: errors.is_empty(),
                 models: merged,
                 missing_roles,
-                errors: Vec::new(),
+                errors,
                 checked_provider: Some(provider_to_string(provider)),
+                status_code: None,
+                status_message: None,
             })
         }
         Err(err) => Ok(ModelAvailabilityDto {
+            configured: true,
             reachable: false,
             models: Vec::new(),
             missing_roles: vec!["chat".to_string(), "graph".to_string(), "embed".to_string()],
@@ -593,6 +654,8 @@ async fn validate_model_setup() -> Result<ModelAvailabilityDto, String> {
                 message: err.message,
             }],
             checked_provider: Some(provider_to_string(provider)),
+            status_code: None,
+            status_message: None,
         }),
     }
 }
@@ -1027,9 +1090,19 @@ async fn replace_engine(
 
     let result: Result<(), String> = async {
         let settings = load_app_settings()?;
+        let Some(active_runtime) = resolve_configured_active_runtime_settings(&settings) else {
+            {
+                let mut init_guard = init_error.lock().await;
+                *init_guard = Some(MODEL_NOT_CONFIGURED_MESSAGE.to_string());
+            }
+            info!(
+                reason = reason,
+                watch_root = %watch_root.display(),
+                "memori-desktop daemon skipped because model runtime is not configured"
+            );
+            return Ok(());
+        };
         let policy = resolve_enterprise_policy(&settings);
-        let model_settings = resolve_model_settings(&settings);
-        let active_runtime = resolve_active_runtime_settings(&model_settings);
         validate_runtime_model_settings(
             &to_model_policy(&policy),
             &to_runtime_model_config(&active_runtime),
@@ -1684,6 +1757,74 @@ fn resolve_active_runtime_settings(settings: &ModelSettingsDto) -> ActiveRuntime
     }
 }
 
+fn resolve_explicit_provider(settings: &AppSettings) -> Option<ModelProvider> {
+    settings
+        .active_provider
+        .clone()
+        .or_else(|| settings.provider.clone())
+        .or_else(|| std::env::var(MEMORI_MODEL_PROVIDER_ENV).ok())
+        .and_then(|value| {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(ModelProvider::from_value(&trimmed))
+            }
+        })
+}
+
+fn resolve_configured_active_runtime_settings(
+    settings: &AppSettings,
+) -> Option<ActiveRuntimeModelSettings> {
+    let explicit_provider = resolve_explicit_provider(settings)?;
+    let mut model_settings = resolve_model_settings(settings);
+    model_settings.active_provider = provider_to_string(explicit_provider);
+    let active = resolve_active_runtime_settings(&model_settings);
+
+    let configured = if explicit_provider == ModelProvider::OpenAiCompatible {
+        !active.endpoint.trim().is_empty()
+            && active
+                .api_key
+                .as_deref()
+                .map(|value| !value.trim().is_empty())
+                .unwrap_or(false)
+            && !active.chat_model.trim().is_empty()
+            && !active.graph_model.trim().is_empty()
+            && !active.embed_model.trim().is_empty()
+    } else {
+        !active.endpoint.trim().is_empty()
+            && !active.chat_model.trim().is_empty()
+            && !active.graph_model.trim().is_empty()
+            && !active.embed_model.trim().is_empty()
+    };
+
+    if configured { Some(active) } else { None }
+}
+
+fn is_model_not_configured_message(message: &str) -> bool {
+    message.contains(MODEL_NOT_CONFIGURED_CODE) || message.contains(MODEL_NOT_CONFIGURED_MESSAGE)
+}
+
+fn default_indexing_status(settings: &AppSettings) -> IndexingStatus {
+    let indexing = resolve_indexing_config(settings);
+    IndexingStatus {
+        phase: "idle".to_string(),
+        indexed_docs: 0,
+        indexed_chunks: 0,
+        graphed_chunks: 0,
+        graph_backlog: 0,
+        last_scan_at: None,
+        last_error: None,
+        paused: false,
+        mode: indexing.mode,
+        resource_budget: indexing.resource_budget,
+        rebuild_state: "ready".to_string(),
+        rebuild_reason: None,
+        index_format_version: 0,
+        parser_format_version: 0,
+    }
+}
+
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
     value.and_then(|v| {
         let trimmed = v.trim().to_string();
@@ -1866,6 +2007,80 @@ async fn list_openai_compatible_models(
                 message: format!("解析远程模型列表失败: {err}"),
             })?;
     Ok(parsed.data.into_iter().map(|m| m.id).collect())
+}
+
+async fn probe_openai_compatible_embedding(
+    endpoint: &str,
+    api_key: Option<&str>,
+    model: &str,
+) -> Result<(), ProviderModelFetchError> {
+    #[derive(Debug, Serialize)]
+    struct OpenAiEmbeddingProbeRequest<'a> {
+        model: &'a str,
+        input: &'a str,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct OpenAiEmbeddingProbeResponse {
+        data: Vec<OpenAiEmbeddingProbeItem>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct OpenAiEmbeddingProbeItem {
+        embedding: Vec<f32>,
+    }
+
+    let url = format!("{}/v1/embeddings", endpoint.trim_end_matches('/'));
+    let mut request = reqwest::Client::new()
+        .post(url)
+        .json(&OpenAiEmbeddingProbeRequest {
+            model,
+            input: "ping",
+        });
+    if let Some(key) = api_key {
+        request = request.bearer_auth(key);
+    }
+    let response = timeout(
+        Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS),
+        request.send(),
+    )
+    .await
+    .map_err(|_| ProviderModelFetchError {
+        code: "request_timeout".to_string(),
+        message: format!("向量模型探测超时({}s)", PROVIDER_HTTP_TIMEOUT_SECS),
+    })?
+    .map_err(|err| ProviderModelFetchError {
+        code: "embed_probe_failed".to_string(),
+        message: format!("向量模型探测失败: {err}"),
+    })?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(ProviderModelFetchError {
+            code: "embed_probe_failed".to_string(),
+            message: format!("status={}, body={body}", status),
+        });
+    }
+    let parsed: OpenAiEmbeddingProbeResponse =
+        response
+            .json()
+            .await
+            .map_err(|err| ProviderModelFetchError {
+                code: "embed_probe_failed".to_string(),
+                message: format!("解析向量模型探测响应失败: {err}"),
+            })?;
+    let ok = parsed
+        .data
+        .first()
+        .map(|item| !item.embedding.is_empty())
+        .unwrap_or(false);
+    if !ok {
+        return Err(ProviderModelFetchError {
+            code: "embed_probe_failed".to_string(),
+            message: "向量模型未返回有效 embedding".to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn scan_local_model_files_from_root(root: &Path) -> Result<Vec<String>, String> {
