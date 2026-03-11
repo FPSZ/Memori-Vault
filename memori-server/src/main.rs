@@ -863,9 +863,10 @@ async fn ask_handler(
 
     let actor = resolve_actor_subject(&state, &headers).await;
     let policy = resolve_enterprise_policy(&load_app_settings().map_err(ApiError::internal)?);
-    if let Err(violation) =
-        validate_runtime_model_settings(&to_model_policy(&policy), &resolve_runtime_model_config_from_env())
-    {
+    if let Err(violation) = validate_runtime_model_settings(
+        &to_model_policy(&policy),
+        &resolve_runtime_model_config_from_env(),
+    ) {
         append_policy_violation_audit(
             &state,
             actor.clone(),
@@ -1175,9 +1176,10 @@ async fn validate_model_setup_handler(
     let model_settings = resolve_model_settings(&settings);
     let active = resolve_active_runtime_settings(&model_settings);
     let policy = resolve_enterprise_policy(&settings);
-    if let Err(violation) =
-        validate_runtime_model_settings(&to_model_policy(&policy), &to_runtime_model_config(&active))
-    {
+    if let Err(violation) = validate_runtime_model_settings(
+        &to_model_policy(&policy),
+        &to_runtime_model_config(&active),
+    ) {
         append_policy_violation_audit(
             &state,
             "anonymous".to_string(),
@@ -1247,7 +1249,9 @@ async fn list_provider_models_handler(
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
     let api_key = normalize_optional_text(payload.api_key);
     let models_root = normalize_optional_text(payload.models_root);
-    if let Err(violation) = validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[]) {
+    if let Err(violation) =
+        validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[])
+    {
         append_policy_violation_audit(
             &state,
             "anonymous".to_string(),
@@ -1292,7 +1296,9 @@ async fn probe_model_provider_handler(
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
     let api_key = normalize_optional_text(payload.api_key);
     let models_root = normalize_optional_text(payload.models_root);
-    if let Err(violation) = validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[]) {
+    if let Err(violation) =
+        validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[])
+    {
         append_policy_violation_audit(
             &state,
             "anonymous".to_string(),
@@ -1347,7 +1353,9 @@ async fn pull_model_handler(
     }
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
     let policy = resolve_enterprise_policy(&load_app_settings().map_err(ApiError::internal)?);
-    if let Err(violation) = validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[]) {
+    if let Err(violation) =
+        validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[])
+    {
         append_policy_violation_audit(
             &state,
             "anonymous".to_string(),
