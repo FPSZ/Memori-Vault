@@ -127,6 +127,18 @@ impl MemoriEngine {
             }
         };
 
+        if answer_indicates_insufficient_evidence(&answer) {
+            return Ok(AskResponseStructured {
+                status: AskStatus::InsufficientEvidence,
+                answer: String::new(),
+                question: inspection.question,
+                scope_paths: inspection.scope_paths,
+                citations: inspection.citations,
+                evidence: inspection.evidence,
+                metrics: inspection.metrics,
+            });
+        }
+
         Ok(AskResponseStructured {
             status: AskStatus::Answered,
             answer,
@@ -832,4 +844,26 @@ impl MemoriEngine {
 
         Ok(())
     }
+}
+
+pub(crate) fn answer_indicates_insufficient_evidence(answer: &str) -> bool {
+    let trimmed = answer.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    [
+        "当前上下文不足",
+        "上下文不足",
+        "证据不足",
+        "insufficient context",
+        "not enough context",
+        "insufficient evidence",
+        "not enough evidence",
+        "lack sufficient context",
+        "lack sufficient evidence",
+    ]
+    .iter()
+    .any(|marker| trimmed.contains(marker) || lower.contains(marker))
 }

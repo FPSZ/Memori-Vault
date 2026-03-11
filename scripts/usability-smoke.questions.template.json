@@ -1,0 +1,148 @@
+{
+  "suite_name": "external-usability-smoke",
+  "notes": "Replace the placeholder questions with 15 real questions for your external corpus. The gate is usable_answer_count >= 10/15.",
+  "questions": [
+    {
+      "id": "Q01",
+      "question": "<single-doc fact question 1>",
+      "mode": "answer",
+      "scope_paths": [],
+      "expected_citation_suffixes": [
+        "<relative/path/to/file1.md>"
+      ],
+      "expected_answer_contains": [
+        "<fact phrase 1>",
+        "<fact phrase 2>"
+      ],
+      "forbidden_answer_contains": [
+        "当前上下文不足"
+      ],
+      "notes": "single-doc factual lookup"
+    },
+    {
+      "id": "Q02",
+      "question": "<single-doc fact question 2>",
+      "mode": "answer",
+      "expected_citation_suffixes": ["<relative/path/to/file2.txt>"],
+      "expected_answer_contains": ["<fact phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"]
+    },
+    {
+      "id": "Q03",
+      "question": "<single-doc fact question 3>",
+      "mode": "answer",
+      "expected_citation_suffixes": ["<relative/path/to/file3.md>"],
+      "expected_answer_contains": ["<fact phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"]
+    },
+    {
+      "id": "Q04",
+      "question": "<single-doc fact question 4>",
+      "mode": "answer",
+      "expected_citation_suffixes": ["<relative/path/to/file4.txt>"],
+      "expected_answer_contains": ["<fact phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"]
+    },
+    {
+      "id": "Q05",
+      "question": "<single-doc fact question 5>",
+      "mode": "answer",
+      "expected_citation_suffixes": ["<relative/path/to/file5.md>"],
+      "expected_answer_contains": ["<fact phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"]
+    },
+    {
+      "id": "Q06",
+      "question": "<single-doc fact question 6>",
+      "mode": "answer",
+      "expected_citation_suffixes": ["<relative/path/to/file6.txt>"],
+      "expected_answer_contains": ["<fact phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"]
+    },
+    {
+      "id": "Q07",
+      "question": "<summary question 1>",
+      "mode": "answer",
+      "expected_citation_suffixes": ["<relative/path/to/summary-source-1.md>"],
+      "expected_answer_contains": ["<summary phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"],
+      "notes": "summary / paraphrase allowed but must stay grounded"
+    },
+    {
+      "id": "Q08",
+      "question": "<summary question 2>",
+      "mode": "answer",
+      "expected_citation_suffixes": ["<relative/path/to/summary-source-2.txt>"],
+      "expected_answer_contains": ["<summary phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"]
+    },
+    {
+      "id": "Q09",
+      "question": "<summary question 3>",
+      "mode": "answer",
+      "expected_citation_suffixes": ["<relative/path/to/summary-source-3.md>"],
+      "expected_answer_contains": ["<summary phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"]
+    },
+    {
+      "id": "Q10",
+      "question": "<summary question 4>",
+      "mode": "answer",
+      "expected_citation_suffixes": ["<relative/path/to/summary-source-4.txt>"],
+      "expected_answer_contains": ["<summary phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"]
+    },
+    {
+      "id": "Q11",
+      "question": "<cross-doc aggregation question 1>",
+      "mode": "answer",
+      "expected_citation_suffixes": [
+        "<relative/path/to/file7.md>",
+        "<relative/path/to/file8.md>"
+      ],
+      "expected_answer_contains": ["<cross-doc phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"],
+      "notes": "cross-document aggregation"
+    },
+    {
+      "id": "Q12",
+      "question": "<cross-doc aggregation question 2>",
+      "mode": "answer",
+      "expected_citation_suffixes": [
+        "<relative/path/to/file9.txt>",
+        "<relative/path/to/file10.md>"
+      ],
+      "expected_answer_contains": ["<cross-doc phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"]
+    },
+    {
+      "id": "Q13",
+      "question": "<cross-doc aggregation question 3>",
+      "mode": "answer",
+      "expected_citation_suffixes": [
+        "<relative/path/to/file1.md>",
+        "<relative/path/to/file10.md>"
+      ],
+      "expected_answer_contains": ["<cross-doc phrase>"],
+      "forbidden_answer_contains": ["当前上下文不足"]
+    },
+    {
+      "id": "Q14",
+      "question": "<should-refuse question 1>",
+      "mode": "refuse",
+      "expected_citation_suffixes": [],
+      "expected_answer_contains": [],
+      "forbidden_answer_contains": [],
+      "notes": "expected refusal / insufficient evidence"
+    },
+    {
+      "id": "Q15",
+      "question": "<should-refuse question 2>",
+      "mode": "refuse",
+      "expected_citation_suffixes": [],
+      "expected_answer_contains": [],
+      "forbidden_answer_contains": [],
+      "notes": "expected refusal / insufficient evidence"
+    }
+  ]
+}

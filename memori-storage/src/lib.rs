@@ -630,6 +630,33 @@ mod tests {
     }
 
     #[test]
+    fn term_extractors_keep_generic_cjk_backoff_terms() {
+        let fts_terms = extract_fts_terms("北极星生物计算成立于");
+        assert!(fts_terms.iter().any(|term| term == "北极星生物计算"));
+
+        let signal_terms = extract_signal_terms("星海系统是做什么的");
+        assert!(signal_terms.iter().any(|term| term == "星海系统"));
+
+        let short_entity_terms = extract_fts_terms("腾讯成立于");
+        assert!(short_entity_terms.iter().any(|term| term == "腾讯"));
+    }
+
+    #[test]
+    fn term_extractors_split_mixed_script_entity_boundaries() {
+        let terms = extract_fts_terms("北极星生物计算PolarisBioCompute成立于");
+        assert!(terms.iter().any(|term| term == "北极星生物计算"));
+        assert!(terms.iter().any(|term| term == "polarisbiocompute"));
+
+        let reverse_terms = extract_signal_terms("PolarisBioCompute北极星生物计算");
+        assert!(reverse_terms.iter().any(|term| term == "北极星生物计算"));
+        assert!(
+            reverse_terms
+                .iter()
+                .any(|term| term == "polarisbiocompute")
+        );
+    }
+
+    #[test]
     fn phrase_signal_terms_keep_docs_and_api_phrases() {
         let terms = extract_phrase_signal_terms("What does POST /api/auth/oidc/login return?");
         assert!(terms.iter().any(|term| term == "post /api/auth/oidc/login"));

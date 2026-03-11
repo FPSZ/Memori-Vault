@@ -1,5 +1,20 @@
 use super::*;
 
+const CJK_QUESTION_SUFFIXES: &[&str] = &[
+    "是什么",
+    "是啥",
+    "什么",
+    "怎么",
+    "如何",
+    "为什么",
+    "多少",
+    "哪一个",
+    "哪个",
+    "哪里",
+    "在哪",
+    "谁",
+];
+
 pub(crate) fn normalize_scope_path_text(path: &Path) -> String {
     #[cfg(target_os = "windows")]
     {
@@ -570,48 +585,53 @@ pub(crate) fn expand_query_token(token: &str) -> Vec<String> {
     }
 
     let mut results = Vec::new();
-    let normalized = normalize_ascii_term(trimmed);
-    if !normalized.is_empty() {
-        results.push(normalized.clone());
-    }
+    let mut candidates = vec![trimmed.to_string()];
+    candidates.extend(extract_mixed_script_segments(trimmed));
 
-    if trimmed.chars().any(is_cjk_char) {
-        let cjk_only = trimmed
-            .chars()
-            .filter(|ch| is_cjk_char(*ch) || ch.is_ascii_digit())
-            .collect::<String>();
-        if !cjk_only.is_empty() {
-            results.push(cjk_only.clone());
+    for candidate in candidates {
+        let normalized = normalize_ascii_term(&candidate);
+        if !normalized.is_empty() {
+            results.push(normalized.clone());
         }
-        let pure_cjk = cjk_only
-            .chars()
-            .filter(|ch| is_cjk_char(*ch))
-            .collect::<String>();
-        if !pure_cjk.is_empty() {
-            results.push(pure_cjk.clone());
-        }
-        for phrase in extract_cjk_phrases(&cjk_only) {
-            results.push(phrase);
-        }
-        for phrase in extract_cjk_phrases(&pure_cjk) {
-            results.push(phrase);
-        }
-    }
 
-    if trimmed
-        .chars()
-        .any(|ch| matches!(ch, '_' | '-' | '.' | '/' | '\\'))
-    {
-        if let Some((stem, _ext)) = trimmed.rsplit_once('.') {
-            let stem = normalize_ascii_term(stem);
-            if !stem.is_empty() {
-                results.push(stem);
+        if candidate.chars().any(is_cjk_char) {
+            let cjk_only = candidate
+                .chars()
+                .filter(|ch| is_cjk_char(*ch) || ch.is_ascii_digit())
+                .collect::<String>();
+            if !cjk_only.is_empty() {
+                results.push(cjk_only.clone());
+            }
+            let pure_cjk = cjk_only
+                .chars()
+                .filter(|ch| is_cjk_char(*ch))
+                .collect::<String>();
+            if !pure_cjk.is_empty() {
+                results.push(pure_cjk.clone());
+            }
+            for phrase in extract_cjk_phrases(&cjk_only) {
+                results.push(phrase);
+            }
+            for phrase in extract_cjk_phrases(&pure_cjk) {
+                results.push(phrase);
             }
         }
-        for segment in trimmed.split(['_', '-', '.', '/', '\\']) {
-            let segment = normalize_ascii_term(segment);
-            if !segment.is_empty() {
-                results.push(segment);
+
+        if candidate
+            .chars()
+            .any(|ch| matches!(ch, '_' | '-' | '.' | '/' | '\\'))
+        {
+            if let Some((stem, _ext)) = candidate.rsplit_once('.') {
+                let stem = normalize_ascii_term(stem);
+                if !stem.is_empty() {
+                    results.push(stem);
+                }
+            }
+            for segment in candidate.split(['_', '-', '.', '/', '\\']) {
+                let segment = normalize_ascii_term(segment);
+                if !segment.is_empty() {
+                    results.push(segment);
+                }
             }
         }
     }
@@ -638,26 +658,17 @@ pub(crate) fn extract_cjk_phrases(token: &str) -> Vec<String> {
         phrases.push(full.clone());
     }
 
-    for suffix in [
-        "是什么",
-        "是啥",
-        "什么",
-        "怎么",
-        "如何",
-        "为什么",
-        "多少",
-        "哪一个",
-        "哪个",
-        "哪里",
-        "在哪",
-        "谁",
-    ] {
+    for suffix in CJK_QUESTION_SUFFIXES {
         if full.ends_with(suffix) {
             let candidate = full.trim_end_matches(suffix).trim().to_string();
             if candidate.chars().count() >= 2 {
                 phrases.push(candidate);
             }
         }
+    }
+
+    for candidate in extract_cjk_prefix_backoff_terms(&full) {
+        phrases.push(candidate);
     }
 
     let mut deduped = Vec::new();
@@ -671,21 +682,72 @@ pub(crate) fn extract_cjk_phrases(token: &str) -> Vec<String> {
 }
 
 pub(crate) fn is_cjk_question_phrase(token: &str) -> bool {
-    matches!(
-        token,
-        "是什么"
-            | "是啥"
-            | "什么"
-            | "怎么"
-            | "如何"
-            | "为什么"
-            | "多少"
-            | "哪个"
-            | "哪一个"
-            | "哪里"
-            | "在哪"
-            | "谁"
-    )
+    CJK_QUESTION_SUFFIXES.contains(&token)
+}
+
+pub(crate) fn extract_mixed_script_segments(token: &str) -> Vec<String> {
+    let trimmed = token.trim();
+    if trimmed.is_empty()
+        || !trimmed.chars().any(is_cjk_char)
+        || !trimmed.chars().any(|ch| ch.is_ascii_alphanumeric())
+    {
+        return Vec::new();
+    }
+
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut current_is_cjk = None;
+
+    for ch in trimmed.chars() {
+        let ch_is_cjk = is_cjk_char(ch);
+        match current_is_cjk {
+            None => {
+                current_is_cjk = Some(ch_is_cjk);
+                current.push(ch);
+            }
+            Some(prev_is_cjk) if prev_is_cjk == ch_is_cjk => current.push(ch),
+            Some(_) => {
+                if current.chars().count() >= 2 {
+                    segments.push(std::mem::take(&mut current));
+                } else {
+                    current.clear();
+                }
+                current.push(ch);
+                current_is_cjk = Some(ch_is_cjk);
+            }
+        }
+    }
+
+    if current.chars().count() >= 2 {
+        segments.push(current);
+    }
+
+    let mut deduped = Vec::new();
+    let mut seen = HashSet::new();
+    for segment in segments {
+        if segment != trimmed && seen.insert(segment.clone()) {
+            deduped.push(segment);
+        }
+    }
+    deduped
+}
+
+pub(crate) fn extract_cjk_prefix_backoff_terms(token: &str) -> Vec<String> {
+    let chars = token.chars().collect::<Vec<_>>();
+    if chars.len() < 5 {
+        return Vec::new();
+    }
+
+    let min_len = if chars.len() <= 6 { 2 } else { 4 };
+    let mut terms = Vec::new();
+    let mut seen = HashSet::new();
+    for len in (min_len..chars.len()).rev() {
+        let candidate = chars[..len].iter().collect::<String>();
+        if !is_cjk_question_phrase(&candidate) && seen.insert(candidate.clone()) {
+            terms.push(candidate);
+        }
+    }
+    terms
 }
 
 pub(crate) fn normalize_ascii_term(term: &str) -> String {

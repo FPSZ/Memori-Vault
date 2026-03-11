@@ -76,6 +76,12 @@ type CitationItem = {
   excerpt: string;
 };
 
+type VisibleCitation = CitationItem & {
+  citation_key: string;
+  duplicate_count: number;
+  is_long_excerpt: boolean;
+};
+
 type EvidenceItem = {
   file_path: string;
   relative_path: string;
@@ -352,6 +358,14 @@ function buildCollapsedMarkdownPreview(content: string): string {
   return normalized.split("\n").slice(0, 8).join("\n");
 }
 
+function isLongCitationExcerpt(content: string): boolean {
+  const normalized = content.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return false;
+  }
+  return normalized.length > 420 || normalized.split("\n").length > 10;
+}
+
 function formatEvidenceReason(reason: EvidenceItem["reason"], t: ReturnType<typeof useI18n>["t"]): string {
   switch (reason) {
     case "both":
@@ -433,6 +447,7 @@ export default function App() {
   const [selectedScopePaths, setSelectedScopePaths] = useState<string[]>([]);
   const [expandedScopeDirs, setExpandedScopeDirs] = useState<Set<string>>(() => new Set());
   const [expandedSourceKeys, setExpandedSourceKeys] = useState<Set<string>>(() => new Set());
+  const [expandedCitationKeys, setExpandedCitationKeys] = useState<Set<string>>(() => new Set());
   const [modelSettings, setModelSettings] = useState<ModelSettingsDto>(DEFAULT_MODEL_SETTINGS);
   const [enterprisePolicy, setEnterprisePolicy] =
     useState<EnterprisePolicyDto>(DEFAULT_ENTERPRISE_POLICY);
@@ -463,10 +478,31 @@ export default function App() {
     () => answerResponse?.evidence.slice(0, retrieveTopK) ?? [],
     [answerResponse, retrieveTopK]
   );
-  const visibleCitations = useMemo(
-    () => answerResponse?.citations.slice(0, retrieveTopK) ?? [],
-    [answerResponse, retrieveTopK]
-  );
+  const visibleCitations = useMemo<VisibleCitation[]>(() => {
+    const grouped = new Map<string, VisibleCitation>();
+    for (const citation of answerResponse?.citations ?? []) {
+      const excerpt = citation.excerpt.trim();
+      const citationKey = `${citation.file_path.toLowerCase()}::${excerpt}`;
+      const existing = grouped.get(citationKey);
+      if (existing) {
+        existing.duplicate_count += 1;
+        continue;
+      }
+      grouped.set(citationKey, {
+        ...citation,
+        citation_key: citationKey,
+        duplicate_count: 1,
+        is_long_excerpt: isLongCitationExcerpt(citation.excerpt)
+      });
+    }
+
+    return Array.from(grouped.values())
+      .map((citation, index) => ({
+        ...citation,
+        index: index + 1
+      }))
+      .slice(0, retrieveTopK);
+  }, [answerResponse, retrieveTopK]);
   const modelSetupConfigured = useMemo(
     () => modelAvailability?.configured ?? false,
     [modelAvailability]
@@ -1505,6 +1541,18 @@ export default function App() {
     });
   };
 
+  const toggleCitationExpanded = (key: string) => {
+    setExpandedCitationKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   const onOpenSourceLocation = async (path: string) => {
     try {
       await invoke("open_source_location", { path });
@@ -2094,40 +2142,78 @@ export default function App() {
                           </div>
                           <div className="space-y-3">
                             {visibleCitations.map((citation) => (
-                              <div
-                                key={`${citation.file_path}-${citation.chunk_index}`}
-                                className="rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-4 py-3"
-                              >
-                                <div className="mb-2 flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div className="text-xs font-semibold text-[var(--accent)]">
-                                      [{citation.index}] {citation.relative_path || citation.file_path}
-                                    </div>
-                                    {citation.heading_path.length > 0 ? (
-                                      <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
-                                        {citation.heading_path.join(" > ")}
+                              (() => {
+                                const expanded = expandedCitationKeys.has(citation.citation_key);
+                                const citationContent =
+                                  citation.is_long_excerpt && !expanded
+                                    ? buildCollapsedMarkdownPreview(citation.excerpt)
+                                    : citation.excerpt;
+
+                                return (
+                                  <div
+                                    key={citation.citation_key}
+                                    className="rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-4 py-3"
+                                  >
+                                    <div className="mb-2 flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <div className="text-xs font-semibold text-[var(--accent)]">
+                                          [{citation.index}] {citation.relative_path || citation.file_path}
+                                        </div>
+                                        {citation.heading_path.length > 0 ? (
+                                          <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                                            {citation.heading_path.join(" > ")}
+                                          </div>
+                                        ) : null}
+                                        {citation.duplicate_count > 1 ? (
+                                          <div className="mt-2 inline-flex rounded-full border border-[var(--border-strong)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-secondary)] uppercase">
+                                            {t("citationDuplicates", { count: citation.duplicate_count })}
+                                          </div>
+                                        ) : null}
                                       </div>
-                                    ) : null}
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => void onOpenSourceLocation(citation.file_path)}
+                                          className="p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
+                                          aria-label={t("openSourceLocation")}
+                                          title={t("openSourceLocation")}
+                                        >
+                                          <FolderOpen className="h-4 w-4" />
+                                        </button>
+                                        {citation.is_long_excerpt ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleCitationExpanded(citation.citation_key)}
+                                            className="p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
+                                            aria-label={expanded ? t("collapseCitation") : t("expandCitation")}
+                                            title={expanded ? t("collapseCitation") : t("expandCitation")}
+                                          >
+                                            {expanded ? (
+                                              <ChevronUp className="h-4 w-4" />
+                                            ) : (
+                                              <ChevronDown className="h-4 w-4" />
+                                            )}
+                                          </button>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                    <div
+                                      className={`md-preview md-preview-source text-sm leading-6 text-[var(--text-secondary)] ${
+                                        citation.is_long_excerpt && !expanded
+                                          ? "source-preview-scrollbar max-h-40 overflow-y-auto pr-2"
+                                          : ""
+                                      }`}
+                                    >
+                                      <ReactMarkdown
+                                        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                                        rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                                      >
+                                        {citationContent}
+                                      </ReactMarkdown>
+                                    </div>
                                   </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => void onOpenSourceLocation(citation.file_path)}
-                                    className="p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
-                                    aria-label={t("openSourceLocation")}
-                                    title={t("openSourceLocation")}
-                                  >
-                                    <FolderOpen className="h-4 w-4" />
-                                  </button>
-                                </div>
-                                <div className="md-preview md-preview-source text-sm leading-6 text-[var(--text-secondary)]">
-                                  <ReactMarkdown
-                                    remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-                                    rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                                  >
-                                    {citation.excerpt}
-                                  </ReactMarkdown>
-                                </div>
-                              </div>
+                                );
+                              })()
                             ))}
                           </div>
                         </section>

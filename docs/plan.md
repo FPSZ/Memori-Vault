@@ -55,6 +55,13 @@ Overall Progress: 84%
 - 当前可以确认的是“引用可信度强于文档排序质量”：
   - 有答案时，citation 仍然可信
   - mixed corpus 下，文档级 Top-1 还不足以支撑高精度对外交付口径
+- 当前最大的阻塞已经不是“某个离线指标还差几个点”，而是**产品可用性仍未过线**：
+  - shipping ask path 仍频繁出现 `insufficient_evidence`
+  - 或者状态显示为 `answered`，但正文实际输出“当前上下文不足”
+  - 因此现有 `core_docs / repo_mixed` 数字只能继续作为内部回归参考，不能当作“已经可交付”的主要依据
+- Phase 6 从现在起新增一个更高优先级 gate：
+  - 使用**外部本地小语料**做 10 文档 / 15 问可用性 smoke
+  - 只有当 `usable_answer_count >= 10 / 15`，且不再出现“`answered` + `当前上下文不足`”假通过时，才允许继续把 retrieval 提准视为主目标
 - `live_embedding` 仍被本地 Ollama / embedding 可用性阻塞，Phase 6 还不能关闭。
 
 ## Phase 0: Baseline & Diagnosis
@@ -186,9 +193,12 @@ Overall Progress: 84%
 
 ## Phase 6: Validation
 **Goal**  
-完成全链路验收，确保重构不带来隐藏退化。
+完成全链路验收，并先把产品从“有回归数字”拉回到“真实可用”。
 
 **Tasks**
+- [ ] 固定外部本地 10 文档 / 15 问可用性 smoke gate，作为当前最高优先级验收入口
+- [ ] 用 shipping ask path 跑完 15 题，并记录每题 `status / answer / citations / evidence / failure_class`
+- [x] 封死 `answered` 假通过：当最终生成文本包含“当前上下文不足”或等价拒答语义时，不再对外标记为 `answered`
 - [ ] 跑完 Phase 0 定义的全部回归查询集 (blocked: live_embedding full_live blocked by local Ollama availability)
 - [x] 比较重构前后的 `Top-1 document hit`、`Top-3 document recall`、`Top-5 chunk recall`、citation validity、拒答正确率
 - [ ] 对大规模文档集做本地性能压测并记录 `P50/P95`
@@ -196,11 +206,19 @@ Overall Progress: 84%
 - [ ] 进行 Windows / macOS / Linux 构建检查
 
 **Exit Criteria**
-- 精度、可信度、性能三项均达到成功标准
+- 先通过小样本真实语料 gate：`usable_answer_count >= 10 / 15`
+- 不再出现“`answered` + `当前上下文不足`”
+- 通过题必须同时满足“答案对 + 引用对 + 不是模板废话”
+- 在此基础上，再继续看精度、可信度、性能三项是否达到成功标准
 - 无新增 panic、无明显路径污染、无默认跨库误命中
 
 **Notes / Risks**
 - 必须单独复测“历史 DB 迁移后”的行为
+- 当前 Phase 6 的第一 blocker 已明确切换为**产品可用性 gate 未通过**，不是单一离线指标
+- 可用性 smoke 的失败必须按三类显式记录，不再统一混成“准确率低”：
+  - `retrieval_miss`
+  - `gating_false_refusal`
+  - `answer_synthesis_fail`
 - 已完成 suite drift reconciliation：当前 JSON suite 的 `answer` case 已通过“target document exists + target clue exists”机械核验
 - 当前 Phase 6 的核心阻塞已经从“样本漂移”转成“真实精度不足”：
   - `core_docs` 虽然可作为 docs-only 基线，但 `Top-1/Top-3` 仍未达到目标
@@ -208,6 +226,9 @@ Overall Progress: 84%
 - 当前真实 gap 主要集中在两类：
   - 描述型文档查询的 document routing 仍然不稳，例如 `R02`, `R05`, `R13`, `R21`, `R28`, `R35`, `R36`
   - mixed-token / implementation lookup 仍然大量排不到正确代码文件，例如 `R40`, `R42`, `R43`, `R44`, `R45`, `R46`, `R50`, `R51`
+- 当前新增确认的一类泛化缺陷是 **mixed-script 实体检索泛化不足**：
+  - 中英实体贴连或混写时，英文问法能命中，中文问法可能掉成 `insufficient_evidence`
+  - 当前修复方向固定为通用 CJK query backoff / script boundary tokenization，明确禁止对具体实体名或具体问法语义写 hardcode
 - 2026-03-11 对 release-note 末尾的外部评审意见完成一次辩证收口：
   - 已接受并落地：`document_signal_query(...)` 不应让 docs query 退成空输入；测试脚本需要升级为当前 runner / smoke 入口
   - 暂不直接照搬：立刻引入 document-level dense；当前 recovery pass 仍先优先收词法/规则侧回退
@@ -240,3 +261,5 @@ Overall Progress: 84%
 - 2026-03-11: 收口本地测试入口：取消 `scripts/` 整目录忽略，新增 `scripts/test-retrieval.ps1` 作为回归 runner 包装脚本，并把 `smoke-start.ps1` / `smoke-stop.ps1` 升级为支持 `desktop/server/both` 与 `-SkipModelCheck` 的当前 smoke 入口
 - 2026-03-11: 吸收 release-note 末尾评审中的有效部分：恢复 docs query 的 deterministic document signal 输入，避免 `document_signal_query(...)` 在描述型问题上退成空字符串；document-dense 与 FTS tokenizer 重配保留为后续精度议题，不在本轮 recovery pass 直接硬上
 - 2026-03-11: 使用新脚本重跑离线基线后，当前最新快照更新为 `core_docs: Top-1=0.6667 / Top-3=0.6667 / Top-5=0.6970 / Reject=1.0000`，`repo_mixed: Top-1=0.5000 / Top-3=0.5227 / Top-5=0.5682 / Reject=0.9600`；说明这轮修正有效但仍未恢复到 `repo_mixed Top-1=0.5682` 旧高点
+- 2026-03-12: 明确 mixed-script 实体检索修复口径：禁止为具体实体名或具体问法语义开后门，统一改为通用 CJK query backoff 与中英脚本边界切分规则
+- 2026-03-11: 接受“当前离线回归数字不足以代表产品可用性”的判断，新增外部本地 10 文档 / 15 问可用性 smoke gate 作为第一放行标准；在 gate 通过前，`core_docs / repo_mixed` 仅继续作为内部回归参考

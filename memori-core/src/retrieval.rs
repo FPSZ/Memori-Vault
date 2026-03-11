@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 
 pub(crate) fn merge_document_candidates(
     analysis: &QueryAnalysis,
@@ -793,18 +794,32 @@ pub(crate) fn evidence_matches_requested_file(
 }
 
 pub(crate) fn build_citations(evidence: &[MergedEvidence]) -> Vec<CitationItem> {
-    evidence
-        .iter()
-        .enumerate()
-        .map(|(index, item)| CitationItem {
-            index: index + 1,
-            file_path: item.chunk.file_path.to_string_lossy().to_string(),
+    let mut seen = HashSet::new();
+    let mut citations = Vec::new();
+
+    for item in evidence {
+        let file_path = item.chunk.file_path.to_string_lossy().to_string();
+        let excerpt = build_reference_excerpt(&item.chunk.file_path, &item.chunk.content);
+        let dedupe_key = format!(
+            "{}\u{1f}{}",
+            file_path.to_ascii_lowercase(),
+            excerpt.trim()
+        );
+        if !seen.insert(dedupe_key) {
+            continue;
+        }
+
+        citations.push(CitationItem {
+            index: citations.len() + 1,
+            file_path,
             relative_path: item.relative_path.clone(),
             chunk_index: item.chunk.chunk_index,
             heading_path: item.chunk.heading_path.clone(),
-            excerpt: build_reference_excerpt(&item.chunk.file_path, &item.chunk.content),
-        })
-        .collect()
+            excerpt,
+        });
+    }
+
+    citations
 }
 
 pub(crate) fn build_evidence_items(evidence: &[MergedEvidence]) -> Vec<EvidenceItem> {

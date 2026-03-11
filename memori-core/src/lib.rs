@@ -886,16 +886,18 @@ pub(crate) use runtime::*;
 mod tests {
     use super::{
         AppState, AskStatus, EgressMode, EngineError, EnterpriseModelPolicy, MemoriEngine,
-        ModelProvider, QueryFamily, QueryIntent, RuntimeModelConfig, WatchEvent, WatchEventKind,
-        analyze_query, document_signal_query, is_implementation_lookup, merge_document_candidates,
-        process_file_event, should_refuse_for_insufficient_evidence,
-        validate_runtime_model_settings,
+        MergedEvidence, ModelProvider, QueryFamily, QueryIntent, RuntimeModelConfig, WatchEvent,
+        WatchEventKind, analyze_query, build_citations, document_signal_query,
+        is_implementation_lookup,
+        merge_document_candidates, process_file_event,
+        should_refuse_for_insufficient_evidence, validate_runtime_model_settings,
     };
     use memori_parser::DocumentChunk;
     use memori_storage::RebuildState;
     use memori_storage::VectorStore;
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_db_path(name: &str) -> PathBuf {
@@ -963,6 +965,76 @@ mod tests {
 
         drop(state);
         let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn build_citations_dedupes_identical_rendered_excerpt_from_same_file() {
+        let file_path = std::env::temp_dir().join(format!(
+            "memori_citation_excerpt_{}.md",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time before unix epoch")
+                .as_nanos()
+        ));
+        let content = "Project note: query_analysis_ms is emitted in retrieval metrics, and query_analysis_ms should stay visible to users for debugging.\n\nSecond paragraph stays separate.";
+        fs::write(&file_path, content).expect("write temp markdown");
+
+        let evidence = vec![
+            MergedEvidence {
+                chunk: DocumentChunk {
+                    file_path: file_path.clone(),
+                    content: "query_analysis_ms is emitted in retrieval metrics".to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["Metrics".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                relative_path: "notes/metrics.md".to_string(),
+                document_reason: "lexical_strict".to_string(),
+                document_rank: 1,
+                document_raw_score: Some(1.0),
+                document_has_exact_signal: false,
+                document_has_docs_phrase_signal: false,
+                document_has_filename_signal: false,
+                document_has_strict_lexical: true,
+                lexical_strict_rank: Some(1),
+                lexical_broad_rank: None,
+                lexical_raw_score: Some(1.0),
+                dense_rank: None,
+                dense_raw_score: None,
+                final_score: 1.0,
+            },
+            MergedEvidence {
+                chunk: DocumentChunk {
+                    file_path: file_path.clone(),
+                    content: "query_analysis_ms should stay visible to users".to_string(),
+                    chunk_index: 1,
+                    heading_path: vec!["Metrics".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                relative_path: "notes/metrics.md".to_string(),
+                document_reason: "mixed".to_string(),
+                document_rank: 1,
+                document_raw_score: Some(0.9),
+                document_has_exact_signal: false,
+                document_has_docs_phrase_signal: false,
+                document_has_filename_signal: false,
+                document_has_strict_lexical: true,
+                lexical_strict_rank: Some(2),
+                lexical_broad_rank: None,
+                lexical_raw_score: Some(0.9),
+                dense_rank: Some(1),
+                dense_raw_score: Some(0.8),
+                final_score: 0.95,
+            },
+        ];
+
+        let citations = build_citations(&evidence);
+
+        assert_eq!(citations.len(), 1);
+        assert_eq!(citations[0].index, 1);
+        assert_eq!(citations[0].relative_path, "notes/metrics.md");
+
+        let _ = fs::remove_file(file_path);
     }
 
     #[test]
@@ -1257,6 +1329,59 @@ mod tests {
     }
 
     #[test]
+    fn analyze_query_extracts_generic_cjk_backoff_terms() {
+        let founded = analyze_query("北极星生物计算成立于");
+        assert!(
+            founded
+                .chunk_terms
+                .iter()
+                .any(|term| term == "北极星生物计算")
+        );
+
+        let description = analyze_query("星海系统是做什么的");
+        assert!(
+            description
+                .chunk_terms
+                .iter()
+                .any(|term| term == "星海系统")
+        );
+
+        let short_entity = analyze_query("腾讯成立于");
+        assert!(short_entity.chunk_terms.iter().any(|term| term == "腾讯"));
+    }
+
+    #[test]
+    fn analyze_query_splits_mixed_script_entity_boundaries() {
+        let analysis = analyze_query("北极星生物计算PolarisBioCompute成立于");
+        assert!(
+            analysis
+                .chunk_terms
+                .iter()
+                .any(|term| term == "北极星生物计算")
+        );
+        assert!(
+            analysis
+                .chunk_terms
+                .iter()
+                .any(|term| term == "polarisbiocompute")
+        );
+
+        let reverse = analyze_query("PolarisBioCompute北极星生物计算");
+        assert!(
+            reverse
+                .chunk_terms
+                .iter()
+                .any(|term| term == "北极星生物计算")
+        );
+        assert!(
+            reverse
+                .chunk_terms
+                .iter()
+                .any(|term| term == "polarisbiocompute")
+        );
+    }
+
+    #[test]
     fn classify_query_intent_marks_external_and_secret_queries() {
         assert_eq!(
             analyze_query("CEO of OpenAI").query_intent,
@@ -1526,6 +1651,23 @@ mod tests {
 
         assert!(should_refuse_for_insufficient_evidence(
             &analysis, &evidence
+        ));
+    }
+
+    #[test]
+    fn explicit_insufficient_context_answer_is_not_treated_as_success() {
+        assert!(super::engine::answer_indicates_insufficient_evidence(
+            "当前上下文不足，缺少关于本周学习内容的直接记录。"
+        ));
+        assert!(super::engine::answer_indicates_insufficient_evidence(
+            "There is insufficient context to answer this reliably."
+        ));
+    }
+
+    #[test]
+    fn grounded_answer_text_is_not_misclassified_as_insufficient() {
+        assert!(!super::engine::answer_indicates_insufficient_evidence(
+            "本周主要学习了 FORTIFY 绕过、CANNARY 检查与若干改进事项。"
         ));
     }
 }
