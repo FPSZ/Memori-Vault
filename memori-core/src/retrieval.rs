@@ -1163,6 +1163,10 @@ pub(crate) fn is_lookup_like_query(query: &str) -> bool {
     {
         return true;
     }
+    // CJK-only queries are never lookup-like (no spaces, token count is misleading)
+    if trimmed.chars().all(|ch| is_cjk(ch) || ch.is_whitespace()) {
+        return false;
+    }
     if trimmed.chars().any(|ch| ch.is_ascii_digit()) && query_token_count(trimmed) <= 6 {
         return true;
     }

@@ -156,6 +156,7 @@ const INDEXING_ACTION_TIMEOUT_MS = 15000;
 const DEFAULT_FONT_SCALE: FontScale = "m";
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 const MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize, rehypeHighlight];
+const MODEL_NOT_CONFIGURED_CODE = "model_not_configured";
 
 const DEFAULT_MODEL_SETTINGS: ModelSettingsDto = {
   active_provider: "ollama_local",
@@ -466,7 +467,18 @@ export default function App() {
     () => answerResponse?.citations.slice(0, retrieveTopK) ?? [],
     [answerResponse, retrieveTopK]
   );
-  const canSubmit = useMemo(() => query.trim().length > 0 && !loading, [loading, query]);
+  const modelSetupConfigured = useMemo(
+    () => modelAvailability?.configured ?? false,
+    [modelAvailability]
+  );
+  const modelSetupNotConfigured = useMemo(
+    () => modelAvailability?.status_code === MODEL_NOT_CONFIGURED_CODE || !modelSetupConfigured,
+    [modelAvailability?.status_code, modelSetupConfigured]
+  );
+  const canSubmit = useMemo(
+    () => query.trim().length > 0 && !loading && !modelSetupNotConfigured,
+    [loading, modelSetupNotConfigured, query]
+  );
   const showSearchDone = useMemo(
     () => isSearching && !loading && !error && answerResponse !== null,
     [answerResponse, error, isSearching, loading]
@@ -493,8 +505,15 @@ export default function App() {
     !isSearchBarHovering &&
     !scopeMenuOpen;
   const modelSetupReady = useMemo(
-    () => Boolean(modelAvailability?.reachable) && (modelAvailability?.missing_roles?.length ?? 1) === 0,
+    () =>
+      Boolean(modelAvailability?.configured) &&
+      Boolean(modelAvailability?.reachable) &&
+      (modelAvailability?.missing_roles?.length ?? 1) === 0,
     [modelAvailability]
+  );
+  const searchPlaceholder = useMemo(
+    () => (modelSetupNotConfigured ? t("modelNotConfiguredInline") : t("askPlaceholder")),
+    [modelSetupNotConfigured, t]
   );
   const activeModelProfile = useMemo(
     () =>
@@ -685,6 +704,26 @@ export default function App() {
         const settings = await invoke<ModelSettingsDto>("get_model_settings");
         if (active) {
           setModelSettings(settings);
+        }
+        const profileConfigured =
+          settings.active_provider === "ollama_local"
+            ? settings.local_profile.endpoint.trim().length > 0 &&
+              settings.local_profile.chat_model.trim().length > 0 &&
+              settings.local_profile.graph_model.trim().length > 0 &&
+              settings.local_profile.embed_model.trim().length > 0
+            : settings.remote_profile.endpoint.trim().length > 0 &&
+              (settings.remote_profile.api_key || "").trim().length > 0 &&
+              settings.remote_profile.chat_model.trim().length > 0 &&
+              settings.remote_profile.graph_model.trim().length > 0 &&
+              settings.remote_profile.embed_model.trim().length > 0;
+        if (!profileConfigured) {
+          if (active) {
+            setProviderModels({ from_folder: [], from_service: [], merged: [] });
+          }
+          return;
+        }
+
+        try {
           const profile =
             settings.active_provider === "ollama_local"
               ? settings.local_profile
@@ -703,6 +742,10 @@ export default function App() {
           });
           if (active) {
             setProviderModels(models);
+          }
+        } catch {
+          if (active) {
+            setProviderModels({ from_folder: [], from_service: [], merged: [] });
           }
         }
       } catch (error) {
@@ -730,14 +773,13 @@ export default function App() {
         const availability = await invoke<ModelAvailabilityDto>("validate_model_setup");
         if (active) {
           setModelAvailability(availability);
-          if (!availability.reachable || (availability.missing_roles?.length ?? 0) > 0) {
-            setIsOnboardingOpen(true);
+          if (availability.status_code === MODEL_NOT_CONFIGURED_CODE) {
+            setError(null);
           }
         }
       } catch (error) {
         if (active) {
           setError(toUiErrorMessage(error));
-          setIsOnboardingOpen(true);
         }
       }
     };
@@ -868,6 +910,21 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     const refreshOnProviderChange = async () => {
+      const profileConfigured =
+        modelSettings.active_provider === "ollama_local"
+          ? modelSettings.local_profile.endpoint.trim().length > 0 &&
+            modelSettings.local_profile.chat_model.trim().length > 0 &&
+            modelSettings.local_profile.graph_model.trim().length > 0 &&
+            modelSettings.local_profile.embed_model.trim().length > 0
+          : modelSettings.remote_profile.endpoint.trim().length > 0 &&
+            (modelSettings.remote_profile.api_key || "").trim().length > 0 &&
+            modelSettings.remote_profile.chat_model.trim().length > 0 &&
+            modelSettings.remote_profile.graph_model.trim().length > 0 &&
+            modelSettings.remote_profile.embed_model.trim().length > 0;
+      if (!profileConfigured) {
+        setProviderModels({ from_folder: [], from_service: [], merged: [] });
+        return;
+      }
       try {
         const profile =
           modelSettings.active_provider === "ollama_local"
@@ -1040,8 +1097,6 @@ export default function App() {
       return;
     }
     if (!modelSetupReady) {
-      setError(t("modelSetupNeeded"));
-      setIsOnboardingOpen(true);
       return;
     }
 
@@ -1250,26 +1305,32 @@ export default function App() {
         uiLang === "zh-CN" ? "模型校验超时，请重试。" : "Model validation timed out."
       );
       setModelAvailability(availability);
-      const refreshedModels = await withTimeout(
-        invoke<ProviderModelsDto>("list_provider_models", {
-          provider: saved.active_provider,
-          endpoint:
-            saved.active_provider === "ollama_local"
-              ? saved.local_profile.endpoint
-              : saved.remote_profile.endpoint,
-          apiKey:
-            saved.active_provider === "openai_compatible"
-              ? saved.remote_profile.api_key || null
-              : null,
-          modelsRoot:
-            saved.active_provider === "ollama_local" ? saved.local_profile.models_root || null : null
-        }),
-        MODEL_ACTION_TIMEOUT_MS,
-        uiLang === "zh-CN" ? "刷新模型列表超时，请稍后重试。" : "Refreshing model list timed out."
-      );
-      setProviderModels(refreshedModels);
+      if (availability.status_code === MODEL_NOT_CONFIGURED_CODE) {
+        setProviderModels({ from_folder: [], from_service: [], merged: [] });
+        setError(null);
+      } else {
+        const refreshedModels = await withTimeout(
+          invoke<ProviderModelsDto>("list_provider_models", {
+            provider: saved.active_provider,
+            endpoint:
+              saved.active_provider === "ollama_local"
+                ? saved.local_profile.endpoint
+                : saved.remote_profile.endpoint,
+            apiKey:
+              saved.active_provider === "openai_compatible"
+                ? saved.remote_profile.api_key || null
+                : null,
+            modelsRoot:
+              saved.active_provider === "ollama_local" ? saved.local_profile.models_root || null : null
+          }),
+          MODEL_ACTION_TIMEOUT_MS,
+          uiLang === "zh-CN" ? "刷新模型列表超时，请稍后重试。" : "Refreshing model list timed out."
+        );
+        setProviderModels(refreshedModels);
+      }
       if (availability.reachable && (availability.missing_roles?.length ?? 0) === 0) {
         setIsOnboardingOpen(false);
+        setError(null);
       }
     } catch (err) {
       const message = toUiErrorMessage(err);
@@ -1298,6 +1359,9 @@ export default function App() {
           uiLang === "zh-CN" ? "模型校验超时，请重试。" : "Model validation timed out."
         );
         setModelAvailability(availability);
+        if (availability.status_code === MODEL_NOT_CONFIGURED_CODE) {
+          setError(null);
+        }
       } catch (err) {
         setModelAvailability(null);
         setError(toUiErrorMessage(err));
@@ -1355,6 +1419,9 @@ export default function App() {
   };
 
   const onSelectProvider = (provider: ModelProvider) => {
+    setModelAvailability(null);
+    setProviderModels({ from_folder: [], from_service: [], merged: [] });
+    setError(null);
     setModelSettings((prev) => ({
       ...prev,
       active_provider: provider
@@ -1508,17 +1575,21 @@ export default function App() {
     const shouldCompact = scrollTop > 2;
     if (shouldCompact) {
       reachedTopWhileCompactRef.current = false;
-      setAllowCompactHoverExpand(false);
+      if (allowCompactHoverExpand) {
+        setAllowCompactHoverExpand(false);
+      }
       if (compactHoverUnlockTimerRef.current !== null) {
         window.clearTimeout(compactHoverUnlockTimerRef.current);
       }
       compactHoverUnlockTimerRef.current = window.setTimeout(() => {
         setAllowCompactHoverExpand(true);
       }, 260);
-      setScopeMenuOpen(false);
-      setIsSearchBarHovering(false);
-      setIsSearchInputFocused(false);
-      searchInputRef.current?.blur();
+      if (scopeMenuOpen) setScopeMenuOpen(false);
+      if (isSearchBarHovering) setIsSearchBarHovering(false);
+      if (isSearchInputFocused) {
+        setIsSearchInputFocused(false);
+        searchInputRef.current?.blur();
+      }
       setIsSearchBarCompact((prev) => (prev === shouldCompact ? prev : shouldCompact));
       return;
     }
@@ -1657,7 +1728,7 @@ export default function App() {
                       setIsSearchBarHovering(true);
                       requestAnimationFrame(() => searchInputRef.current?.focus());
                     }}
-                    aria-label={t("askPlaceholder")}
+                    aria-label={searchPlaceholder}
                     className="block h-1.5 w-full appearance-none rounded-full border-0 bg-[var(--search-collapsed-bar)] p-0 shadow-[0_2px_8px_rgba(15,23,42,0.12)] outline-none focus:border-0 focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0"
                   />
                 ) : (
@@ -1802,6 +1873,7 @@ export default function App() {
                     ref={searchInputRef}
                     type="text"
                     autoFocus
+                    disabled={modelSetupNotConfigured}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={onKeyDown}
@@ -1824,8 +1896,12 @@ export default function App() {
                         setFileMatchesOpen(false);
                       }, 120);
                     }}
-                    placeholder={t("askPlaceholder")}
-                    className="w-full flex-1 border-none bg-transparent pr-10 text-xl text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-0"
+                    placeholder={searchPlaceholder}
+                    className={`w-full flex-1 border-none bg-transparent pr-10 text-xl text-[var(--text-primary)] focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-100 ${
+                      modelSetupNotConfigured
+                        ? "placeholder:text-red-400"
+                        : "placeholder:text-[var(--text-muted)]"
+                    }`}
                   />
                 </div>
                   <AnimatePresence>
@@ -1936,13 +2012,13 @@ export default function App() {
               {isSearching && (
                 <motion.section
                   initial={{ opacity: 0, y: 20 }}
-                  animate={{
-                    opacity: 1,
-                    y: 0,
-                    paddingTop: isSearchBarCollapsed ? 74 : isSearchBarCompact ? 102 : 146
-                  }}
+                  animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 12 }}
                   transition={{ duration: 0.24, ease: "easeOut" }}
+                  style={{
+                    paddingTop: isSearchBarCollapsed ? 74 : isSearchBarCompact ? 102 : 146,
+                    transition: "padding-top 0.24s ease-out"
+                  }}
                   className="no-scrollbar mx-auto h-full w-full max-w-4xl overflow-y-auto"
                   onScroll={onResultScroll}
                   onWheel={onResultWheel}

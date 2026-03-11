@@ -53,7 +53,7 @@ pub(crate) fn analyze_query(query: &str) -> QueryAnalysis {
 
     if filename_terms.is_empty() {
         for term in &document_terms {
-            if term.chars().any(is_cjk) || term.chars().any(|ch| ch.is_ascii_digit()) {
+            if term.chars().any(|ch| ch.is_ascii_digit()) {
                 insert_unique_term(&mut seen_filename, &mut filename_terms, term);
             }
         }

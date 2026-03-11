@@ -92,7 +92,8 @@ pub(crate) fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
              relative_path,
              chunk_id UNINDEXED,
              doc_id UNINDEXED,
-             file_path UNINDEXED
+             file_path UNINDEXED,
+             tokenize = 'trigram'
          );
          CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
              search_text,
@@ -100,7 +101,8 @@ pub(crate) fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
              relative_path,
              heading_catalog_text,
              doc_id UNINDEXED,
-             file_path UNINDEXED
+             file_path UNINDEXED,
+             tokenize = 'trigram'
          );
          CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id);
          CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_doc_chunk_index ON chunks(doc_id, chunk_index);
@@ -118,6 +120,7 @@ pub(crate) fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
     ensure_chunks_schema(conn)?;
     ensure_file_index_state_schema(conn)?;
     ensure_file_catalog_schema(conn)?;
+    migrate_legacy_fts_tables(conn)?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_documents_relative_path ON documents(relative_path)",
         [],
@@ -260,7 +263,139 @@ pub(crate) fn ensure_file_index_state_schema(conn: &Connection) -> Result<(), St
     Ok(())
 }
 
+fn migrate_legacy_fts_tables(conn: &Connection) -> Result<(), StorageError> {
+    for (table, create_sql) in &[
+        (
+            "chunks_fts",
+            "CREATE VIRTUAL TABLE chunks_fts USING fts5(
+                content, heading_text, file_name, relative_path,
+                chunk_id UNINDEXED, doc_id UNINDEXED, file_path UNINDEXED,
+                tokenize = 'trigram'
+            )",
+        ),
+        (
+            "documents_fts",
+            "CREATE VIRTUAL TABLE documents_fts USING fts5(
+                search_text, file_name, relative_path, heading_catalog_text,
+                doc_id UNINDEXED, file_path UNINDEXED,
+                tokenize = 'trigram'
+            )",
+        ),
+    ] {
+        // Check tokenizer via FTS5 shadow config table
+        let is_trigram = conn
+            .query_row(
+                &format!("SELECT v FROM {}_config WHERE k = 'tokenize'", table),
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|v| v.contains("trigram"))
+            .unwrap_or(false);
+
+        // Use query_row instead of execute to safely probe column existence
+        let has_doc_id = conn
+            .query_row(
+                &format!("SELECT doc_id FROM {} LIMIT 0", table),
+                [],
+                |_| Ok(()),
+            )
+            .optional()
+            .is_ok();
+
+        let has_file_name = conn
+            .query_row(
+                &format!("SELECT file_name FROM {} LIMIT 0", table),
+                [],
+                |_| Ok(()),
+            )
+            .optional()
+            .is_ok();
+
+        let needs_rebuild = !is_trigram || !has_doc_id || !has_file_name;
+
+        if needs_rebuild {
+            conn.execute_batch(&format!(
+                "DROP TABLE IF EXISTS {table}; {create_sql};"
+            ))
+            .map_err(map_sqlite_error)?;
+            // FTS data is gone — force a full rebuild so lexical index is repopulated
+            set_metadata_value(conn, "rebuild_state", "required")?;
+            set_metadata_value(
+                conn,
+                "rebuild_reason",
+                "fts_schema_migration:FTS 表已升级为 trigram tokenizer，需全量重建以恢复词法索引",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn migrate_legacy_file_catalog_ext_column(conn: &Connection) -> Result<(), StorageError> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(file_catalog)")
+        .map_err(map_sqlite_error)?;
+    let columns: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(map_sqlite_error)?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if !columns.iter().any(|c| c == "ext") {
+        return Ok(());
+    }
+
+    // Build SELECT expressions defensively — old tables may be missing columns
+    let col = |name: &str, default: &str| -> String {
+        if columns.iter().any(|c| c == name) {
+            name.to_string()
+        } else {
+            default.to_string()
+        }
+    };
+
+    let file_ext_src = if columns.iter().any(|c| c == "file_ext") {
+        "file_ext".to_string()
+    } else {
+        "ext".to_string()
+    };
+
+    let select = format!(
+        "file_path, {}, {}, {}, {}, {}, {}, {}, {}",
+        col("relative_path", "''"),
+        col("parent_dir", "''"),
+        col("file_name", "''"),
+        file_ext_src,
+        col("file_size", "0"),
+        col("mtime_secs", "0"),
+        col("discovered_at", "0"),
+        col("removed_at", "NULL"),
+    );
+
+    conn.execute_batch(&format!(
+        "BEGIN;
+         CREATE TABLE file_catalog_new (
+             file_path TEXT PRIMARY KEY,
+             relative_path TEXT NOT NULL DEFAULT '',
+             parent_dir TEXT NOT NULL DEFAULT '',
+             file_name TEXT NOT NULL DEFAULT '',
+             file_ext TEXT NOT NULL DEFAULT '',
+             file_size INTEGER NOT NULL DEFAULT 0,
+             mtime_secs INTEGER NOT NULL DEFAULT 0,
+             discovered_at INTEGER NOT NULL DEFAULT 0,
+             removed_at INTEGER
+         );
+         INSERT INTO file_catalog_new SELECT {select} FROM file_catalog;
+         DROP TABLE file_catalog;
+         ALTER TABLE file_catalog_new RENAME TO file_catalog;
+         COMMIT;"
+    ))
+    .map_err(map_sqlite_error)?;
+
+    Ok(())
+}
+
 pub(crate) fn ensure_file_catalog_schema(conn: &Connection) -> Result<(), StorageError> {
+    migrate_legacy_file_catalog_ext_column(conn)?;
     ensure_table_column(
         conn,
         "file_catalog",
