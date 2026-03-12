@@ -27,7 +27,6 @@ pub(crate) async fn resolve_actor_subject(state: &ServerState, headers: &HeaderM
     }
 }
 
-
 pub(crate) fn decode_jwt_claims(token: &str) -> Result<serde_json::Value, String> {
     let mut parts = token.split('.');
     let _header = parts.next();
@@ -79,6 +78,3 @@ pub(crate) fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
         Some(trimmed.to_string())
     }
 }
-
-
-

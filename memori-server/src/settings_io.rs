@@ -49,6 +49,3 @@ pub(crate) fn resolve_watch_root_from_settings(settings: &AppSettings) -> Result
 
     std::env::current_dir().map_err(|err| format!("获取当前工作目录失败: {err}"))
 }
-
-
-

@@ -371,7 +371,9 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
     }
 }
 
-pub(crate) fn normalize_model_settings_payload(payload: ModelSettingsDto) -> Result<ModelSettingsDto, String> {
+pub(crate) fn normalize_model_settings_payload(
+    payload: ModelSettingsDto,
+) -> Result<ModelSettingsDto, String> {
     let active_provider = ModelProvider::from_value(&payload.active_provider);
     let local_endpoint =
         normalize_endpoint(ModelProvider::OllamaLocal, &payload.local_profile.endpoint);
@@ -445,7 +447,9 @@ pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> Str
     }
 }
 
-pub(crate) fn resolve_active_runtime_settings(settings: &ModelSettingsDto) -> ActiveRuntimeModelSettings {
+pub(crate) fn resolve_active_runtime_settings(
+    settings: &ModelSettingsDto,
+) -> ActiveRuntimeModelSettings {
     let active_provider = ModelProvider::from_value(&settings.active_provider);
     if active_provider == ModelProvider::OpenAiCompatible {
         return ActiveRuntimeModelSettings {
@@ -537,7 +541,9 @@ pub(crate) fn merge_model_candidates(
     }
 }
 
-pub(crate) async fn list_ollama_models(endpoint: &str) -> Result<Vec<String>, ProviderModelFetchError> {
+pub(crate) async fn list_ollama_models(
+    endpoint: &str,
+) -> Result<Vec<String>, ProviderModelFetchError> {
     #[derive(Debug, Deserialize)]
     struct OllamaTagResp {
         models: Vec<OllamaTagItem>,
@@ -777,5 +783,3 @@ pub(crate) fn resolve_enterprise_policy(settings: &AppSettings) -> EnterprisePol
         },
     }
 }
-
-

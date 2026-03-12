@@ -86,7 +86,6 @@ pub(crate) fn read_audit_events() -> Result<Vec<AuditEventDto>, String> {
     Ok(events)
 }
 
-
 pub(crate) fn snapshot_metrics(metrics: &ServerMetrics) -> ServerMetricsDto {
     let ask_requests = metrics.ask_requests.load(Ordering::Relaxed);
     let ask_latency_total_ms = metrics.ask_latency_total_ms.load(Ordering::Relaxed);
@@ -104,13 +103,9 @@ pub(crate) fn snapshot_metrics(metrics: &ServerMetrics) -> ServerMetricsDto {
     }
 }
 
-
 pub(crate) fn audit_log_file_path() -> Result<PathBuf, String> {
     let config_root = dirs::config_dir().ok_or_else(|| "无法获取用户配置目录".to_string())?;
     Ok(config_root
         .join(SETTINGS_APP_DIR_NAME)
         .join(AUDIT_LOG_FILE_NAME))
 }
-
-
-
