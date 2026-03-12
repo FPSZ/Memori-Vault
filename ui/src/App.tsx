@@ -513,6 +513,18 @@ function formatDocumentReason(
       return t("documentReasonBoth");
     case "lexical":
       return t("documentReasonLexical");
+    case "lexical_strict":
+      return t("documentReasonLexicalStrict");
+    case "lexical_broad":
+      return t("documentReasonLexicalBroad");
+    case "mixed":
+      return t("documentReasonMixed");
+    case "exact_path":
+      return t("documentReasonExactPath");
+    case "exact_symbol":
+      return t("documentReasonExactSymbol");
+    case "docs_phrase":
+      return t("documentReasonDocsPhrase");
     case "filename":
       return t("documentReasonFilename");
     case "scope":
@@ -2362,12 +2374,18 @@ export default function App() {
                                 return (
                                   <div
                                     key={citation.citation_key}
-                                    className="rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-4 py-3"
+                                    className="relative overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-4 py-3"
                                   >
-                                    <div className="mb-2 flex items-start justify-between gap-3">
+                                    <div
+                                      aria-hidden="true"
+                                      className="pointer-events-none absolute -left-1 -top-3 z-0 select-none italic text-[88px] font-semibold leading-none text-[color-mix(in_srgb,var(--accent)_16%,transparent)]"
+                                    >
+                                      {citation.index}
+                                    </div>
+                                    <div className="relative z-10 mb-2 flex items-start justify-between gap-3">
                                       <div className="min-w-0">
                                         <div className="text-xs font-semibold text-[var(--accent)]">
-                                          [{citation.index}] {citation.relative_path || citation.file_path}
+                                          {citation.relative_path || citation.file_path}
                                         </div>
                                         {citation.heading_path.length > 0 ? (
                                           <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
@@ -2408,7 +2426,7 @@ export default function App() {
                                       </div>
                                     </div>
                                     <div
-                                      className={`md-preview md-preview-source text-sm leading-6 text-[var(--text-secondary)] ${
+                                      className={`relative z-10 md-preview md-preview-source text-sm leading-6 text-[var(--text-secondary)] ${
                                         !expanded
                                           ? "source-preview-scrollbar max-h-28 overflow-y-auto pr-2"
                                           : ""
@@ -2476,7 +2494,7 @@ export default function App() {
                                         {t("chunkRankLabel", { count: source.top_chunk_rank })}
                                       </span>
                                       <span className="text-[var(--text-muted)]">
-                                        {source.fragment_count} fragments
+                                        {t("evidenceFragments", { count: source.fragment_count })}
                                       </span>
                                     </div>
                                     <div className="mt-2 truncate font-mono text-xs text-[var(--text-secondary)]" title={source.file_path}>
