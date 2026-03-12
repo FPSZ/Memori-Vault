@@ -70,12 +70,12 @@ pub(crate) fn normalize_storage_file_path_text(path: &Path) -> String {
 }
 
 pub(crate) fn build_relative_path(file_path: &Path, watch_root: Option<&Path>) -> String {
-    if let Some(root) = watch_root {
-        if let Ok(relative) = file_path.strip_prefix(root) {
-            let text = relative.to_string_lossy().to_string();
-            if !text.trim().is_empty() {
-                return normalize_relative_path_text(&text);
-            }
+    if let Some(root) = watch_root
+        && let Ok(relative) = file_path.strip_prefix(root)
+    {
+        let text = relative.to_string_lossy().to_string();
+        if !text.trim().is_empty() {
+            return normalize_relative_path_text(&text);
         }
     }
 
@@ -84,7 +84,7 @@ pub(crate) fn build_relative_path(file_path: &Path, watch_root: Option<&Path>) -
         .and_then(|name| name.to_str())
         .map(normalize_relative_path_text)
         .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| normalize_relative_path_text(&file_path.to_string_lossy()))
+        .unwrap_or_else(|| normalize_relative_path_text(file_path.to_string_lossy()))
 }
 
 pub(crate) fn normalize_relative_path_text(text: impl AsRef<str>) -> String {

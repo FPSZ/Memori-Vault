@@ -74,7 +74,6 @@ impl VectorStore for InMemoryStore {
 }
 
 /// SQLite 持久化存储实现。
-
 impl VectorStore for SqliteStore {
     async fn insert_chunks(
         &self,
