@@ -585,10 +585,7 @@ pub(crate) fn should_refuse_for_insufficient_evidence(
         QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup
     ) && top.document_rank <= 3
         && (top.document_has_docs_phrase_signal || top.document_has_strict_lexical)
-        && evidence
-            .iter()
-            .take(2)
-            .any(has_any_chunk_lexical)
+        && evidence.iter().take(2).any(has_any_chunk_lexical)
     {
         return false;
     }
