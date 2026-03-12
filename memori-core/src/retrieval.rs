@@ -206,9 +206,9 @@ pub(crate) fn merge_document_candidates(
             "exact_symbol".to_string()
         } else if doc.has_docs_phrase_signal {
             "docs_phrase".to_string()
-        } else if doc.has_exact_signal && (doc.has_strict_lexical || doc.has_broad_lexical) {
-            "mixed".to_string()
-        } else if doc.has_filename_signal && (doc.has_strict_lexical || doc.has_broad_lexical) {
+        } else if (doc.has_exact_signal || doc.has_filename_signal)
+            && (doc.has_strict_lexical || doc.has_broad_lexical)
+        {
             "mixed".to_string()
         } else if doc.has_strict_lexical {
             "lexical_strict".to_string()
@@ -588,7 +588,7 @@ pub(crate) fn should_refuse_for_insufficient_evidence(
         && evidence
             .iter()
             .take(2)
-            .any(|item| has_any_chunk_lexical(item))
+            .any(has_any_chunk_lexical)
     {
         return false;
     }
@@ -884,9 +884,11 @@ pub(crate) fn build_merged_evidence_from_items(items: &[EvidenceItem]) -> Vec<Me
 pub(crate) fn prepare_query_for_retrieval(question: &str) -> QueryPreparation {
     let query_analysis_started_at = Instant::now();
     let analysis = analyze_query(question);
-    let mut metrics = RetrievalMetrics::default();
-    metrics.query_analysis_ms = elapsed_ms_u64(query_analysis_started_at);
-    metrics.query_flags = query_flags_as_labels(&analysis);
+    let mut metrics = RetrievalMetrics {
+        query_analysis_ms: elapsed_ms_u64(query_analysis_started_at),
+        query_flags: query_flags_as_labels(&analysis),
+        ..RetrievalMetrics::default()
+    };
     metrics
         .query_flags
         .push(format!("intent:{}", analysis.query_intent.as_str()));
