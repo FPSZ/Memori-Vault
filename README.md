@@ -72,7 +72,7 @@ Details: [docs/RETRIEVAL_BASELINE.md](./docs/RETRIEVAL_BASELINE.md)
 - Deployment assets included (`deploy/systemd`, env template, backup/restore scripts).
 
 Current note:
-- Enterprise deployment is available as a private deployment preview in `v0.2.0`.
+- Enterprise deployment is available as a private deployment preview in `v0.3.0`.
 - Auth/session flows are suitable for controlled internal environments first and will continue to harden in later releases.
 
 Details: [docs/enterprise.md](./docs/enterprise.md)

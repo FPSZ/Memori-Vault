@@ -76,7 +76,7 @@ ollama list
 - `cargo test --workspace`
 - `npm --prefix ui run build`
 - 版本一致性：workspace / tauri / ui package
-- 发布说明：`docs/RELEASE_NOTES_v0.2.0.md`
+- 发布说明：`docs/RELEASE_NOTES_v0.3.0.md`
 
 ## 8. 可选烟测脚本
 

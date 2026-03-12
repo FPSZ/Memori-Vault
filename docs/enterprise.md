@@ -14,7 +14,7 @@ This document describes the current preview-stage enterprise capabilities for si
 Preview note:
 
 - The current auth/session implementation is intended for controlled internal environments.
-- Treat this document as the capability baseline for `v0.2.0`, not as a claim of fully hardened GA enterprise identity infrastructure.
+- Treat this document as the capability baseline for `v0.3.0`, not as a claim of fully hardened GA enterprise identity infrastructure.
 - This document covers runtime/security posture only; it does not imply that mixed-corpus retrieval quality is already production-validated.
 
 ## Auth and Session

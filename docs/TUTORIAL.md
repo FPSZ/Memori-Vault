@@ -1,6 +1,6 @@
 # Memori-Vault Tutorial (Primary)
 
-This is the primary quick-start and usage tutorial for `v0.2.0`.
+This is the primary quick-start and usage tutorial for `v0.3.0`.
 
 Chinese companion: [TUTORIAL.zh-CN.md](./TUTORIAL.zh-CN.md)
 
@@ -130,7 +130,7 @@ Before publishing:
 - `cargo test --workspace`
 - `npm --prefix ui run build`
 - Verify version consistency (`workspace`, `tauri.conf.json`, `ui/package.json`).
-- Prepare release notes in `docs/RELEASE_NOTES_v0.2.0.md`.
+- Prepare release notes in `docs/RELEASE_NOTES_v0.3.0.md`.
 
 ## 9. Optional Smoke Scripts
 
