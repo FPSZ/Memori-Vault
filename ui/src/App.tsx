@@ -12,6 +12,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  Atom,
   Check,
   ChevronDown,
   ChevronRight,
@@ -48,6 +49,7 @@ import {
   ThemeMode,
   SettingsModal
 } from "./components/SettingsModal";
+import { fadeSlideUpVariants } from "./components/MotionKit";
 import { useI18n } from "./i18n";
 import type { Language } from "./i18n";
 
@@ -80,6 +82,27 @@ type VisibleCitation = CitationItem & {
   citation_key: string;
   duplicate_count: number;
   is_long_excerpt: boolean;
+};
+
+type VisibleEvidenceGroup = {
+  evidence_key: string;
+  file_path: string;
+  relative_path: string;
+  heading_paths: string[];
+  block_kinds: string[];
+  document_reasons: string[];
+  reasons: string[];
+  document_rank: number;
+  top_chunk_rank: number;
+  chunk_ranks: number[];
+  content: string;
+  fragment_count: number;
+};
+
+type MetricRow = {
+  key: string;
+  label: string;
+  value: number;
 };
 
 type EvidenceItem = {
@@ -341,7 +364,7 @@ function isMarkdownFile(path: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(path.trim());
 }
 
-function buildCollapsedMarkdownPreview(content: string): string {
+function buildCollapsedMarkdownPreview(content: string, maxLines = 8): string {
   const normalized = content.replace(/\r\n/g, "\n").trim();
   if (!normalized) {
     return normalized;
@@ -351,11 +374,113 @@ function buildCollapsedMarkdownPreview(content: string): string {
   if (fenceMatch) {
     const fenceIndex = fenceMatch.index ?? 0;
     const before = normalized.slice(0, fenceIndex).trim();
-    const beforeLines = before ? before.split("\n").slice(-6).join("\n") : "";
+    const beforeLines = before ? before.split("\n").slice(-Math.min(maxLines, 6)).join("\n") : "";
     return beforeLines ? `${beforeLines}\n\n${fenceMatch[0]}` : fenceMatch[0];
   }
 
-  return normalized.split("\n").slice(0, 8).join("\n");
+  return normalized.split("\n").slice(0, maxLines).join("\n");
+}
+
+function normalizeEvidenceContent(content: string): string {
+  return content
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function mergeEvidenceFragments(items: EvidenceItem[]): string {
+  const uniqueFragments: string[] = [];
+
+  for (const item of items) {
+    const normalized = normalizeEvidenceContent(item.content);
+    if (!normalized) {
+      continue;
+    }
+
+    const duplicateIndex = uniqueFragments.findIndex((existing) => {
+      if (existing === normalized) {
+        return true;
+      }
+      if (existing.includes(normalized)) {
+        return true;
+      }
+      if (normalized.includes(existing)) {
+        return true;
+      }
+      return false;
+    });
+
+    if (duplicateIndex >= 0) {
+      if (normalized.length > uniqueFragments[duplicateIndex].length) {
+        uniqueFragments[duplicateIndex] = normalized;
+      }
+      continue;
+    }
+
+    uniqueFragments.push(normalized);
+  }
+
+  return uniqueFragments.join("\n\n---\n\n");
+}
+
+function formatMetricDuration(ms: number): string {
+  return `${Math.round(Math.max(0, ms))}ms`;
+}
+
+function formatQueryFlag(flag: string, t: ReturnType<typeof useI18n>["t"]): string {
+  switch (flag) {
+    case "cjk":
+      return t("flagCjk");
+    case "ascii_identifier":
+      return t("flagAsciiIdentifier");
+    case "path_like":
+      return t("flagPathLike");
+    case "lookup_like":
+      return t("flagLookupLike");
+    default:
+      break;
+  }
+
+  if (flag.startsWith("token_count:")) {
+    return t("flagTokenCount", { count: flag.slice("token_count:".length) });
+  }
+  if (flag.startsWith("identifier_terms:")) {
+    return t("flagIdentifierTerms", { count: flag.slice("identifier_terms:".length) });
+  }
+  if (flag.startsWith("filename_terms:")) {
+    return t("flagFilenameTerms", { count: flag.slice("filename_terms:".length) });
+  }
+  if (flag.startsWith("query_family:")) {
+    const family = flag.slice("query_family:".length);
+    const value =
+      family === "docs_explanatory"
+        ? t("queryFamilyDocsExplanatory")
+        : family === "docs_api_lookup"
+          ? t("queryFamilyDocsApiLookup")
+          : family === "implementation_lookup"
+            ? t("queryFamilyImplementationLookup")
+            : family;
+    return t("flagQueryFamily", { value });
+  }
+  if (flag.startsWith("intent:")) {
+    const intent = flag.slice("intent:".length);
+    const value =
+      intent === "repo_lookup"
+        ? t("intentRepoLookup")
+        : intent === "repo_question"
+          ? t("intentRepoQuestion")
+          : intent === "external_fact"
+            ? t("intentExternalFact")
+            : intent === "secret_request"
+              ? t("intentSecretRequest")
+              : intent === "missing_file_lookup"
+                ? t("intentMissingFileLookup")
+                : intent;
+    return t("flagIntent", { value });
+  }
+
+  return flag;
 }
 
 function isLongCitationExcerpt(content: string): boolean {
@@ -400,7 +525,7 @@ function formatDocumentReason(
 function statusToneClasses(status: AskStatus): string {
   switch (status) {
     case "answered":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+      return "border-[color-mix(in_srgb,var(--accent)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent)_12%,var(--bg-surface-1)_88%)] text-[color-mix(in_srgb,var(--accent)_76%,var(--text-primary)_24%)]";
     case "model_failed_with_evidence":
       return "border-amber-500/30 bg-amber-500/10 text-amber-200";
     default:
@@ -478,6 +603,59 @@ export default function App() {
     () => answerResponse?.evidence.slice(0, retrieveTopK) ?? [],
     [answerResponse, retrieveTopK]
   );
+  const visibleEvidenceGroups = useMemo<VisibleEvidenceGroup[]>(() => {
+    const groups = new Map<string, EvidenceItem[]>();
+    for (const source of visibleEvidence) {
+      const key = source.file_path.toLowerCase();
+      const bucket = groups.get(key);
+      if (bucket) {
+        bucket.push(source);
+      } else {
+        groups.set(key, [source]);
+      }
+    }
+
+    return Array.from(groups.values())
+      .map((items) => {
+        const sortedItems = [...items].sort((a, b) => a.chunk_rank - b.chunk_rank);
+        const first = sortedItems[0];
+        const headingPaths = Array.from(
+          new Set(
+            sortedItems
+              .map((item) => item.heading_path.join(" > ").trim())
+              .filter((value) => value.length > 0)
+          )
+        );
+        const blockKinds = Array.from(
+          new Set(sortedItems.map((item) => item.block_kind.trim()).filter(Boolean))
+        );
+        const documentReasons = Array.from(
+          new Set(sortedItems.map((item) => item.document_reason))
+        );
+        const reasons = Array.from(new Set(sortedItems.map((item) => item.reason)));
+        const chunkRanks = sortedItems.map((item) => item.chunk_rank);
+        return {
+          evidence_key: `${first.file_path.toLowerCase()}::${chunkRanks.join(",")}`,
+          file_path: first.file_path,
+          relative_path: first.relative_path,
+          heading_paths: headingPaths,
+          block_kinds: blockKinds,
+          document_reasons: documentReasons,
+          reasons,
+          document_rank: Math.min(...sortedItems.map((item) => item.document_rank)),
+          top_chunk_rank: Math.min(...chunkRanks),
+          chunk_ranks: chunkRanks,
+          content: mergeEvidenceFragments(sortedItems),
+          fragment_count: sortedItems.length
+        };
+      })
+      .sort((a, b) => {
+        if (a.document_rank !== b.document_rank) {
+          return a.document_rank - b.document_rank;
+        }
+        return a.top_chunk_rank - b.top_chunk_rank;
+      });
+  }, [visibleEvidence]);
   const visibleCitations = useMemo<VisibleCitation[]>(() => {
     const grouped = new Map<string, VisibleCitation>();
     for (const citation of answerResponse?.citations ?? []) {
@@ -503,6 +681,39 @@ export default function App() {
       }))
       .slice(0, retrieveTopK);
   }, [answerResponse, retrieveTopK]);
+  const measuredMetricsTotalMs = useMemo(() => {
+    if (!answerResponse) {
+      return 0;
+    }
+    const metrics = answerResponse.metrics;
+    return (
+      metrics.query_analysis_ms +
+      metrics.doc_recall_ms +
+      metrics.doc_lexical_ms +
+      metrics.doc_merge_ms +
+      metrics.chunk_lexical_ms +
+      metrics.chunk_dense_ms +
+      metrics.merge_ms +
+      metrics.answer_ms
+    );
+  }, [answerResponse]);
+  const metricRows = useMemo<MetricRow[]>(() => {
+    if (!answerResponse) {
+      return [];
+    }
+    const metrics = answerResponse.metrics;
+    return [
+      { key: "answer_ms", label: t("metricAnswer"), value: metrics.answer_ms },
+      { key: "doc_recall_ms", label: t("metricDocRecall"), value: metrics.doc_recall_ms },
+      { key: "chunk_dense_ms", label: t("metricChunkDense"), value: metrics.chunk_dense_ms },
+      { key: "chunk_lexical_ms", label: t("metricChunkLexical"), value: metrics.chunk_lexical_ms },
+      { key: "query_analysis_ms", label: t("metricQueryAnalysis"), value: metrics.query_analysis_ms },
+      { key: "doc_lexical_ms", label: t("metricDocLexical"), value: metrics.doc_lexical_ms },
+      { key: "doc_merge_ms", label: t("metricDocMerge"), value: metrics.doc_merge_ms },
+      { key: "merge_ms", label: t("metricMerge"), value: metrics.merge_ms }
+    ]
+      .sort((a, b) => b.value - a.value);
+  }, [answerResponse, t]);
   const modelSetupConfigured = useMemo(
     () => modelAvailability?.configured ?? false,
     [modelAvailability]
@@ -2119,7 +2330,7 @@ export default function App() {
                       {answerResponse.answer.trim().length > 0 && (
                         <div className="mb-6 border-l-2 border-[var(--accent)] pl-4">
                           <div className="mb-3 flex items-center gap-2">
-                            <Sparkles className="h-4 w-4 text-[var(--accent)]" />
+                            <Atom className="h-4 w-4 text-[var(--accent)]" />
                             <span className="text-xs font-bold tracking-widest text-[var(--accent)]">
                               {t("synthesis")}
                             </span>
@@ -2144,10 +2355,9 @@ export default function App() {
                             {visibleCitations.map((citation) => (
                               (() => {
                                 const expanded = expandedCitationKeys.has(citation.citation_key);
-                                const citationContent =
-                                  citation.is_long_excerpt && !expanded
-                                    ? buildCollapsedMarkdownPreview(citation.excerpt)
-                                    : citation.excerpt;
+                                const citationContent = expanded
+                                  ? citation.excerpt
+                                  : buildCollapsedMarkdownPreview(citation.excerpt, 5);
 
                                 return (
                                   <div
@@ -2180,27 +2390,27 @@ export default function App() {
                                         >
                                           <FolderOpen className="h-4 w-4" />
                                         </button>
-                                        {citation.is_long_excerpt ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => toggleCitationExpanded(citation.citation_key)}
-                                            className="p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
-                                            aria-label={expanded ? t("collapseCitation") : t("expandCitation")}
-                                            title={expanded ? t("collapseCitation") : t("expandCitation")}
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleCitationExpanded(citation.citation_key)}
+                                          className="p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
+                                          aria-label={expanded ? t("collapseCitation") : t("expandCitation")}
+                                          title={expanded ? t("collapseCitation") : t("expandCitation")}
+                                        >
+                                          <motion.span
+                                            animate={{ rotate: expanded ? 180 : 0 }}
+                                            transition={{ duration: 0.2, ease: "easeOut" }}
+                                            className="inline-flex"
                                           >
-                                            {expanded ? (
-                                              <ChevronUp className="h-4 w-4" />
-                                            ) : (
-                                              <ChevronDown className="h-4 w-4" />
-                                            )}
-                                          </button>
-                                        ) : null}
+                                            <ChevronDown className="h-4 w-4" />
+                                          </motion.span>
+                                        </button>
                                       </div>
                                     </div>
                                     <div
                                       className={`md-preview md-preview-source text-sm leading-6 text-[var(--text-secondary)] ${
-                                        citation.is_long_excerpt && !expanded
-                                          ? "source-preview-scrollbar max-h-40 overflow-y-auto pr-2"
+                                        !expanded
+                                          ? "source-preview-scrollbar max-h-28 overflow-y-auto pr-2"
                                           : ""
                                       }`}
                                     >
@@ -2208,7 +2418,7 @@ export default function App() {
                                         remarkPlugins={MARKDOWN_REMARK_PLUGINS}
                                         rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
                                       >
-                                        {citationContent}
+                                        {expanded ? citation.excerpt : citationContent}
                                       </ReactMarkdown>
                                     </div>
                                   </div>
@@ -2219,74 +2429,87 @@ export default function App() {
                         </section>
                       )}
 
-                      {visibleEvidence.length > 0 && (
+                      {visibleEvidenceGroups.length > 0 && (
                         <section className="mt-8">
                           <div className="mb-3 text-[11px] tracking-[0.16em] text-[var(--text-secondary)] uppercase">
                             {t("evidenceTitle")}
                           </div>
 
-                          <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-2">
-                            {visibleEvidence.map((source, index) => {
-                              const sourceKey = `${source.file_path}-${source.chunk_index}-${index}`;
+                          <div className="grid grid-cols-1 items-stretch gap-3 md:grid-cols-2">
+                            {visibleEvidenceGroups.map((source) => {
+                              const sourceKey = source.evidence_key;
                               const expanded = expandedSourceKeys.has(sourceKey);
                               const markdownPreview = isMarkdownFile(source.file_path);
                               const markdownContent = expanded
                                 ? source.content
-                                : buildCollapsedMarkdownPreview(source.content);
+                                : buildCollapsedMarkdownPreview(source.content, 7);
 
                               return (
-                                <motion.div
+                                <div
                                   key={sourceKey}
-                                  layout="position"
-                                  transition={{ type: "spring", stiffness: 240, damping: 30 }}
-                                  className={`relative h-fit self-start flex flex-row items-start gap-4 rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] p-4 ${
+                                  className={`relative flex h-full flex-col rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-4 py-3 ${
                                     expanded ? "md:col-span-2" : ""
                                   }`}
                                 >
-                                  <div className="min-w-0 flex-1 pr-5">
+                                  <div className="min-w-0 flex-1 pr-12">
                                     <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                                      <span className="rounded-full bg-[var(--bg-surface-2)] px-2 py-0.5 text-[var(--text-secondary)]">
-                                        {formatDocumentReason(source.document_reason, t)}
-                                      </span>
-                                      <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[var(--accent)]">
-                                        {formatEvidenceReason(source.reason, t)}
-                                      </span>
+                                      {source.document_reasons.map((reason) => (
+                                        <span
+                                          key={`doc-${sourceKey}-${reason}`}
+                                          className="rounded-full bg-[var(--bg-surface-2)] px-2 py-0.5 text-[var(--text-secondary)]"
+                                        >
+                                          {formatDocumentReason(reason, t)}
+                                        </span>
+                                      ))}
+                                      {source.reasons.map((reason) => (
+                                        <span
+                                          key={`reason-${sourceKey}-${reason}`}
+                                          className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[var(--accent)]"
+                                        >
+                                          {formatEvidenceReason(reason, t)}
+                                        </span>
+                                      ))}
                                       <span className="text-[var(--text-secondary)]">
                                         {t("documentRankLabel", { count: source.document_rank })}
                                       </span>
                                       <span className="text-[var(--text-secondary)]">
-                                        {t("chunkRankLabel", { count: source.chunk_rank })}
+                                        {t("chunkRankLabel", { count: source.top_chunk_rank })}
+                                      </span>
+                                      <span className="text-[var(--text-muted)]">
+                                        {source.fragment_count} fragments
                                       </span>
                                     </div>
                                     <div className="mt-2 truncate font-mono text-xs text-[var(--text-secondary)]" title={source.file_path}>
                                       {source.relative_path || source.file_path}
                                     </div>
                                     <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-                                      {source.block_kind}
-                                      {source.heading_path.length > 0 ? ` · ${source.heading_path.join(" > ")}` : ""}
+                                      {source.block_kinds.join(" / ")}
+                                      {source.heading_paths.length > 0 ? ` · ${source.heading_paths.join(" · ")}` : ""}
                                     </div>
                                     {markdownPreview ? (
                                       <div
                                         className={`md-preview md-preview-source mt-2 text-sm leading-6 text-[var(--text-secondary)] ${
-                                          expanded ? "" : "source-preview-scrollbar max-h-40 overflow-y-auto pr-2"
+                                          !expanded
+                                            ? "source-preview-scrollbar max-h-24 overflow-y-auto pr-2"
+                                            : ""
                                         }`}
                                       >
                                         <ReactMarkdown
                                           remarkPlugins={MARKDOWN_REMARK_PLUGINS}
                                           rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
                                         >
-                                          {markdownContent}
+                                          {expanded ? source.content : markdownContent}
                                         </ReactMarkdown>
                                       </div>
                                     ) : (
                                       <div
-                                        className={
-                                          expanded
-                                            ? "mt-2 whitespace-pre-wrap break-words font-mono text-[13px] leading-6 text-[var(--text-muted)]"
-                                            : "source-preview-scrollbar mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[13px] leading-6 text-[var(--text-muted)] pr-2"
-                                        }
+                                        className={`mt-2 whitespace-pre-wrap break-words font-mono text-[13px] leading-6 text-[var(--text-muted)] ${
+                                          !expanded
+                                            ? "source-preview-scrollbar max-h-24 overflow-y-auto pr-2"
+                                            : ""
+                                        }`}
                                       >
-                                        {source.content}
+                                        {expanded ? source.content : markdownContent}
                                       </div>
                                     )}
                                   </div>
@@ -2314,7 +2537,7 @@ export default function App() {
                                       <ChevronDown className="h-4 w-4" />
                                     )}
                                   </button>
-                                </motion.div>
+                                </div>
                               );
                             })}
                           </div>
@@ -2332,40 +2555,65 @@ export default function App() {
                                 key={flag}
                                 className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-0.5 text-[var(--text-secondary)]"
                               >
-                                {flag}
+                                {formatQueryFlag(flag, t)}
                               </span>
                             ))}
                           </div>
                         ) : null}
-                        <div className="grid grid-cols-2 gap-3 text-xs text-[var(--text-secondary)] md:grid-cols-4">
-                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
-                            <div>{t("metricQueryAnalysis")}</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.query_analysis_ms}ms</div>
-                          </div>
-                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
-                            <div>{t("metricDocRecall")}</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.doc_recall_ms}ms</div>
-                          </div>
-                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
-                            <div>{t("metricDocLexical")}</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.doc_lexical_ms}ms</div>
-                          </div>
-                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
-                            <div>{t("metricDocMerge")}</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.doc_merge_ms}ms</div>
-                          </div>
-                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
-                            <div>{t("metricChunkLexical")}</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.chunk_lexical_ms}ms</div>
-                          </div>
-                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
-                            <div>{t("metricChunkDense")}</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.chunk_dense_ms}ms</div>
-                          </div>
-                          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
-                            <div>{t("metricMerge")}</div>
-                            <div className="mt-1 text-sm text-[var(--text-primary)]">{answerResponse.metrics.merge_ms}ms</div>
-                          </div>
+                        <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-[var(--text-secondary)]">
+                          <span>
+                            {t("metricTotal")}{" "}
+                            <span className="font-mono text-[var(--text-primary)]">
+                              {lastSearchDurationMs !== null ? formatElapsed(lastSearchDurationMs) : "-"}
+                            </span>
+                          </span>
+                          <span>
+                            {t("metricMeasured")}{" "}
+                            <span className="font-mono text-[var(--text-primary)]">
+                              {formatMetricDuration(measuredMetricsTotalMs)}
+                            </span>
+                          </span>
+                          {lastSearchDurationMs !== null && lastSearchDurationMs > measuredMetricsTotalMs ? (
+                            <span>
+                              {t("metricUntracked")}{" "}
+                              <span className="font-mono text-[var(--text-primary)]">
+                                {formatMetricDuration(lastSearchDurationMs - measuredMetricsTotalMs)}
+                              </span>
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="space-y-3">
+                          {metricRows.map((metric, index) => {
+                            const maxMetricValue = metricRows[0]?.value ?? 1;
+                            const widthPercent = Math.max(6, (metric.value / maxMetricValue) * 100);
+                            return (
+                              <div
+                                key={metric.key}
+                                className="flex items-center gap-3 text-xs text-[var(--text-secondary)]"
+                              >
+                                <span className="w-6 shrink-0 text-right font-mono text-[10px] text-[var(--text-muted)]">
+                                  {index + 1}
+                                </span>
+                                <span className="w-28 shrink-0 truncate text-[var(--text-secondary)] md:w-36">
+                                  {metric.label}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg-canvas)_90%)]">
+                                    <div
+                                      className="h-full rounded-full bg-[var(--accent)]"
+                                      style={{ width: `${widthPercent}%` }}
+                                    />
+                                  </div>
+                                </div>
+                                <span className="w-14 shrink-0 text-right font-mono text-[var(--text-primary)] md:w-16">
+                                  {formatMetricDuration(metric.value)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-3 text-[11px] text-[var(--text-muted)]">
+                          {t("metricsNote")}
                         </div>
                       </section>
                     </article>
@@ -2385,8 +2633,8 @@ export default function App() {
                 nodes: stats.nodes
               })}
             </span>
-            <span className="inline-flex items-center gap-2 text-emerald-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            <span className="inline-flex items-center gap-2 text-[var(--accent)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
               {t("localFirstDaemon")}
             </span>
           </div>
