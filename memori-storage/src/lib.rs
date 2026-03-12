@@ -649,11 +649,7 @@ mod tests {
 
         let reverse_terms = extract_signal_terms("PolarisBioCompute北极星生物计算");
         assert!(reverse_terms.iter().any(|term| term == "北极星生物计算"));
-        assert!(
-            reverse_terms
-                .iter()
-                .any(|term| term == "polarisbiocompute")
-        );
+        assert!(reverse_terms.iter().any(|term| term == "polarisbiocompute"));
     }
 
     #[test]

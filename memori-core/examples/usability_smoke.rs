@@ -151,7 +151,10 @@ async fn main() -> Result<(), AnyError> {
     println!("Usability smoke finished");
     println!("JSON report: {}", json_path.display());
     println!("Markdown report: {}", md_path.display());
-    println!("Usable answers: {}/{}", report.summary.usable_answer_count, report.summary.question_count);
+    println!(
+        "Usable answers: {}/{}",
+        report.summary.usable_answer_count, report.summary.question_count
+    );
     println!("Gate passed: {}", yes_no(report.summary.gate_passed));
     println!("========================================");
 
@@ -203,7 +206,8 @@ fn parse_args() -> Result<CliArgs, AnyError> {
     }
 
     let corpus_root = corpus_root.ok_or("missing required --corpus-root")?;
-    let questions_path = questions_path.unwrap_or_else(|| corpus_root.join("memori-usability-questions.json"));
+    let questions_path =
+        questions_path.unwrap_or_else(|| corpus_root.join("memori-usability-questions.json"));
     let stamp = unix_timestamp_secs();
     let db_path = db_path.unwrap_or_else(|| {
         PathBuf::from("target")
@@ -231,7 +235,9 @@ fn parse_args() -> Result<CliArgs, AnyError> {
 fn print_help() {
     println!("memori-core usability smoke");
     println!("  --corpus-root <path>         External corpus directory (required)");
-    println!("  --questions <path>           Question JSON file (default: <corpus-root>/memori-usability-questions.json)");
+    println!(
+        "  --questions <path>           Question JSON file (default: <corpus-root>/memori-usability-questions.json)"
+    );
     println!("  --db-path <path>             SQLite db path for this smoke run");
     println!("  --report-dir <path>          Output directory for report.json/report.md");
     println!("  --lang <lang>                Answer language (default: zh-CN)");
@@ -241,17 +247,17 @@ fn print_help() {
 }
 
 fn load_question_file(path: &Path) -> Result<UsabilityQuestionFile, AnyError> {
-    let raw = fs::read_to_string(path).map_err(|err| {
-        format!(
-            "failed to read question file {}: {err}",
-            path.display()
-        )
-    })?;
+    let raw = fs::read_to_string(path)
+        .map_err(|err| format!("failed to read question file {}: {err}", path.display()))?;
     Ok(serde_json::from_str(&raw)?)
 }
 
 async fn prepare_engine(engine: &MemoriEngine, timeout_secs: u64) -> Result<(), AnyError> {
-    timeout(Duration::from_secs(timeout_secs), engine.prepare_retrieval_index()).await??;
+    timeout(
+        Duration::from_secs(timeout_secs),
+        engine.prepare_retrieval_index(),
+    )
+    .await??;
     Ok(())
 }
 
@@ -339,12 +345,17 @@ fn evaluate_response(
         QuestionMode::Answer => {
             if response.status != AskStatus::Answered {
                 pass = false;
-                failure_class = Some(if !response.citations.is_empty() || !response.evidence.is_empty() {
-                    FailureClass::GatingFalseRefusal
-                } else {
-                    FailureClass::RetrievalMiss
-                });
-                reasons.push(format!("expected answered status, got {:?}", response.status));
+                failure_class = Some(
+                    if !response.citations.is_empty() || !response.evidence.is_empty() {
+                        FailureClass::GatingFalseRefusal
+                    } else {
+                        FailureClass::RetrievalMiss
+                    },
+                );
+                reasons.push(format!(
+                    "expected answered status, got {:?}",
+                    response.status
+                ));
             }
             if answer_indicates_insufficient_evidence(&answer) {
                 pass = false;
@@ -363,7 +374,10 @@ fn evaluate_response(
             }
             if !question.expected_citation_suffixes.is_empty()
                 && !response.citations.iter().any(|citation| {
-                    let rel = citation.relative_path.replace('\\', "/").to_ascii_lowercase();
+                    let rel = citation
+                        .relative_path
+                        .replace('\\', "/")
+                        .to_ascii_lowercase();
                     question.expected_citation_suffixes.iter().any(|suffix| {
                         rel.ends_with(&suffix.replace('\\', "/").to_ascii_lowercase())
                     })
@@ -404,10 +418,14 @@ fn evaluate_response(
             }
         }
         QuestionMode::Refuse => {
-            if response.status == AskStatus::Answered && !answer_indicates_insufficient_evidence(&answer) {
+            if response.status == AskStatus::Answered
+                && !answer_indicates_insufficient_evidence(&answer)
+            {
                 pass = false;
                 failure_class = Some(FailureClass::AnswerSynthesisFail);
-                reasons.push("expected refusal/insufficient evidence but got substantive answer".to_string());
+                reasons.push(
+                    "expected refusal/insufficient evidence but got substantive answer".to_string(),
+                );
             }
         }
     }
@@ -428,7 +446,10 @@ fn evaluate_response(
     }
 }
 
-fn summarize_results(results: &[UsabilityQuestionResult], corpus_document_count: usize) -> UsabilitySummary {
+fn summarize_results(
+    results: &[UsabilityQuestionResult],
+    corpus_document_count: usize,
+) -> UsabilitySummary {
     let question_count = results.len();
     let answer_questions = results
         .iter()
@@ -447,7 +468,8 @@ fn summarize_results(results: &[UsabilityQuestionResult], corpus_document_count:
         pass_count as f64 / question_count as f64
     };
     let no_false_answered_refusal = results.iter().all(|item| {
-        !(item.status == AskStatus::Answered && answer_indicates_insufficient_evidence(&item.answer))
+        !(item.status == AskStatus::Answered
+            && answer_indicates_insufficient_evidence(&item.answer))
     });
 
     UsabilitySummary {
@@ -467,15 +489,33 @@ fn summarize_results(results: &[UsabilityQuestionResult], corpus_document_count:
 fn render_markdown_report(report: &UsabilityReport) -> String {
     let mut output = String::new();
     output.push_str("# Usability Smoke Report\n\n");
-    output.push_str(&format!("- generated_at_utc: `{}`\n", report.generated_at_utc));
+    output.push_str(&format!(
+        "- generated_at_utc: `{}`\n",
+        report.generated_at_utc
+    ));
     output.push_str(&format!("- corpus_root: `{}`\n", report.corpus_root));
     output.push_str(&format!("- questions_path: `{}`\n", report.questions_path));
     output.push_str(&format!("- db_path: `{}`\n", report.db_path));
-    output.push_str(&format!("- indexed_documents: `{}`\n", report.baseline.indexed_document_count));
-    output.push_str(&format!("- corpus_document_count: `{}`\n", report.corpus_document_count));
-    output.push_str(&format!("- usable_answer_count: `{}/{}`\n", report.summary.usable_answer_count, report.summary.question_count));
-    output.push_str(&format!("- gate_passed: `{}`\n", yes_no(report.summary.gate_passed)));
-    output.push_str(&format!("- corpus_target_met: `{}`\n\n", yes_no(report.summary.corpus_target_met)));
+    output.push_str(&format!(
+        "- indexed_documents: `{}`\n",
+        report.baseline.indexed_document_count
+    ));
+    output.push_str(&format!(
+        "- corpus_document_count: `{}`\n",
+        report.corpus_document_count
+    ));
+    output.push_str(&format!(
+        "- usable_answer_count: `{}/{}`\n",
+        report.summary.usable_answer_count, report.summary.question_count
+    ));
+    output.push_str(&format!(
+        "- gate_passed: `{}`\n",
+        yes_no(report.summary.gate_passed)
+    ));
+    output.push_str(&format!(
+        "- corpus_target_met: `{}`\n\n",
+        yes_no(report.summary.corpus_target_met)
+    ));
     output.push_str("| ID | Mode | Status | Pass | Failure | Citations | Reasons |\n");
     output.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
     for result in &report.results {

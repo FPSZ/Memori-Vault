@@ -888,16 +888,15 @@ mod tests {
         AppState, AskStatus, EgressMode, EngineError, EnterpriseModelPolicy, MemoriEngine,
         MergedEvidence, ModelProvider, QueryFamily, QueryIntent, RuntimeModelConfig, WatchEvent,
         WatchEventKind, analyze_query, build_citations, document_signal_query,
-        is_implementation_lookup,
-        merge_document_candidates, process_file_event,
+        is_implementation_lookup, merge_document_candidates, process_file_event,
         should_refuse_for_insufficient_evidence, validate_runtime_model_settings,
     };
     use memori_parser::DocumentChunk;
     use memori_storage::RebuildState;
     use memori_storage::VectorStore;
+    use std::fs;
     use std::path::PathBuf;
     use std::sync::Arc;
-    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_db_path(name: &str) -> PathBuf {

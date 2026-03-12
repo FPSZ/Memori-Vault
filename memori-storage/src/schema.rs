@@ -294,11 +294,9 @@ fn migrate_legacy_fts_tables(conn: &Connection) -> Result<(), StorageError> {
 
         // Use query_row instead of execute to safely probe column existence
         let has_doc_id = conn
-            .query_row(
-                &format!("SELECT doc_id FROM {} LIMIT 0", table),
-                [],
-                |_| Ok(()),
-            )
+            .query_row(&format!("SELECT doc_id FROM {} LIMIT 0", table), [], |_| {
+                Ok(())
+            })
             .optional()
             .is_ok();
 
@@ -314,10 +312,8 @@ fn migrate_legacy_fts_tables(conn: &Connection) -> Result<(), StorageError> {
         let needs_rebuild = !is_trigram || !has_doc_id || !has_file_name;
 
         if needs_rebuild {
-            conn.execute_batch(&format!(
-                "DROP TABLE IF EXISTS {table}; {create_sql};"
-            ))
-            .map_err(map_sqlite_error)?;
+            conn.execute_batch(&format!("DROP TABLE IF EXISTS {table}; {create_sql};"))
+                .map_err(map_sqlite_error)?;
             // FTS data is gone — force a full rebuild so lexical index is repopulated
             set_metadata_value(conn, "rebuild_state", "required")?;
             set_metadata_value(

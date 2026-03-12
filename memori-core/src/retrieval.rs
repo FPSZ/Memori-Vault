@@ -800,11 +800,7 @@ pub(crate) fn build_citations(evidence: &[MergedEvidence]) -> Vec<CitationItem> 
     for item in evidence {
         let file_path = item.chunk.file_path.to_string_lossy().to_string();
         let excerpt = build_reference_excerpt(&item.chunk.file_path, &item.chunk.content);
-        let dedupe_key = format!(
-            "{}\u{1f}{}",
-            file_path.to_ascii_lowercase(),
-            excerpt.trim()
-        );
+        let dedupe_key = format!("{}\u{1f}{}", file_path.to_ascii_lowercase(), excerpt.trim());
         if !seen.insert(dedupe_key) {
             continue;
         }
