@@ -25,11 +25,9 @@ import {
   Sun,
   Search,
   Settings as SettingsIcon,
-  Sparkles,
   Square,
   X
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -52,126 +50,30 @@ import {
 import { fadeSlideUpVariants } from "./components/MotionKit";
 import { useI18n } from "./i18n";
 import type { Language } from "./i18n";
-
-type VaultStats = {
-  documents: number;
-  chunks: number;
-  nodes: number;
-};
-
-type VaultStatsRaw = Partial<
-  VaultStats & {
-    document_count: number;
-    chunk_count: number;
-    graph_node_count: number;
-  }
->;
-
-type AskStatus = "answered" | "insufficient_evidence" | "model_failed_with_evidence";
-
-type CitationItem = {
-  index: number;
-  file_path: string;
-  relative_path: string;
-  chunk_index: number;
-  heading_path: string[];
-  excerpt: string;
-};
-
-type VisibleCitation = CitationItem & {
-  citation_key: string;
-  duplicate_count: number;
-  is_long_excerpt: boolean;
-};
-
-type VisibleEvidenceGroup = {
-  evidence_key: string;
-  file_path: string;
-  relative_path: string;
-  heading_paths: string[];
-  block_kinds: string[];
-  document_reasons: string[];
-  reasons: string[];
-  document_rank: number;
-  top_chunk_rank: number;
-  chunk_ranks: number[];
-  content: string;
-  fragment_count: number;
-};
-
-type MetricRow = {
-  key: string;
-  label: string;
-  value: number;
-};
-
-type EvidenceItem = {
-  file_path: string;
-  relative_path: string;
-  chunk_index: number;
-  heading_path: string[];
-  block_kind: string;
-  document_reason: "lexical" | "filename" | "both" | "scope" | string;
-  reason: "lexical" | "dense" | "both" | "unknown" | string;
-  document_rank: number;
-  chunk_rank: number;
-  document_raw_score?: number | null;
-  lexical_raw_score?: number | null;
-  dense_raw_score?: number | null;
-  final_score: number;
-  content: string;
-};
-
-type RetrievalMetrics = {
-  query_analysis_ms: number;
-  doc_recall_ms: number;
-  doc_lexical_ms: number;
-  doc_merge_ms: number;
-  chunk_lexical_ms: number;
-  chunk_dense_ms: number;
-  merge_ms: number;
-  answer_ms: number;
-  doc_candidate_count: number;
-  chunk_candidate_count: number;
-  final_evidence_count: number;
-  query_flags: string[];
-};
-
-type AskResponseStructured = {
-  status: AskStatus;
-  answer: string;
-  question: string;
-  scope_paths: string[];
-  citations: CitationItem[];
-  evidence: EvidenceItem[];
-  metrics: RetrievalMetrics;
-};
-
-type AppSettingsDto = {
-  watch_root: string;
-  language?: string | null;
-  indexing_mode?: string | null;
-  resource_budget?: string | null;
-  schedule_start?: string | null;
-  schedule_end?: string | null;
-};
-
-type SearchScopeItem = {
-  path: string;
-  name: string;
-  relative_path: string;
-  is_dir: boolean;
-  depth: number;
-};
-
-type FileMatch = {
-  file_path: string;
-  file_name: string;
-  parent_dir: string;
-  ext: string;
-  mtime_secs: number;
-  file_size: number;
-};
+import { buildVisibleCitations, buildVisibleEvidenceGroups } from "./app/evidence";
+import {
+  buildCollapsedMarkdownPreview,
+  formatElapsed,
+  formatMetricDuration,
+  normalizeScopeKey,
+  statusToneClasses
+} from "./app/formatters";
+import { useQueryFlow } from "./app/hooks/useQueryFlow";
+import { AnswerPanel } from "./app/panels/AnswerPanel";
+import { CitationPanel } from "./app/panels/CitationPanel";
+import { EvidencePanel } from "./app/panels/EvidencePanel";
+import { MetricsPanel } from "./app/panels/MetricsPanel";
+import type {
+  AppSettingsDto,
+  AskResponseStructured,
+  FileMatch,
+  MetricRow,
+  SearchScopeItem,
+  VaultStats,
+  VaultStatsRaw,
+  VisibleCitation,
+  VisibleEvidenceGroup
+} from "./app/types";
 
 const TAURI_HOST_MISSING_MESSAGE = "未检测到 Tauri 宿主环境，请使用 cargo tauri dev 启动";
 const AI_LANG_STORAGE_KEY = "memori-ai-language";
@@ -349,222 +251,13 @@ function normalizeStats(raw: VaultStatsRaw): VaultStats {
   };
 }
 
-function formatElapsed(ms: number): string {
-  const safe = Math.max(0, ms);
-  if (safe < 60_000) {
-    return `${(safe / 1000).toFixed(1)}s`;
-  }
-  const totalSeconds = Math.round(safe / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
-}
-
-function isMarkdownFile(path: string): boolean {
-  return /\.(md|markdown|mdx)$/i.test(path.trim());
-}
-
-function buildCollapsedMarkdownPreview(content: string, maxLines = 8): string {
-  const normalized = content.replace(/\r\n/g, "\n").trim();
-  if (!normalized) {
-    return normalized;
-  }
-
-  const fenceMatch = normalized.match(/```[\w-]*\n[\s\S]*?\n```/);
-  if (fenceMatch) {
-    const fenceIndex = fenceMatch.index ?? 0;
-    const before = normalized.slice(0, fenceIndex).trim();
-    const beforeLines = before ? before.split("\n").slice(-Math.min(maxLines, 6)).join("\n") : "";
-    return beforeLines ? `${beforeLines}\n\n${fenceMatch[0]}` : fenceMatch[0];
-  }
-
-  return normalized.split("\n").slice(0, maxLines).join("\n");
-}
-
-function normalizeEvidenceContent(content: string): string {
-  return content
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function mergeEvidenceFragments(items: EvidenceItem[]): string {
-  const uniqueFragments: string[] = [];
-
-  for (const item of items) {
-    const normalized = normalizeEvidenceContent(item.content);
-    if (!normalized) {
-      continue;
-    }
-
-    const duplicateIndex = uniqueFragments.findIndex((existing) => {
-      if (existing === normalized) {
-        return true;
-      }
-      if (existing.includes(normalized)) {
-        return true;
-      }
-      if (normalized.includes(existing)) {
-        return true;
-      }
-      return false;
-    });
-
-    if (duplicateIndex >= 0) {
-      if (normalized.length > uniqueFragments[duplicateIndex].length) {
-        uniqueFragments[duplicateIndex] = normalized;
-      }
-      continue;
-    }
-
-    uniqueFragments.push(normalized);
-  }
-
-  return uniqueFragments.join("\n\n---\n\n");
-}
-
-function formatMetricDuration(ms: number): string {
-  return `${Math.round(Math.max(0, ms))}ms`;
-}
-
-function formatQueryFlag(flag: string, t: ReturnType<typeof useI18n>["t"]): string {
-  switch (flag) {
-    case "cjk":
-      return t("flagCjk");
-    case "ascii_identifier":
-      return t("flagAsciiIdentifier");
-    case "path_like":
-      return t("flagPathLike");
-    case "lookup_like":
-      return t("flagLookupLike");
-    default:
-      break;
-  }
-
-  if (flag.startsWith("token_count:")) {
-    return t("flagTokenCount", { count: flag.slice("token_count:".length) });
-  }
-  if (flag.startsWith("identifier_terms:")) {
-    return t("flagIdentifierTerms", { count: flag.slice("identifier_terms:".length) });
-  }
-  if (flag.startsWith("filename_terms:")) {
-    return t("flagFilenameTerms", { count: flag.slice("filename_terms:".length) });
-  }
-  if (flag.startsWith("query_family:")) {
-    const family = flag.slice("query_family:".length);
-    const value =
-      family === "docs_explanatory"
-        ? t("queryFamilyDocsExplanatory")
-        : family === "docs_api_lookup"
-          ? t("queryFamilyDocsApiLookup")
-          : family === "implementation_lookup"
-            ? t("queryFamilyImplementationLookup")
-            : family;
-    return t("flagQueryFamily", { value });
-  }
-  if (flag.startsWith("intent:")) {
-    const intent = flag.slice("intent:".length);
-    const value =
-      intent === "repo_lookup"
-        ? t("intentRepoLookup")
-        : intent === "repo_question"
-          ? t("intentRepoQuestion")
-          : intent === "external_fact"
-            ? t("intentExternalFact")
-            : intent === "secret_request"
-              ? t("intentSecretRequest")
-              : intent === "missing_file_lookup"
-                ? t("intentMissingFileLookup")
-                : intent;
-    return t("flagIntent", { value });
-  }
-
-  return flag;
-}
-
-function isLongCitationExcerpt(content: string): boolean {
-  const normalized = content.replace(/\r\n/g, "\n").trim();
-  if (!normalized) {
-    return false;
-  }
-  return normalized.length > 420 || normalized.split("\n").length > 10;
-}
-
-function formatEvidenceReason(reason: EvidenceItem["reason"], t: ReturnType<typeof useI18n>["t"]): string {
-  switch (reason) {
-    case "both":
-      return t("evidenceReasonBoth");
-    case "lexical":
-      return t("evidenceReasonLexical");
-    case "dense":
-      return t("evidenceReasonDense");
-    default:
-      return reason;
-  }
-}
-
-function formatDocumentReason(
-  reason: EvidenceItem["document_reason"],
-  t: ReturnType<typeof useI18n>["t"]
-): string {
-  switch (reason) {
-    case "both":
-      return t("documentReasonBoth");
-    case "lexical":
-      return t("documentReasonLexical");
-    case "lexical_strict":
-      return t("documentReasonLexicalStrict");
-    case "lexical_broad":
-      return t("documentReasonLexicalBroad");
-    case "mixed":
-      return t("documentReasonMixed");
-    case "exact_path":
-      return t("documentReasonExactPath");
-    case "exact_symbol":
-      return t("documentReasonExactSymbol");
-    case "docs_phrase":
-      return t("documentReasonDocsPhrase");
-    case "filename":
-      return t("documentReasonFilename");
-    case "scope":
-      return t("documentReasonScope");
-    default:
-      return reason;
-  }
-}
-
-function statusToneClasses(status: AskStatus): string {
-  switch (status) {
-    case "answered":
-      return "border-[color-mix(in_srgb,var(--accent)_34%,transparent)] bg-[color-mix(in_srgb,var(--accent)_12%,var(--bg-surface-1)_88%)] text-[color-mix(in_srgb,var(--accent)_76%,var(--text-primary)_24%)]";
-    case "model_failed_with_evidence":
-      return "border-amber-500/30 bg-amber-500/10 text-amber-200";
-    default:
-      return "border-[var(--border-strong)] bg-[var(--bg-surface-2)] text-[var(--text-secondary)]";
-  }
-}
-
-function normalizeScopeKey(relativePath: string, fallback: string): string {
-  const normalized = relativePath.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
-  if (normalized) {
-    return normalized;
-  }
-  return fallback.replaceAll("\\", "/");
-}
 
 export default function App() {
   const { lang: uiLang, setLang: setUiLang, t } = useI18n();
-  const [query, setQuery] = useState("");
-  const [answerResponse, setAnswerResponse] = useState<AskResponseStructured | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
   const [isSearchBarCompact, setIsSearchBarCompact] = useState(false);
   const [isSearchBarHovering, setIsSearchBarHovering] = useState(false);
   const [isSearchInputFocused, setIsSearchInputFocused] = useState(false);
   const [allowCompactHoverExpand, setAllowCompactHoverExpand] = useState(true);
-  const [searchElapsedMs, setSearchElapsedMs] = useState(0);
-  const [lastSearchDurationMs, setLastSearchDurationMs] = useState<number | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
@@ -606,93 +299,62 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const scopeMenuRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const searchStartedAtRef = useRef<number | null>(null);
   const compactHoverUnlockTimerRef = useRef<number | null>(null);
   const fileMatchesCloseTimerRef = useRef<number | null>(null);
   const reachedTopWhileCompactRef = useRef(false);
+
+  const modelSetupConfigured = useMemo(
+    () => modelAvailability?.configured ?? false,
+    [modelAvailability]
+  );
+  const modelSetupNotConfigured = useMemo(
+    () => modelAvailability?.status_code === MODEL_NOT_CONFIGURED_CODE || !modelSetupConfigured,
+    [modelAvailability?.status_code, modelSetupConfigured]
+  );
+  const modelSetupReady = useMemo(
+    () =>
+      Boolean(modelAvailability?.configured) &&
+      Boolean(modelAvailability?.reachable) &&
+      (modelAvailability?.missing_roles?.length ?? 1) === 0,
+    [modelAvailability]
+  );
+
+  const {
+    query,
+    setQuery,
+    answerResponse,
+    loading,
+    isSearching,
+    searchElapsedMs,
+    lastSearchDurationMs,
+    runSearch
+  } = useQueryFlow({
+    aiLang,
+    retrieveTopK,
+    selectedScopePaths,
+    modelSetupReady,
+    onError: (message) => setError(message),
+    toUiErrorMessage,
+    onSearchStart: () => {
+      setIsSearchBarCompact(false);
+      setError(null);
+      setExpandedSourceKeys(new Set());
+      setFileMatchesOpen(false);
+    }
+  });
 
   const visibleEvidence = useMemo(
     () => answerResponse?.evidence.slice(0, retrieveTopK) ?? [],
     [answerResponse, retrieveTopK]
   );
-  const visibleEvidenceGroups = useMemo<VisibleEvidenceGroup[]>(() => {
-    const groups = new Map<string, EvidenceItem[]>();
-    for (const source of visibleEvidence) {
-      const key = source.file_path.toLowerCase();
-      const bucket = groups.get(key);
-      if (bucket) {
-        bucket.push(source);
-      } else {
-        groups.set(key, [source]);
-      }
-    }
-
-    return Array.from(groups.values())
-      .map((items) => {
-        const sortedItems = [...items].sort((a, b) => a.chunk_rank - b.chunk_rank);
-        const first = sortedItems[0];
-        const headingPaths = Array.from(
-          new Set(
-            sortedItems
-              .map((item) => item.heading_path.join(" > ").trim())
-              .filter((value) => value.length > 0)
-          )
-        );
-        const blockKinds = Array.from(
-          new Set(sortedItems.map((item) => item.block_kind.trim()).filter(Boolean))
-        );
-        const documentReasons = Array.from(
-          new Set(sortedItems.map((item) => item.document_reason))
-        );
-        const reasons = Array.from(new Set(sortedItems.map((item) => item.reason)));
-        const chunkRanks = sortedItems.map((item) => item.chunk_rank);
-        return {
-          evidence_key: `${first.file_path.toLowerCase()}::${chunkRanks.join(",")}`,
-          file_path: first.file_path,
-          relative_path: first.relative_path,
-          heading_paths: headingPaths,
-          block_kinds: blockKinds,
-          document_reasons: documentReasons,
-          reasons,
-          document_rank: Math.min(...sortedItems.map((item) => item.document_rank)),
-          top_chunk_rank: Math.min(...chunkRanks),
-          chunk_ranks: chunkRanks,
-          content: mergeEvidenceFragments(sortedItems),
-          fragment_count: sortedItems.length
-        };
-      })
-      .sort((a, b) => {
-        if (a.document_rank !== b.document_rank) {
-          return a.document_rank - b.document_rank;
-        }
-        return a.top_chunk_rank - b.top_chunk_rank;
-      });
-  }, [visibleEvidence]);
-  const visibleCitations = useMemo<VisibleCitation[]>(() => {
-    const grouped = new Map<string, VisibleCitation>();
-    for (const citation of answerResponse?.citations ?? []) {
-      const excerpt = citation.excerpt.trim();
-      const citationKey = `${citation.file_path.toLowerCase()}::${excerpt}`;
-      const existing = grouped.get(citationKey);
-      if (existing) {
-        existing.duplicate_count += 1;
-        continue;
-      }
-      grouped.set(citationKey, {
-        ...citation,
-        citation_key: citationKey,
-        duplicate_count: 1,
-        is_long_excerpt: isLongCitationExcerpt(citation.excerpt)
-      });
-    }
-
-    return Array.from(grouped.values())
-      .map((citation, index) => ({
-        ...citation,
-        index: index + 1
-      }))
-      .slice(0, retrieveTopK);
-  }, [answerResponse, retrieveTopK]);
+  const visibleEvidenceGroups = useMemo<VisibleEvidenceGroup[]>(
+    () => buildVisibleEvidenceGroups(visibleEvidence),
+    [visibleEvidence]
+  );
+  const visibleCitations = useMemo<VisibleCitation[]>(
+    () => buildVisibleCitations(answerResponse?.citations ?? [], retrieveTopK),
+    [answerResponse, retrieveTopK]
+  );
   const measuredMetricsTotalMs = useMemo(() => {
     if (!answerResponse) {
       return 0;
@@ -726,14 +388,6 @@ export default function App() {
     ]
       .sort((a, b) => b.value - a.value);
   }, [answerResponse, t]);
-  const modelSetupConfigured = useMemo(
-    () => modelAvailability?.configured ?? false,
-    [modelAvailability]
-  );
-  const modelSetupNotConfigured = useMemo(
-    () => modelAvailability?.status_code === MODEL_NOT_CONFIGURED_CODE || !modelSetupConfigured,
-    [modelAvailability?.status_code, modelSetupConfigured]
-  );
   const canSubmit = useMemo(
     () => query.trim().length > 0 && !loading && !modelSetupNotConfigured,
     [loading, modelSetupNotConfigured, query]
@@ -763,13 +417,6 @@ export default function App() {
     isSearchBarCompact &&
     !isSearchBarHovering &&
     !scopeMenuOpen;
-  const modelSetupReady = useMemo(
-    () =>
-      Boolean(modelAvailability?.configured) &&
-      Boolean(modelAvailability?.reachable) &&
-      (modelAvailability?.missing_roles?.length ?? 1) === 0,
-    [modelAvailability]
-  );
   const searchPlaceholder = useMemo(
     () => (modelSetupNotConfigured ? t("modelNotConfiguredInline") : t("askPlaceholder")),
     [modelSetupNotConfigured, t]
@@ -1239,22 +886,6 @@ export default function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!loading) {
-      return;
-    }
-    const updateElapsed = () => {
-      const startedAt = searchStartedAtRef.current;
-      if (startedAt == null) {
-        return;
-      }
-      setSearchElapsedMs(performance.now() - startedAt);
-    };
-    updateElapsed();
-    const timer = window.setInterval(updateElapsed, 100);
-    return () => window.clearInterval(timer);
-  }, [loading]);
-
   const refreshIndexingStatus = async () => {
     const status = await withTimeout(
       invoke<IndexingStatusDto>("get_indexing_status"),
@@ -1348,49 +979,6 @@ export default function App() {
       throw err;
     } finally {
       setIndexingBusy(false);
-    }
-  };
-
-  const runSearch = async (overrideScopePaths?: string[]) => {
-    if (!canSubmit) {
-      return;
-    }
-    if (!modelSetupReady) {
-      return;
-    }
-
-    setIsSearching(true);
-    setIsSearchBarCompact(false);
-    setLoading(true);
-    setSearchElapsedMs(0);
-    setLastSearchDurationMs(null);
-    searchStartedAtRef.current = performance.now();
-    setError(null);
-    setAnswerResponse(null);
-    setExpandedSourceKeys(new Set());
-    setFileMatchesOpen(false);
-
-    try {
-      const scopePaths = overrideScopePaths ?? selectedScopePaths;
-      const response = await invoke<AskResponseStructured>("ask_vault_structured", {
-        query: query.trim(),
-        lang: aiLang,
-        topK: retrieveTopK,
-        scopePaths
-      });
-      setAnswerResponse(response);
-    } catch (error) {
-      setAnswerResponse(null);
-      setError(toUiErrorMessage(error));
-    } finally {
-      const startedAt = searchStartedAtRef.current;
-      if (startedAt != null) {
-        const elapsed = performance.now() - startedAt;
-        setSearchElapsedMs(elapsed);
-        setLastSearchDurationMs(elapsed);
-      }
-      searchStartedAtRef.current = null;
-      setLoading(false);
     }
   };
 
@@ -2314,326 +1902,38 @@ export default function App() {
 
                   {!loading && !error && answerResponse && (
                     <article className="pb-8">
-                      <div className={`mb-5 rounded-xl border px-4 py-3 text-sm ${statusToneClasses(answerResponse.status)}`}>
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <Sparkles className="h-4 w-4" />
-                            <span className="font-semibold">
-                              {answerResponse.status === "answered"
-                                ? t("answerStatusAnswered")
-                                : answerResponse.status === "model_failed_with_evidence"
-                                  ? t("answerStatusModelFailed")
-                                  : t("answerStatusInsufficient")}
-                            </span>
-                          </div>
-                          {lastSearchDurationMs !== null ? (
-                            <span className="text-[11px] text-[var(--text-secondary)]">
-                              {t("elapsedTime", { time: formatElapsed(lastSearchDurationMs) })}
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-[var(--text-secondary)]">
-                          <span>{t("docCandidateCount", { count: answerResponse.metrics.doc_candidate_count })}</span>
-                          <span>{t("chunkCandidateCount", { count: answerResponse.metrics.chunk_candidate_count })}</span>
-                          <span>{t("finalEvidenceCount", { count: answerResponse.metrics.final_evidence_count })}</span>
-                        </div>
-                      </div>
-
-                      {answerResponse.answer.trim().length > 0 && (
-                        <div className="mb-6 border-l-2 border-[var(--accent)] pl-4">
-                          <div className="mb-3 flex items-center gap-2">
-                            <Atom className="h-4 w-4 text-[var(--accent)]" />
-                            <span className="text-xs font-bold tracking-widest text-[var(--accent)]">
-                              {t("synthesis")}
-                            </span>
-                          </div>
-                          <div className="md-preview mt-1 break-words font-sans text-lg leading-relaxed text-[var(--text-primary)]">
-                            <ReactMarkdown
-                              remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-                              rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                            >
-                              {answerResponse.answer}
-                            </ReactMarkdown>
-                          </div>
-                        </div>
-                      )}
-
-                      {visibleCitations.length > 0 && (
-                        <section className="mt-6">
-                          <div className="mb-3 text-[11px] tracking-[0.16em] text-[var(--text-secondary)] uppercase">
-                            {t("citationsTitle")}
-                          </div>
-                          <div className="space-y-3">
-                            {visibleCitations.map((citation) => (
-                              (() => {
-                                const expanded = expandedCitationKeys.has(citation.citation_key);
-                                const citationContent = expanded
-                                  ? citation.excerpt
-                                  : buildCollapsedMarkdownPreview(citation.excerpt, 5);
-
-                                return (
-                                  <div
-                                    key={citation.citation_key}
-                                    className="relative overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-4 py-3"
-                                  >
-                                    <div
-                                      aria-hidden="true"
-                                      className="pointer-events-none absolute -left-1 -top-3 z-0 select-none italic text-[88px] font-semibold leading-none text-[color-mix(in_srgb,var(--accent)_16%,transparent)]"
-                                    >
-                                      {citation.index}
-                                    </div>
-                                    <div className="relative z-10 mb-2 flex items-start justify-between gap-3">
-                                      <div className="min-w-0">
-                                        <div className="text-xs font-semibold text-[var(--accent)]">
-                                          {citation.relative_path || citation.file_path}
-                                        </div>
-                                        {citation.heading_path.length > 0 ? (
-                                          <div className="mt-1 text-[11px] text-[var(--text-secondary)]">
-                                            {citation.heading_path.join(" > ")}
-                                          </div>
-                                        ) : null}
-                                        {citation.duplicate_count > 1 ? (
-                                          <div className="mt-2 inline-flex rounded-full border border-[var(--border-strong)] px-2 py-0.5 text-[10px] tracking-[0.08em] text-[var(--text-secondary)] uppercase">
-                                            {t("citationDuplicates", { count: citation.duplicate_count })}
-                                          </div>
-                                        ) : null}
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <button
-                                          type="button"
-                                          onClick={() => void onOpenSourceLocation(citation.file_path)}
-                                          className="p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
-                                          aria-label={t("openSourceLocation")}
-                                          title={t("openSourceLocation")}
-                                        >
-                                          <FolderOpen className="h-4 w-4" />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => toggleCitationExpanded(citation.citation_key)}
-                                          className="p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
-                                          aria-label={expanded ? t("collapseCitation") : t("expandCitation")}
-                                          title={expanded ? t("collapseCitation") : t("expandCitation")}
-                                        >
-                                          <motion.span
-                                            animate={{ rotate: expanded ? 180 : 0 }}
-                                            transition={{ duration: 0.2, ease: "easeOut" }}
-                                            className="inline-flex"
-                                          >
-                                            <ChevronDown className="h-4 w-4" />
-                                          </motion.span>
-                                        </button>
-                                      </div>
-                                    </div>
-                                    <div
-                                      className={`relative z-10 md-preview md-preview-source text-sm leading-6 text-[var(--text-secondary)] ${
-                                        !expanded
-                                          ? "source-preview-scrollbar max-h-28 overflow-y-auto pr-2"
-                                          : ""
-                                      }`}
-                                    >
-                                      <ReactMarkdown
-                                        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-                                        rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                                      >
-                                        {expanded ? citation.excerpt : citationContent}
-                                      </ReactMarkdown>
-                                    </div>
-                                  </div>
-                                );
-                              })()
-                            ))}
-                          </div>
-                        </section>
-                      )}
-
-                      {visibleEvidenceGroups.length > 0 && (
-                        <section className="mt-8">
-                          <div className="mb-3 text-[11px] tracking-[0.16em] text-[var(--text-secondary)] uppercase">
-                            {t("evidenceTitle")}
-                          </div>
-
-                          <div className="grid grid-cols-1 items-stretch gap-3 md:grid-cols-2">
-                            {visibleEvidenceGroups.map((source) => {
-                              const sourceKey = source.evidence_key;
-                              const expanded = expandedSourceKeys.has(sourceKey);
-                              const markdownPreview = isMarkdownFile(source.file_path);
-                              const markdownContent = expanded
-                                ? source.content
-                                : buildCollapsedMarkdownPreview(source.content, 7);
-
-                              return (
-                                <div
-                                  key={sourceKey}
-                                  className={`relative flex h-full flex-col rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-4 py-3 ${
-                                    expanded ? "md:col-span-2" : ""
-                                  }`}
-                                >
-                                  <div className="min-w-0 flex-1 pr-12">
-                                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                                      {source.document_reasons.map((reason) => (
-                                        <span
-                                          key={`doc-${sourceKey}-${reason}`}
-                                          className="rounded-full bg-[var(--bg-surface-2)] px-2 py-0.5 text-[var(--text-secondary)]"
-                                        >
-                                          {formatDocumentReason(reason, t)}
-                                        </span>
-                                      ))}
-                                      {source.reasons.map((reason) => (
-                                        <span
-                                          key={`reason-${sourceKey}-${reason}`}
-                                          className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[var(--accent)]"
-                                        >
-                                          {formatEvidenceReason(reason, t)}
-                                        </span>
-                                      ))}
-                                      <span className="text-[var(--text-secondary)]">
-                                        {t("documentRankLabel", { count: source.document_rank })}
-                                      </span>
-                                      <span className="text-[var(--text-secondary)]">
-                                        {t("chunkRankLabel", { count: source.top_chunk_rank })}
-                                      </span>
-                                      <span className="text-[var(--text-muted)]">
-                                        {t("evidenceFragments", { count: source.fragment_count })}
-                                      </span>
-                                    </div>
-                                    <div className="mt-2 truncate font-mono text-xs text-[var(--text-secondary)]" title={source.file_path}>
-                                      {source.relative_path || source.file_path}
-                                    </div>
-                                    <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-                                      {source.block_kinds.join(" / ")}
-                                      {source.heading_paths.length > 0 ? ` · ${source.heading_paths.join(" · ")}` : ""}
-                                    </div>
-                                    {markdownPreview ? (
-                                      <div
-                                        className={`md-preview md-preview-source mt-2 text-sm leading-6 text-[var(--text-secondary)] ${
-                                          !expanded
-                                            ? "source-preview-scrollbar max-h-24 overflow-y-auto pr-2"
-                                            : ""
-                                        }`}
-                                      >
-                                        <ReactMarkdown
-                                          remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-                                          rehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                                        >
-                                          {expanded ? source.content : markdownContent}
-                                        </ReactMarkdown>
-                                      </div>
-                                    ) : (
-                                      <div
-                                        className={`mt-2 whitespace-pre-wrap break-words font-mono text-[13px] leading-6 text-[var(--text-muted)] ${
-                                          !expanded
-                                            ? "source-preview-scrollbar max-h-24 overflow-y-auto pr-2"
-                                            : ""
-                                        }`}
-                                      >
-                                        {expanded ? source.content : markdownContent}
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => void onOpenSourceLocation(source.file_path)}
-                                    className="absolute top-3 right-8 p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
-                                    aria-label={t("openSourceLocation")}
-                                    title={t("openSourceLocation")}
-                                  >
-                                    <FolderOpen className="h-4 w-4" />
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleSourceExpanded(sourceKey)}
-                                    className="absolute top-3 right-3 p-0 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
-                                    aria-label={expanded ? t("collapseSource") : t("expandSource")}
-                                    title={expanded ? t("collapseSource") : t("expandSource")}
-                                  >
-                                    {expanded ? (
-                                      <ChevronUp className="h-4 w-4" />
-                                    ) : (
-                                      <ChevronDown className="h-4 w-4" />
-                                    )}
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </section>
-                      )}
-
-                      <section className="mt-8">
-                        <div className="mb-3 text-[11px] tracking-[0.16em] text-[var(--text-secondary)] uppercase">
-                          {t("retrievalMetricsTitle")}
-                        </div>
-                        {answerResponse.metrics.query_flags.length > 0 ? (
-                          <div className="mb-3 flex flex-wrap gap-2 text-[11px]">
-                            {answerResponse.metrics.query_flags.map((flag) => (
-                              <span
-                                key={flag}
-                                className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-0.5 text-[var(--text-secondary)]"
-                              >
-                                {formatQueryFlag(flag, t)}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                        <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-[var(--text-secondary)]">
-                          <span>
-                            {t("metricTotal")}{" "}
-                            <span className="font-mono text-[var(--text-primary)]">
-                              {lastSearchDurationMs !== null ? formatElapsed(lastSearchDurationMs) : "-"}
-                            </span>
-                          </span>
-                          <span>
-                            {t("metricMeasured")}{" "}
-                            <span className="font-mono text-[var(--text-primary)]">
-                              {formatMetricDuration(measuredMetricsTotalMs)}
-                            </span>
-                          </span>
-                          {lastSearchDurationMs !== null && lastSearchDurationMs > measuredMetricsTotalMs ? (
-                            <span>
-                              {t("metricUntracked")}{" "}
-                              <span className="font-mono text-[var(--text-primary)]">
-                                {formatMetricDuration(lastSearchDurationMs - measuredMetricsTotalMs)}
-                              </span>
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="space-y-3">
-                          {metricRows.map((metric, index) => {
-                            const maxMetricValue = metricRows[0]?.value ?? 1;
-                            const widthPercent = Math.max(6, (metric.value / maxMetricValue) * 100);
-                            return (
-                              <div
-                                key={metric.key}
-                                className="flex items-center gap-3 text-xs text-[var(--text-secondary)]"
-                              >
-                                <span className="w-6 shrink-0 text-right font-mono text-[10px] text-[var(--text-muted)]">
-                                  {index + 1}
-                                </span>
-                                <span className="w-28 shrink-0 truncate text-[var(--text-secondary)] md:w-36">
-                                  {metric.label}
-                                </span>
-                                <div className="min-w-0 flex-1">
-                                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--accent)_10%,var(--bg-canvas)_90%)]">
-                                    <div
-                                      className="h-full rounded-full bg-[var(--accent)]"
-                                      style={{ width: `${widthPercent}%` }}
-                                    />
-                                  </div>
-                                </div>
-                                <span className="w-14 shrink-0 text-right font-mono text-[var(--text-primary)] md:w-16">
-                                  {formatMetricDuration(metric.value)}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div className="mt-3 text-[11px] text-[var(--text-muted)]">
-                          {t("metricsNote")}
-                        </div>
-                      </section>
+                      <AnswerPanel
+                        answerResponse={answerResponse}
+                        lastSearchDurationMs={lastSearchDurationMs}
+                        markdownRemarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                        markdownRehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                        t={t}
+                      />
+                      <CitationPanel
+                        visibleCitations={visibleCitations}
+                        expandedCitationKeys={expandedCitationKeys}
+                        onToggleCitationExpanded={toggleCitationExpanded}
+                        onOpenSourceLocation={(path) => void onOpenSourceLocation(path)}
+                        markdownRemarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                        markdownRehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                        t={t}
+                      />
+                      <EvidencePanel
+                        visibleEvidenceGroups={visibleEvidenceGroups}
+                        expandedSourceKeys={expandedSourceKeys}
+                        onToggleSourceExpanded={toggleSourceExpanded}
+                        onOpenSourceLocation={(path) => void onOpenSourceLocation(path)}
+                        markdownRemarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                        markdownRehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                        t={t}
+                      />
+                      <MetricsPanel
+                        answerResponse={answerResponse}
+                        metricRows={metricRows}
+                        measuredMetricsTotalMs={measuredMetricsTotalMs}
+                        lastSearchDurationMs={lastSearchDurationMs}
+                        t={t}
+                      />
                     </article>
                   )}
                 </motion.section>
