@@ -2,7 +2,7 @@
 
 Last Updated: 2026-03-12 UTC  
 Current Phase: Phase 6 - Validation  
-Overall Progress: 87%
+Overall Progress: 88%
 
 ## Status Rules
 - 任务状态：完成即勾选 `- [x]`，不保留“半完成”状态。
@@ -67,6 +67,10 @@ Overall Progress: 87%
   - `Citations` 默认折叠
   - `Evidence` 按文档聚合并去重，再以两栏卡片展示
   - `Retrieval Metrics` 改为横向阶段排行，并单独展示 `总耗时 / 已打点小计 / 未打点部分`
+- 结构治理已进入“文档先行”阶段：
+  - 新增 `docs/STRUCTURE.md` 作为内部结构地图
+  - 后续拆分优先级固定为 `ui/src/App.tsx -> memori-desktop/src/lib.rs -> memori-server/src/main.rs`
+  - 当前不把结构拆分与 retrieval 提准混做同一轮
 - 当前又新增确认了一类更具体的 docs-query 排序缺陷：
   - 像 `岗位是什么` 这类核心词清晰的问法可以回答
   - 像 `新增的12岗位是什么` 这种带强约束数字的问法也可以回答
@@ -214,6 +218,7 @@ Overall Progress: 87%
 - [x] 封死 `answered` 假通过：当最终生成文本包含“当前上下文不足”或等价拒答语义时，不再对外标记为 `answered`
 - [x] 桌面端未配置模型时改为“无 runtime / 无 onboarding / 搜索框内联红字提示”
 - [x] 收口 answer panel：引用默认折叠、证据按文档聚合去重、检索指标按阶段排行展示
+- [x] 建立内部结构地图文档（`docs/STRUCTURE.md`）并固定下一轮拆分优先级
 - [ ] 修复中文描述型 docs query 的 broad lexical 污染：让多词覆盖优先于单个高频业务词命中
 - [ ] 跑完 Phase 0 定义的全部回归查询集 (blocked: live_embedding full_live blocked by local Ollama availability)
 - [x] 比较重构前后的 `Top-1 document hit`、`Top-3 document recall`、`Top-5 chunk recall`、citation validity、拒答正确率
@@ -290,6 +295,7 @@ Overall Progress: 87%
 - 2026-03-12: 桌面端模型未配置流程收口为“无 runtime / 无 onboarding / 搜索框内联红字提示”，明确当前 active provider 未完成配置时不再自动回退本地 Ollama
 - 2026-03-12: answer panel UI 收口到当前基线：回答区使用独立图标，`Citations` 默认折叠，`Evidence` 按文档聚合去重并以两栏卡片展示，`Retrieval Metrics` 改为横向阶段排行并显式区分总耗时与未打点部分
 - 2026-03-12: 新增更具体的 docs-query 诊断：`岗位是什么` 与 `新增的12岗位是什么` 可答，但 `新增的岗位是什么` 仍会被高频业务词 `新增` 带偏；确认下一轮优先修“多词覆盖优先于 broad lexical 泛命中”，而不是继续堆单词命中权重
+- 2026-03-12: 建立 `docs/STRUCTURE.md` 作为内部结构地图，并固定大文件拆分路线图：优先 `ui/src/App.tsx`、`memori-desktop/src/lib.rs`、`memori-server/src/main.rs`；`memori-core/src/retrieval.rs` 与 `memori-storage/src/document.rs` 暂缓拆分
 - 2026-03-11: 收口本地测试入口：取消 `scripts/` 整目录忽略，新增 `scripts/test-retrieval.ps1` 作为回归 runner 包装脚本，并把 `smoke-start.ps1` / `smoke-stop.ps1` 升级为支持 `desktop/server/both` 与 `-SkipModelCheck` 的当前 smoke 入口
 - 2026-03-11: 吸收 release-note 末尾评审中的有效部分：恢复 docs query 的 deterministic document signal 输入，避免 `document_signal_query(...)` 在描述型问题上退成空字符串；document-dense 与 FTS tokenizer 重配保留为后续精度议题，不在本轮 recovery pass 直接硬上
 - 2026-03-11: 使用新脚本重跑离线基线后，当前最新快照更新为 `core_docs: Top-1=0.6667 / Top-3=0.6667 / Top-5=0.6970 / Reject=1.0000`，`repo_mixed: Top-1=0.5000 / Top-3=0.5227 / Top-5=0.5682 / Reject=0.9600`；说明这轮修正有效但仍未恢复到 `repo_mixed Top-1=0.5682` 旧高点
