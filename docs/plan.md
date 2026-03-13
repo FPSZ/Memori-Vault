@@ -213,7 +213,6 @@ Overall Progress: 88%
 完成全链路验收，并先把产品从“有回归数字”拉回到“真实可用”。
 
 **Tasks**
-- [ ] 固定外部本地 10 文档 / 15 问可用性 smoke gate，作为当前最高优先级验收入口
 - [ ] 用 shipping ask path 跑完 15 题，并记录每题 `status / answer / citations / evidence / failure_class`
 - [x] 封死 `answered` 假通过：当最终生成文本包含“当前上下文不足”或等价拒答语义时，不再对外标记为 `answered`
 - [x] 桌面端未配置模型时改为“无 runtime / 无 onboarding / 搜索框内联红字提示”

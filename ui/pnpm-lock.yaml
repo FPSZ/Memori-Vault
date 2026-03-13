@@ -17,6 +17,9 @@ importers:
       framer-motion:
         specifier: ^12.23.12
         version: 12.35.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      hast-util-sanitize:
+        specifier: ^5.0.2
+        version: 5.0.2
       lucide-react:
         specifier: ^0.554.0
         version: 0.554.0(react@19.2.4)
