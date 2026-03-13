@@ -3,25 +3,12 @@ import {
   UIEvent as ReactUIEvent,
   WheelEvent as ReactWheelEvent,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState
 } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  Atom,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  FileText,
-  FolderOpen,
-  LoaderCircle,
-  Search,
-} from "lucide-react";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -43,7 +30,6 @@ import type {
   ResourceBudget,
   ThemeMode
 } from "./components/settings/types";
-import { fadeSlideUpVariants } from "./components/MotionKit";
 import { useI18n } from "./i18n";
 import type { Language } from "./i18n";
 import {
@@ -53,7 +39,6 @@ import {
   getModelSettings,
   getVaultStats,
   listProviderModels,
-  listSearchScopes,
   openSourceLocation,
   pauseIndexing,
   probeModelProvider,
@@ -72,10 +57,12 @@ import {
   buildCollapsedMarkdownPreview,
   formatElapsed,
   formatMetricDuration,
-  normalizeScopeKey,
   statusToneClasses
 } from "./app/formatters";
 import { useQueryFlow } from "./app/hooks/useQueryFlow";
+import { useAppearanceSync } from "./app/hooks/useAppearanceSync";
+import { useScopeManager } from "./app/hooks/useScopeManager";
+import { useWindowControls } from "./app/hooks/useWindowControls";
 import { OnboardingOverlay } from "./app/layout/OnboardingOverlay";
 import { ResultStage } from "./app/layout/ResultStage";
 import { SearchStage } from "./app/layout/SearchStage";
@@ -86,7 +73,6 @@ import type {
   AskResponseStructured,
   FileMatch,
   MetricRow,
-  SearchScopeItem,
   VaultStats,
   VaultStatsRaw,
   VisibleCitation,
@@ -276,7 +262,6 @@ export default function App() {
   const [isSearchBarHovering, setIsSearchBarHovering] = useState(false);
   const [isSearchInputFocused, setIsSearchInputFocused] = useState(false);
   const [allowCompactHoverExpand, setAllowCompactHoverExpand] = useState(true);
-  const [isMaximized, setIsMaximized] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(0);
@@ -287,13 +272,8 @@ export default function App() {
   const [retrieveTopK, setRetrieveTopK] = useState<number>(() => resolveInitialRetrieveTopK());
   const [watchRoot, setWatchRoot] = useState("");
   const [isPickingWatchRoot, setIsPickingWatchRoot] = useState(false);
-  const [scopeMenuOpen, setScopeMenuOpen] = useState(false);
-  const [scopeItems, setScopeItems] = useState<SearchScopeItem[]>([]);
-  const [scopeLoading, setScopeLoading] = useState(false);
   const [fileMatches, setFileMatches] = useState<FileMatch[]>([]);
   const [fileMatchesOpen, setFileMatchesOpen] = useState(false);
-  const [selectedScopePaths, setSelectedScopePaths] = useState<string[]>([]);
-  const [expandedScopeDirs, setExpandedScopeDirs] = useState<Set<string>>(() => new Set());
   const [expandedSourceKeys, setExpandedSourceKeys] = useState<Set<string>>(() => new Set());
   const [expandedCitationKeys, setExpandedCitationKeys] = useState<Set<string>>(() => new Set());
   const [modelSettings, setModelSettings] = useState<ModelSettingsDto>(DEFAULT_MODEL_SETTINGS);
@@ -315,11 +295,37 @@ export default function App() {
   const [indexingBusy, setIndexingBusy] = useState(false);
   const [stats, setStats] = useState<VaultStats>({ documents: 0, chunks: 0, nodes: 0 });
   const [error, setError] = useState<string | null>(null);
-  const scopeMenuRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const compactHoverUnlockTimerRef = useRef<number | null>(null);
   const fileMatchesCloseTimerRef = useRef<number | null>(null);
   const reachedTopWhileCompactRef = useRef(false);
+
+  const {
+    scopeMenuOpen,
+    setScopeMenuOpen,
+    scopeMenuRef,
+    scopeItems,
+    scopeLoading,
+    selectedScopePaths,
+    setSelectedScopePaths,
+    selectedScopeSet,
+    expandedScopeDirs,
+    setExpandedScopeDirs,
+    scopeChildrenCountByParentKey,
+    visibleScopeItems,
+    onToggleScopePath,
+    onClearScopeSelection,
+    onToggleScopeDirExpanded
+  } = useScopeManager({
+    watchRoot,
+    toUiErrorMessage,
+    onError: setError
+  });
+
+  const { isMaximized, onMinimize, onToggleMaximize, onClose } = useWindowControls({
+    toUiErrorMessage,
+    onError: setError
+  });
 
   const modelSetupConfigured = useMemo(
     () => modelAvailability?.configured ?? false,
@@ -429,7 +435,6 @@ export default function App() {
     [selectedScopePaths.length, t]
   );
 
-  const selectedScopeSet = useMemo(() => new Set(selectedScopePaths), [selectedScopePaths]);
   const isSearchBarCollapsed =
     isSearching &&
     isSearchBarCompact &&
@@ -446,125 +451,20 @@ export default function App() {
         : modelSettings.remote_profile,
     [modelSettings]
   );
-  const scopeViewItems = useMemo(() => {
-    return scopeItems.map((item) => {
-      const key = normalizeScopeKey(item.relative_path ?? "", item.path);
-      const slashIndex = key.lastIndexOf("/");
-      const parentKey = slashIndex >= 0 ? key.slice(0, slashIndex) : "";
-      return { ...item, key, parentKey };
-    });
-  }, [scopeItems]);
-  const scopeChildrenCountByParentKey = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of scopeViewItems) {
-      const prev = counts.get(item.parentKey) ?? 0;
-      counts.set(item.parentKey, prev + 1);
-    }
-    return counts;
-  }, [scopeViewItems]);
-  const visibleScopeItems = useMemo(() => {
-    const byKey = new Map(scopeViewItems.map((item) => [item.key, item] as const));
-    const visibilityMemo = new Map<string, boolean>();
 
-    const isVisible = (item: (typeof scopeViewItems)[number]): boolean => {
-      if (visibilityMemo.has(item.key)) {
-        return visibilityMemo.get(item.key) ?? false;
-      }
-      if (!item.parentKey) {
-        visibilityMemo.set(item.key, true);
-        return true;
-      }
-
-      const parent = byKey.get(item.parentKey);
-      if (!parent || !parent.is_dir) {
-        visibilityMemo.set(item.key, true);
-        return true;
-      }
-
-      const parentVisible = isVisible(parent);
-      const visible = parentVisible && expandedScopeDirs.has(parent.path);
-      visibilityMemo.set(item.key, visible);
-      return visible;
-    };
-
-    return scopeViewItems.filter((item) => isVisible(item));
-  }, [expandedScopeDirs, scopeViewItems]);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(AI_LANG_STORAGE_KEY, aiLang);
-    }
-  }, [aiLang]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
-    window.localStorage.removeItem(LEGACY_THEME_MODE_STORAGE_KEY);
-  }, [themeMode]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(FONT_PRESET_STORAGE_KEY, fontPreset);
-  }, [fontPreset]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(FONT_SCALE_STORAGE_KEY, fontScale);
-  }, [fontScale]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(RETRIEVE_TOP_K_STORAGE_KEY, String(retrieveTopK));
-  }, [retrieveTopK]);
-
-  useLayoutEffect(() => {
-    const root = document.documentElement;
-    const fontPresetMap: Record<
-      FontPreset,
-      { regular: string; mono: string }
-    > = {
-      system: {
-        regular:
-          '"PingFang SC","Microsoft YaHei","Segoe UI",Inter,"SF Pro Text","Noto Sans",sans-serif',
-        mono:
-          '"Cascadia Mono","JetBrains Mono","Maple Mono","IBM Plex Mono","Consolas","SFMono-Regular","Noto Sans Mono",monospace'
-      },
-      neo: {
-        regular:
-          '"HarmonyOS Sans SC","Segoe UI Variable","Segoe UI",Inter,"SF Pro Display","Noto Sans",sans-serif',
-        mono:
-          '"Berkeley Mono","JetBrains Mono","Cascadia Mono","IBM Plex Mono","Consolas","Noto Sans Mono",monospace'
-      },
-      mono: {
-        regular:
-          '"IBM Plex Sans","PingFang SC","Microsoft YaHei","Segoe UI",Inter,sans-serif',
-        mono:
-          '"IBM Plex Mono","Sarasa Mono SC","JetBrains Mono","Cascadia Mono","Consolas","Noto Sans Mono",monospace'
-      }
-    };
-    const fontScaleMap: Record<FontScale, string> = {
-      s: "14px",
-      m: "16px",
-      l: "18px"
-    };
-
-    root.style.setProperty("--app-font-family", fontPresetMap[fontPreset].regular);
-    root.style.setProperty("--app-font-family-mono", fontPresetMap[fontPreset].mono);
-    root.style.setProperty("--app-font-size", fontScaleMap[fontScale]);
-    // Tailwind typography utilities are rem-based, so root(html) font-size must change.
-    root.style.fontSize = fontScaleMap[fontScale];
-    root.setAttribute("data-theme", themeMode);
-    root.style.colorScheme = themeMode;
-  }, [fontPreset, fontScale, themeMode]);
-
+  useAppearanceSync({
+    aiLang,
+    themeMode,
+    fontPreset,
+    fontScale,
+    retrieveTopK,
+    aiLangStorageKey: AI_LANG_STORAGE_KEY,
+    themeStorageKey: THEME_STORAGE_KEY,
+    legacyThemeModeStorageKey: LEGACY_THEME_MODE_STORAGE_KEY,
+    fontPresetStorageKey: FONT_PRESET_STORAGE_KEY,
+    fontScaleStorageKey: FONT_SCALE_STORAGE_KEY,
+    retrieveTopKStorageKey: RETRIEVE_TOP_K_STORAGE_KEY
+  });
   useEffect(() => {
     let active = true;
 
@@ -725,88 +625,6 @@ export default function App() {
       window.clearInterval(timer);
     };
   }, []);
-
-  useEffect(() => {
-    let active = true;
-
-    const loadScopes = async () => {
-      if (!isTauriHostAvailable()) {
-        return;
-      }
-      setScopeLoading(true);
-      try {
-        const scopes = await listSearchScopes();
-        if (!active) {
-          return;
-        }
-        setScopeItems(scopes);
-        setSelectedScopePaths((prev) => prev.filter((path) => scopes.some((s) => s.path === path)));
-        setExpandedScopeDirs(
-          (prev) =>
-            new Set(
-              [...prev].filter((path) => scopes.some((s) => s.is_dir && s.path === path))
-            )
-        );
-      } catch (err) {
-        if (active) {
-          setError(toUiErrorMessage(err));
-        }
-      } finally {
-        if (active) {
-          setScopeLoading(false);
-        }
-      }
-    };
-
-    void loadScopes();
-    return () => {
-      active = false;
-    };
-  }, [watchRoot]);
-
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (!scopeMenuOpen) {
-        return;
-      }
-      if (!scopeMenuRef.current) {
-        return;
-      }
-      const target = event.target as Node | null;
-      if (target && !scopeMenuRef.current.contains(target)) {
-        setScopeMenuOpen(false);
-      }
-    };
-
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [scopeMenuOpen]);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const syncMaximizeState = async () => {
-      if (!isTauriHostAvailable()) {
-        return;
-      }
-
-      try {
-        const maximized = await getCurrentWindow().isMaximized();
-        if (mounted) {
-          setIsMaximized(maximized);
-        }
-      } catch {
-        // Ignore; this is best-effort UI sync.
-      }
-    };
-
-    void syncMaximizeState();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
   useEffect(() => {
     const onGlobalKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === ",") {
@@ -1053,33 +871,6 @@ export default function App() {
     scopeMenuOpen,
     // Intentionally not depending on selectedScopePaths; suggestions remain global.
   ]);
-
-  const onMinimize = async () => {
-    try {
-      await getCurrentWindow().minimize();
-    } catch (err) {
-      setError(toUiErrorMessage(err));
-    }
-  };
-
-  const onToggleMaximize = async () => {
-    try {
-      const win = getCurrentWindow();
-      await win.toggleMaximize();
-      const maximized = await win.isMaximized();
-      setIsMaximized(maximized);
-    } catch (err) {
-      setError(toUiErrorMessage(err));
-    }
-  };
-
-  const onClose = async () => {
-    try {
-      await getCurrentWindow().close();
-    } catch (err) {
-      setError(toUiErrorMessage(err));
-    }
-  };
 
   const onToggleThemeMode = () => {
     setThemeMode((prev) => (prev === "dark" ? "light" : "dark"));
@@ -1417,30 +1208,6 @@ export default function App() {
     }
   };
 
-  const onToggleScopePath = (path: string) => {
-    setSelectedScopePaths((prev) => {
-      if (prev.includes(path)) {
-        return prev.filter((p) => p !== path);
-      }
-      return [...prev, path];
-    });
-  };
-
-  const onClearScopeSelection = () => {
-    setSelectedScopePaths([]);
-  };
-  const onToggleScopeDirExpanded = (path: string) => {
-    setExpandedScopeDirs((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
-  };
-
   const onResultScroll = (event: ReactUIEvent<HTMLElement>) => {
     const scrollTop = event.currentTarget.scrollTop;
     const shouldCompact = scrollTop > 2;
@@ -1666,5 +1433,13 @@ export default function App() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
 
 
