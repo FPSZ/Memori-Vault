@@ -15,6 +15,8 @@
     "framer-motion": "^12.23.12",
     "hast-util-sanitize": "^5.0.2",
     "lucide-react": "^0.554.0",
+    "motion-dom": "^12.35.0",
+    "motion-utils": "^12.29.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",

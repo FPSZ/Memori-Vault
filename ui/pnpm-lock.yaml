@@ -23,6 +23,12 @@ importers:
       lucide-react:
         specifier: ^0.554.0
         version: 0.554.0(react@19.2.4)
+      motion-dom:
+        specifier: ^12.35.0
+        version: 12.35.0
+      motion-utils:
+        specifier: ^12.29.2
+        version: 12.29.2
       react:
         specifier: ^19.2.0
         version: 19.2.4
