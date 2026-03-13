@@ -45,7 +45,7 @@ export function EvidencePanel({
           return (
             <div
               key={sourceKey}
-              className={`relative flex h-full flex-col rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-4 py-3 ${
+              className={`surface-lite relative flex h-full flex-col rounded-xl px-4 py-3 ${
                 expanded ? "md:col-span-2" : ""
               }`}
             >

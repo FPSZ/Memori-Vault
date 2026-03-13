@@ -3,11 +3,11 @@ import {
   UIEvent as ReactUIEvent,
   WheelEvent as ReactWheelEvent,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AnimatePresence, motion } from "framer-motion";
@@ -20,13 +20,7 @@ import {
   FileText,
   FolderOpen,
   LoaderCircle,
-  Moon,
-  Minus,
-  Sun,
   Search,
-  Settings as SettingsIcon,
-  Square,
-  X
 } from "lucide-react";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
@@ -34,22 +28,45 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {
+  SettingsModal
+} from "./components/SettingsModal";
+import type {
+  EnterprisePolicyDto,
   FontPreset,
   FontScale,
-  EnterprisePolicyDto,
   IndexingMode,
   IndexingStatusDto,
   ModelAvailabilityDto,
-  ModelSettingsDto,
   ModelProvider,
+  ModelSettingsDto,
   ProviderModelsDto,
   ResourceBudget,
-  ThemeMode,
-  SettingsModal
-} from "./components/SettingsModal";
+  ThemeMode
+} from "./components/settings/types";
 import { fadeSlideUpVariants } from "./components/MotionKit";
 import { useI18n } from "./i18n";
 import type { Language } from "./i18n";
+import {
+  getAppSettings,
+  getEnterprisePolicy,
+  getIndexingStatus,
+  getModelSettings,
+  getVaultStats,
+  listProviderModels,
+  listSearchScopes,
+  openSourceLocation,
+  pauseIndexing,
+  probeModelProvider,
+  pullModel,
+  resumeIndexing,
+  setEnterprisePolicy as saveEnterprisePolicyRemote,
+  setIndexingMode as saveIndexingModeRemote,
+  setModelSettings as saveModelSettingsRemote,
+  setWatchRoot as saveWatchRootRemote,
+  searchFiles,
+  triggerReindex,
+  validateModelSetup
+} from "./app/api/desktop";
 import { buildVisibleCitations, buildVisibleEvidenceGroups } from "./app/evidence";
 import {
   buildCollapsedMarkdownPreview,
@@ -59,10 +76,11 @@ import {
   statusToneClasses
 } from "./app/formatters";
 import { useQueryFlow } from "./app/hooks/useQueryFlow";
-import { AnswerPanel } from "./app/panels/AnswerPanel";
-import { CitationPanel } from "./app/panels/CitationPanel";
-import { EvidencePanel } from "./app/panels/EvidencePanel";
-import { MetricsPanel } from "./app/panels/MetricsPanel";
+import { OnboardingOverlay } from "./app/layout/OnboardingOverlay";
+import { ResultStage } from "./app/layout/ResultStage";
+import { SearchStage } from "./app/layout/SearchStage";
+import { StatusFooter } from "./app/layout/StatusFooter";
+import { TitleBar } from "./app/layout/TitleBar";
 import type {
   AppSettingsDto,
   AskResponseStructured,
@@ -507,7 +525,7 @@ export default function App() {
     window.localStorage.setItem(RETRIEVE_TOP_K_STORAGE_KEY, String(retrieveTopK));
   }, [retrieveTopK]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
     const fontPresetMap: Record<
       FontPreset,
@@ -552,7 +570,7 @@ export default function App() {
 
     const loadStats = async () => {
       try {
-        const raw = await invoke<VaultStatsRaw>("get_vault_stats");
+        const raw = await getVaultStats();
         if (active) {
           setStats(normalizeStats(raw));
         }
@@ -565,7 +583,7 @@ export default function App() {
 
     const loadSettings = async () => {
       try {
-        const settings = await invoke<AppSettingsDto>("get_app_settings");
+        const settings = await getAppSettings();
         if (active) {
           setWatchRoot(settings.watch_root ?? "");
           setIndexingMode(normalizeIndexingMode(settings.indexing_mode));
@@ -590,7 +608,7 @@ export default function App() {
 
     const loadIndexingStatus = async () => {
       try {
-        const status = await invoke<IndexingStatusDto>("get_indexing_status");
+        const status = await getIndexingStatus();
         if (active) {
           setIndexingStatus({
             ...status,
@@ -607,7 +625,7 @@ export default function App() {
 
     const loadModelSettings = async () => {
       try {
-        const settings = await invoke<ModelSettingsDto>("get_model_settings");
+        const settings = await getModelSettings();
         if (active) {
           setModelSettings(settings);
         }
@@ -634,7 +652,7 @@ export default function App() {
             settings.active_provider === "ollama_local"
               ? settings.local_profile
               : settings.remote_profile;
-          const models = await invoke<ProviderModelsDto>("list_provider_models", {
+          const models = await listProviderModels({
             provider: settings.active_provider,
             endpoint: profile.endpoint,
             apiKey:
@@ -663,7 +681,7 @@ export default function App() {
 
     const loadEnterprisePolicy = async () => {
       try {
-        const policy = await invoke<EnterprisePolicyDto>("get_enterprise_policy");
+        const policy = await getEnterprisePolicy();
         if (active) {
           setEnterprisePolicy(policy);
         }
@@ -674,9 +692,9 @@ export default function App() {
       }
     };
 
-    const validateModelSetup = async () => {
+    const loadModelAvailability = async () => {
       try {
-        const availability = await invoke<ModelAvailabilityDto>("validate_model_setup");
+        const availability = await validateModelSetup();
         if (active) {
           setModelAvailability(availability);
           if (availability.status_code === MODEL_NOT_CONFIGURED_CODE) {
@@ -695,7 +713,7 @@ export default function App() {
     void loadIndexingStatus();
     void loadEnterprisePolicy();
     void loadModelSettings().then(() => {
-      void validateModelSetup();
+      void loadModelAvailability();
     });
     const timer = window.setInterval(() => {
       void loadStats();
@@ -717,7 +735,7 @@ export default function App() {
       }
       setScopeLoading(true);
       try {
-        const scopes = await invoke<SearchScopeItem[]>("list_search_scopes");
+        const scopes = await listSearchScopes();
         if (!active) {
           return;
         }
@@ -836,7 +854,7 @@ export default function App() {
           modelSettings.active_provider === "ollama_local"
             ? modelSettings.local_profile
             : modelSettings.remote_profile;
-        const models = await invoke<ProviderModelsDto>("list_provider_models", {
+        const models = await listProviderModels({
           provider: modelSettings.active_provider,
           endpoint: profile.endpoint,
           apiKey:
@@ -888,7 +906,7 @@ export default function App() {
 
   const refreshIndexingStatus = async () => {
     const status = await withTimeout(
-      invoke<IndexingStatusDto>("get_indexing_status"),
+      getIndexingStatus(),
       INDEXING_ACTION_TIMEOUT_MS,
       uiLang === "zh-CN" ? "获取索引状态超时，请稍后重试。" : "Fetching indexing status timed out."
     );
@@ -903,13 +921,11 @@ export default function App() {
     setIndexingBusy(true);
     try {
       const saved = await withTimeout(
-        invoke<AppSettingsDto>("set_indexing_mode", {
-          payload: {
-            indexing_mode: indexingMode,
-            resource_budget: resourceBudget,
-            schedule_start: indexingMode === "scheduled" ? scheduleStart : null,
-            schedule_end: indexingMode === "scheduled" ? scheduleEnd : null
-          }
+        saveIndexingModeRemote({
+          indexing_mode: indexingMode,
+          resource_budget: resourceBudget,
+          schedule_start: indexingMode === "scheduled" ? scheduleStart : null,
+          schedule_end: indexingMode === "scheduled" ? scheduleEnd : null
         }),
         INDEXING_ACTION_TIMEOUT_MS,
         uiLang === "zh-CN" ? "保存索引配置超时，请重试。" : "Saving indexing config timed out."
@@ -932,7 +948,7 @@ export default function App() {
     setIndexingBusy(true);
     try {
       await withTimeout(
-        invoke<string>("trigger_reindex"),
+        triggerReindex(),
         INDEXING_ACTION_TIMEOUT_MS * 2,
         uiLang === "zh-CN" ? "触发重建索引超时，请稍后重试。" : "Triggering reindex timed out."
       );
@@ -950,7 +966,7 @@ export default function App() {
     setIndexingBusy(true);
     try {
       await withTimeout(
-        invoke("pause_indexing"),
+        pauseIndexing(),
         INDEXING_ACTION_TIMEOUT_MS,
         uiLang === "zh-CN" ? "暂停索引超时，请稍后重试。" : "Pausing indexing timed out."
       );
@@ -968,7 +984,7 @@ export default function App() {
     setIndexingBusy(true);
     try {
       await withTimeout(
-        invoke("resume_indexing"),
+        resumeIndexing(),
         INDEXING_ACTION_TIMEOUT_MS,
         uiLang === "zh-CN" ? "恢复索引超时，请稍后重试。" : "Resuming indexing timed out."
       );
@@ -1009,7 +1025,7 @@ export default function App() {
     let canceled = false;
       const timer = window.setTimeout(async () => {
         try {
-          const matches = await invoke<FileMatch[]>("search_files", {
+          const matches = await searchFiles({
             query: q,
             limit: 20,
             // File suggestions should not be constrained by the current scope selection;
@@ -1073,7 +1089,7 @@ export default function App() {
     setModelBusy(true);
     try {
       const availability = await withTimeout(
-        invoke<ModelAvailabilityDto>("probe_model_provider", {
+        probeModelProvider({
           provider: modelSettings.active_provider,
           endpoint: activeModelProfile.endpoint,
           apiKey:
@@ -1110,7 +1126,7 @@ export default function App() {
     setModelBusy(true);
     try {
       const models = await withTimeout(
-        invoke<ProviderModelsDto>("list_provider_models", {
+        listProviderModels({
           provider: modelSettings.active_provider,
           endpoint: activeModelProfile.endpoint,
           apiKey:
@@ -1139,15 +1155,13 @@ export default function App() {
     setModelBusy(true);
     try {
       const saved = await withTimeout(
-        invoke<ModelSettingsDto>("set_model_settings", {
-          payload: modelSettings
-        }),
+        saveModelSettingsRemote(modelSettings),
         MODEL_ACTION_TIMEOUT_MS,
         uiLang === "zh-CN" ? "保存模型设置超时，请重试。" : "Saving model settings timed out."
       );
       setModelSettings(saved);
       const availability = await withTimeout(
-        invoke<ModelAvailabilityDto>("validate_model_setup"),
+        validateModelSetup(),
         MODEL_ACTION_TIMEOUT_MS,
         uiLang === "zh-CN" ? "模型校验超时，请重试。" : "Model validation timed out."
       );
@@ -1157,7 +1171,7 @@ export default function App() {
         setError(null);
       } else {
         const refreshedModels = await withTimeout(
-          invoke<ProviderModelsDto>("list_provider_models", {
+          listProviderModels({
             provider: saved.active_provider,
             endpoint:
               saved.active_provider === "ollama_local"
@@ -1192,16 +1206,14 @@ export default function App() {
     setEnterpriseBusy(true);
     try {
       const saved = await withTimeout(
-        invoke<EnterprisePolicyDto>("set_enterprise_policy", {
-          payload: enterprisePolicy
-        }),
+        saveEnterprisePolicyRemote(enterprisePolicy),
         MODEL_ACTION_TIMEOUT_MS,
         uiLang === "zh-CN" ? "保存企业策略超时，请重试。" : "Saving enterprise policy timed out."
       );
       setEnterprisePolicy(saved);
       try {
         const availability = await withTimeout(
-          invoke<ModelAvailabilityDto>("validate_model_setup"),
+          validateModelSetup(),
           MODEL_ACTION_TIMEOUT_MS,
           uiLang === "zh-CN" ? "模型校验超时，请重试。" : "Model validation timed out."
         );
@@ -1226,7 +1238,7 @@ export default function App() {
     setModelBusy(true);
     try {
       const availability = await withTimeout(
-        invoke<ModelAvailabilityDto>("pull_model", {
+        pullModel({
           model,
           provider: modelSettings.active_provider,
           endpoint: activeModelProfile.endpoint,
@@ -1240,7 +1252,7 @@ export default function App() {
       );
       setModelAvailability(availability);
       const refreshedModels = await withTimeout(
-        invoke<ProviderModelsDto>("list_provider_models", {
+        listProviderModels({
           provider: modelSettings.active_provider,
           endpoint: activeModelProfile.endpoint,
           apiKey:
@@ -1296,7 +1308,7 @@ export default function App() {
     };
     setModelSettings(next);
     if (next.active_provider === "ollama_local") {
-      const models = await invoke<ProviderModelsDto>("list_provider_models", {
+      const models = await listProviderModels({
         provider: next.active_provider,
         endpoint: next.local_profile.endpoint,
         apiKey: null,
@@ -1366,7 +1378,7 @@ export default function App() {
 
   const onOpenSourceLocation = async (path: string) => {
     try {
-      await invoke("open_source_location", { path });
+      await openSourceLocation(path);
     } catch (err) {
       setError(toUiErrorMessage(err));
     }
@@ -1390,12 +1402,12 @@ export default function App() {
         return;
       }
 
-      const settings = await invoke<AppSettingsDto>("set_watch_root", { path: selected });
+      const settings = await saveWatchRootRemote(selected);
       setWatchRoot(settings.watch_root ?? selected);
       setSelectedScopePaths([]);
       setExpandedScopeDirs(new Set());
 
-      const raw = await invoke<VaultStatsRaw>("get_vault_stats");
+      const raw = await getVaultStats();
       setStats(normalizeStats(raw));
       setError(null);
     } catch (err) {
@@ -1468,495 +1480,97 @@ export default function App() {
   return (
     <div className="h-screen w-screen bg-[var(--bg-canvas)] text-[var(--text-primary)]">
       <div className="relative flex h-full w-full flex-col overflow-hidden bg-[var(--bg-canvas)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
-        <header
-          data-tauri-drag-region=""
-          className="relative z-50 flex h-9 shrink-0 items-center pl-2 pr-2 select-none bg-[var(--bg-canvas)]/95 backdrop-blur [app-region:drag] [-webkit-app-region:drag]"
-        >
-          <div
-            data-tauri-drag-region=""
-            className="pointer-events-none absolute inset-0 flex items-center justify-center px-44"
-          >
-            <div className="inline-flex min-w-0 max-w-[62vw] items-center gap-2 px-1 text-[10px] text-[var(--text-secondary)]">
-              <span className="shrink-0 uppercase tracking-[0.08em]">{t("watchRoot")}</span>
-              <span className="min-w-0 truncate text-[var(--text-primary)]">{headerWatchRoot}</span>
-              <span className="shrink-0 text-[var(--text-muted)]">|</span>
-              <span className="shrink-0">{headerSelectedCount}</span>
-            </div>
-          </div>
-          <div data-tauri-drag-region="" className="h-full flex-1 cursor-move" />
-          <div className="flex items-center gap-1.5 [app-region:no-drag] [-webkit-app-region:no-drag]">
-            <motion.button
-              type="button"
-              onClick={onToggleThemeMode}
-              className="inline-flex items-center justify-center p-1 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
-              aria-label={t("themeToggle")}
-              title={t("themeToggle")}
-              whileTap={{ scale: 0.9 }}
-              animate={{ rotate: themeMode === "dark" ? 0 : 180 }}
-              transition={{ type: "spring", damping: 16, stiffness: 180 }}
-            >
-              {themeMode === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-            </motion.button>
-            <button
-              type="button"
-              onClick={() => setIsSettingsOpen((prev) => !prev)}
-              className="inline-flex items-center justify-center p-1 text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
-              aria-label={t("settings")}
-              title={t("settings")}
-            >
-              <SettingsIcon className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void onMinimize()}
-              className="inline-flex items-center justify-center p-1 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
-              aria-label="Minimize"
-              title="Minimize"
-            >
-              <Minus className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void onToggleMaximize()}
-              className="inline-flex items-center justify-center p-1 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
-              aria-label={isMaximized ? "Restore" : "Maximize"}
-              title={isMaximized ? "Restore" : "Maximize"}
-            >
-              <Square className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => void onClose()}
-              className="inline-flex items-center justify-center p-1 text-[var(--danger)] transition hover:text-red-400"
-              aria-label="Close"
-              title="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </header>
+        <TitleBar
+          t={t}
+          headerWatchRoot={headerWatchRoot}
+          headerSelectedCount={headerSelectedCount}
+          themeMode={themeMode}
+          isMaximized={isMaximized}
+          onToggleThemeMode={onToggleThemeMode}
+          onToggleSettings={() => setIsSettingsOpen((prev) => !prev)}
+          onMinimize={onMinimize}
+          onToggleMaximize={onToggleMaximize}
+          onClose={onClose}
+        />
 
         <div className="relative z-10 flex-1 overflow-hidden">
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div
-              className="absolute left-1/2 top-[-220px] h-[620px] w-[620px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,rgba(88,166,255,0.14),rgba(88,166,255,0)_72%)] transition-opacity duration-500"
-              style={{ opacity: themeMode === "dark" ? 0.8 : 0.55 }}
+          <div
+            className={`pointer-events-none absolute inset-0 z-0 ${
+              themeMode === "dark"
+                ? "bg-[radial-gradient(104%_74%_at_50%_-10%,rgba(181,210,238,0.17),transparent_64%),radial-gradient(70%_52%_at_18%_34%,rgba(111,154,200,0.1),transparent_76%),radial-gradient(66%_50%_at_84%_36%,rgba(104,145,189,0.09),transparent_78%),linear-gradient(180deg,#121b28_0%,#111926_46%,#101722_100%)]"
+                : "bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(255,255,255,0.82),transparent_62%),radial-gradient(72%_54%_at_18%_30%,rgba(196,220,244,0.42),transparent_78%),radial-gradient(68%_52%_at_84%_34%,rgba(205,225,244,0.36),transparent_80%),linear-gradient(180deg,#f8fbff_0%,#f4f8fd_56%,#f2f6fb_100%)]"
+            }`}
+          />
+
+          <main className="relative z-10 mx-auto h-full w-full max-w-5xl px-6 pb-4 md:px-10">
+            <SearchStage
+              isSearching={isSearching}
+              isSearchBarCollapsed={isSearchBarCollapsed}
+              isSearchBarCompact={isSearchBarCompact}
+              allowCompactHoverExpand={allowCompactHoverExpand}
+              isSearchInputFocused={isSearchInputFocused}
+              scopeMenuOpen={scopeMenuOpen}
+              scopeLoading={scopeLoading}
+              scopeItems={scopeItems}
+              visibleScopeItems={visibleScopeItems}
+              selectedScopeSet={selectedScopeSet}
+              selectedScopeLabel={selectedScopeLabel}
+              scopeChildrenCountByParentKey={scopeChildrenCountByParentKey}
+              expandedScopeDirs={expandedScopeDirs}
+              fileMatchesOpen={fileMatchesOpen}
+              fileMatches={fileMatches}
+              watchRoot={watchRoot}
+              showSearchDone={showSearchDone}
+              loading={loading}
+              modelSetupNotConfigured={modelSetupNotConfigured}
+              query={query}
+              uiLang={uiLang}
+              searchPlaceholder={searchPlaceholder}
+              t={t}
+              searchInputRef={searchInputRef}
+              scopeMenuRef={scopeMenuRef}
+              fileMatchesCloseTimerRef={fileMatchesCloseTimerRef}
+              setQuery={setQuery}
+              setIsSearchBarHovering={setIsSearchBarHovering}
+              setScopeMenuOpen={setScopeMenuOpen}
+              setIsSearchInputFocused={setIsSearchInputFocused}
+              setFileMatchesOpen={setFileMatchesOpen}
+              setSelectedScopePaths={setSelectedScopePaths}
+              onKeyDown={onKeyDown}
+              onClearScopeSelection={onClearScopeSelection}
+              onToggleScopePath={onToggleScopePath}
+              onToggleScopeDirExpanded={onToggleScopeDirExpanded}
             />
-          </div>
 
-          <main className="relative mx-auto h-full w-full max-w-5xl px-6 pb-4 md:px-10">
-            <motion.div
-              className="absolute left-6 right-6 z-40 md:left-10 md:right-10"
-              animate={{
-                top: isSearching ? (isSearchBarCollapsed ? "6px" : isSearchBarCompact ? "8px" : "20px") : "45%",
-                y: isSearching ? 0 : "-50%"
-              }}
-              transition={{ duration: 0.18, ease: "easeOut" }}
-            >
-              <motion.div
-                onMouseEnter={() => {
-                  if (isSearchBarCompact && allowCompactHoverExpand) {
-                    setIsSearchBarHovering(true);
-                  }
-                }}
-                onMouseLeave={() => {
-                  if (isSearchBarCompact && !isSearchInputFocused && !scopeMenuOpen) {
-                    setIsSearchBarHovering(false);
-                  }
-                }}
-                className={`relative mx-auto w-full transition-[max-width,opacity,box-shadow,background-color,border-color] duration-300 ease-out will-change-[max-width,opacity] focus-within:ring-1 focus-within:ring-[var(--line-soft)] focus-within:shadow-[var(--float-shadow-focus)] ${
-                  isSearchBarCollapsed
-                    ? "max-w-[300px] rounded-full overflow-hidden border-0 bg-transparent px-0 py-0 shadow-none ring-0 focus-within:ring-0"
-                    : isSearching && isSearchBarCompact
-                    ? "max-w-3xl rounded-full px-4 py-2.5"
-                    : "max-w-4xl rounded-xl px-6 py-5"
-                } ${
-                  isSearchBarCollapsed
-                    ? ""
-                    : isSearching && isSearchBarCompact
-                    ? "bg-[var(--bg-surface-1)] ring-0 shadow-[0_2px_10px_rgba(15,23,42,0.08)]"
-                    : isSearching
-                    ? "bg-[var(--bg-surface-1)] ring-0 shadow-[var(--float-shadow)]"
-                    : "bg-[var(--bg-surface-1)] ring-0 shadow-[var(--float-shadow)]"
-                }`}
-              >
-                {isSearchBarCollapsed ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsSearchBarHovering(true);
-                      requestAnimationFrame(() => searchInputRef.current?.focus());
-                    }}
-                    aria-label={searchPlaceholder}
-                    className="block h-1.5 w-full appearance-none rounded-full border-0 bg-[var(--search-collapsed-bar)] p-0 shadow-[0_2px_8px_rgba(15,23,42,0.12)] outline-none focus:border-0 focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0"
-                  />
-                ) : (
-                  <>
-                    <div className="relative flex items-center gap-3">
-                  <div ref={scopeMenuRef} className="relative shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setScopeMenuOpen((prev) => !prev)}
-                      className={`inline-flex max-w-[170px] items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-xs transition ${
-                        isSearching && isSearchBarCompact ? "h-8" : "h-9"
-                      } ${
-                        scopeMenuOpen
-                          ? "bg-[var(--accent-soft)] text-[var(--accent)]"
-                          : "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
-                      }`}
-                      aria-label={t("scopeSelectTitle")}
-                      title={t("scopeSelectTitle")}
-                    >
-                      <ChevronDown
-                        className={`h-3.5 w-3.5 shrink-0 transition-transform ${
-                          scopeMenuOpen ? "rotate-180" : ""
-                        }`}
-                      />
-                      <span className="truncate">{selectedScopeLabel}</span>
-                    </button>
-
-                    <AnimatePresence>
-                      {scopeMenuOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: -6, scale: 0.98 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: -4, scale: 0.98 }}
-                          transition={{ duration: 0.16, ease: "easeOut" }}
-                          className="absolute left-0 top-[calc(100%+10px)] z-40 w-[360px] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2 shadow-[0_20px_45px_rgba(0,0,0,0.5)] backdrop-blur"
-                        >
-                          <div className="mb-2 flex items-center justify-between px-1">
-                            <span className="text-[11px] tracking-[0.08em] text-[var(--text-secondary)]">
-                              {t("scopeSelectTitle")}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={onClearScopeSelection}
-                              className="text-[11px] text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
-                            >
-                              {t("scopeAll")}
-                            </button>
-                          </div>
-
-                          <div className="no-scrollbar max-h-72 overflow-y-auto pr-1">
-                            {scopeLoading && (
-                              <div className="px-2 py-3 text-xs text-[var(--text-secondary)]">{t("scopeLoading")}</div>
-                            )}
-
-                            {!scopeLoading && scopeItems.length === 0 && (
-                              <div className="px-2 py-3 text-xs text-[var(--text-secondary)]">{t("scopeNoItems")}</div>
-                            )}
-
-                            {!scopeLoading &&
-                              visibleScopeItems.map((item) => {
-                                const selected = selectedScopeSet.has(item.path);
-                                const displayName = item.name.trim() ? item.name : item.path;
-                                const relativePath =
-                                  item.relative_path.trim() || item.path;
-                                const hasChildren =
-                                  item.is_dir && (scopeChildrenCountByParentKey.get(item.key) ?? 0) > 0;
-                                const isExpanded = expandedScopeDirs.has(item.path);
-
-                                return (
-                                  <div
-                                    key={item.key}
-                                    onClick={() => onToggleScopePath(item.path)}
-                                    className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left transition ${
-                                      selected ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--bg-surface-2)]"
-                                    }`}
-                                    title={item.path}
-                                    role="button"
-                                    tabIndex={0}
-                                    onKeyDown={(event) => {
-                                      if (event.key === "Enter" || event.key === " ") {
-                                        event.preventDefault();
-                                        onToggleScopePath(item.path);
-                                      }
-                                    }}
-                                  >
-                                    <span
-                                      className="flex min-w-0 items-center gap-2"
-                                      style={{ paddingLeft: `${item.depth * 12}px` }}
-                                    >
-                                      {item.is_dir ? (
-                                        <FolderOpen className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
-                                      ) : (
-                                        <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
-                                      )}
-                                      <span className="min-w-0">
-                                        <span className="block truncate text-xs text-[var(--text-primary)]">
-                                          {displayName}
-                                        </span>
-                                        <span className="block truncate text-[10px] text-[var(--text-muted)]">
-                                          {relativePath}
-                                        </span>
-                                      </span>
-                                    </span>
-                                    <span className="ml-2 inline-flex shrink-0 items-center gap-1">
-                                      <span className="h-4 w-4">
-                                        {selected ? (
-                                          <Check className="h-4 w-4 text-[var(--accent)]" />
-                                        ) : null}
-                                      </span>
-                                      {hasChildren ? (
-                                        <button
-                                          type="button"
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            onToggleScopeDirExpanded(item.path);
-                                          }}
-                                          className="inline-flex h-4 w-4 items-center justify-center text-[var(--text-secondary)] transition hover:text-[var(--accent)]"
-                                          aria-label={isExpanded ? "Collapse folder" : "Expand folder"}
-                                          title={isExpanded ? "Collapse folder" : "Expand folder"}
-                                        >
-                                          <ChevronRight
-                                            className={`h-3.5 w-3.5 transition-transform ${
-                                              isExpanded ? "rotate-90 text-[var(--accent)]" : ""
-                                            }`}
-                                          />
-                                        </button>
-                                      ) : (
-                                        <span className="h-4 w-4" />
-                                      )}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
-                  <Search className="h-5 w-5 shrink-0 text-[var(--text-secondary)]" />
-                  <input
-                    ref={searchInputRef}
-                    type="text"
-                    autoFocus
-                    disabled={modelSetupNotConfigured}
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={onKeyDown}
-                    onFocus={() => {
-                      setIsSearchInputFocused(true);
-                      if (isSearchBarCompact) {
-                        setIsSearchBarHovering(true);
-                      }
-                      if (fileMatchesCloseTimerRef.current != null) {
-                        window.clearTimeout(fileMatchesCloseTimerRef.current);
-                        fileMatchesCloseTimerRef.current = null;
-                      }
-                    }}
-                    onBlur={() => {
-                      setIsSearchInputFocused(false);
-                      if (isSearchBarCompact && !scopeMenuOpen) {
-                        setIsSearchBarHovering(false);
-                      }
-                      fileMatchesCloseTimerRef.current = window.setTimeout(() => {
-                        setFileMatchesOpen(false);
-                      }, 120);
-                    }}
-                    placeholder={searchPlaceholder}
-                    className={`w-full flex-1 border-none bg-transparent pr-10 text-xl text-[var(--text-primary)] focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-100 ${
-                      modelSetupNotConfigured
-                        ? "placeholder:text-red-400"
-                        : "placeholder:text-[var(--text-muted)]"
-                    }`}
-                  />
-                </div>
-                  <AnimatePresence>
-                    {fileMatchesOpen && fileMatches.length > 0 && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -6 }}
-                        transition={{ duration: 0.18, ease: "easeOut" }}
-                        onMouseDown={(event) => event.preventDefault()}
-                      className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl bg-[var(--bg-surface-1)] ring-1 ring-[var(--line-soft)] shadow-[var(--float-shadow)]"
-                      >
-                        <div className="px-3 py-2 text-[11px] text-[var(--text-muted)]">
-                        {uiLang === "zh-CN" ? "相关文件" : "Relevant files"}
-                        </div>
-                      <div className="settings-scrollbar max-h-72 overflow-y-auto pr-1">
-                        {fileMatches.slice(0, 20).map((item) => {
-                          const isSelected = selectedScopeSet.has(item.file_path);
-                          const parent = item.parent_dir || "";
-                          const relative =
-                            watchRoot && parent.toLowerCase().startsWith(watchRoot.toLowerCase())
-                              ? parent.slice(watchRoot.length).replace(/^[/\\\\]/, "")
-                              : parent;
-                          return (
-                            <button
-                              key={item.file_path}
-                              type="button"
-                              aria-pressed={isSelected}
-                              onClick={() => {
-                                setSelectedScopePaths((prev) => {
-                                  if (prev.includes(item.file_path)) {
-                                    return prev.filter((p) => p !== item.file_path);
-                                  }
-                                  return [...prev, item.file_path];
-                                });
-                                // Selecting a file here should only set scope, not trigger a query.
-                                requestAnimationFrame(() => searchInputRef.current?.focus());
-                              }}
-                              className={`group flex w-full items-center gap-3 px-3 py-2 text-left transition-[background-color,transform] duration-180 ease-out active:scale-[0.995] ${
-                                isSelected
-                                  ? "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]"
-                                  : "hover:bg-[color-mix(in_srgb,var(--accent)_6%,transparent)]"
-                              }`}
-                            >
-                              <FileText
-                                className={`h-4 w-4 shrink-0 ${
-                                  isSelected ? "text-[var(--accent)]" : "text-[var(--text-secondary)]"
-                                }`}
-                              />
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm text-[var(--text-primary)]">
-                                  {item.file_name || item.file_path}
-                                </span>
-                                <span className="block truncate text-[11px] text-[var(--text-muted)]">
-                                  {relative || item.parent_dir}
-                                </span>
-                              </span>
-                              <span
-                                className={`ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors duration-180 ease-out ${
-                                  isSelected
-                                    ? "bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)]"
-                                    : "bg-[color-mix(in_srgb,var(--text-muted)_6%,transparent)] text-[color-mix(in_srgb,var(--text-muted)_20%,transparent)] group-hover:bg-[color-mix(in_srgb,var(--accent)_8%,transparent)]"
-                                }`}
-                              >
-                                <Check
-                                  className={`h-3.5 w-3.5 transition-[opacity,transform] duration-180 ease-out ${
-                                    isSelected ? "opacity-100 scale-100" : "opacity-0 scale-75"
-                                  }`}
-                                />
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-                <AnimatePresence>
-                  {isSearching && loading && (
-                    <motion.div
-                      initial={{ opacity: 0.2, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.9 }}
-                      className="absolute right-6 top-1/2 -translate-y-1/2 text-[var(--accent)]"
-                    >
-                      <LoaderCircle className="h-5 w-5 animate-spin" />
-                    </motion.div>
-                  )}
-                  {showSearchDone && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.92 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="absolute right-6 top-1/2 -translate-y-1/2 text-[var(--accent)]"
-                    >
-                      <Check className="h-5 w-5" />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-                  </>
-                )}
-              </motion.div>
-            </motion.div>
-
-            <AnimatePresence>
-              {isSearching && (
-                <motion.section
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 12 }}
-                  transition={{ duration: 0.24, ease: "easeOut" }}
-                  style={{
-                    paddingTop: isSearchBarCollapsed ? 74 : isSearchBarCompact ? 102 : 146,
-                    transition: "padding-top 0.24s ease-out"
-                  }}
-                  className="no-scrollbar mx-auto h-full w-full max-w-4xl overflow-y-auto"
-                  onScroll={onResultScroll}
-                  onWheel={onResultWheel}
-                >
-                  {loading && (
-                    <div className="flex items-center justify-between px-1 py-3 text-sm text-[var(--text-secondary)]">
-                      <div className="flex items-center gap-3">
-                        <LoaderCircle className="h-4 w-4 animate-spin text-[var(--accent)]" />
-                        {t("loading")}
-                      </div>
-                      <span className="text-xs text-[var(--text-muted)]">
-                        {formatElapsed(searchElapsedMs)}
-                      </span>
-                    </div>
-                  )}
-
-                  {!loading && error && (
-                    <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-5 py-4 text-sm text-red-300">
-                      {error}
-                    </div>
-                  )}
-
-                  {!loading && !error && answerResponse && (
-                    <article className="pb-8">
-                      <AnswerPanel
-                        answerResponse={answerResponse}
-                        lastSearchDurationMs={lastSearchDurationMs}
-                        markdownRemarkPlugins={MARKDOWN_REMARK_PLUGINS}
-                        markdownRehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                        t={t}
-                      />
-                      <CitationPanel
-                        visibleCitations={visibleCitations}
-                        expandedCitationKeys={expandedCitationKeys}
-                        onToggleCitationExpanded={toggleCitationExpanded}
-                        onOpenSourceLocation={(path) => void onOpenSourceLocation(path)}
-                        markdownRemarkPlugins={MARKDOWN_REMARK_PLUGINS}
-                        markdownRehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                        t={t}
-                      />
-                      <EvidencePanel
-                        visibleEvidenceGroups={visibleEvidenceGroups}
-                        expandedSourceKeys={expandedSourceKeys}
-                        onToggleSourceExpanded={toggleSourceExpanded}
-                        onOpenSourceLocation={(path) => void onOpenSourceLocation(path)}
-                        markdownRemarkPlugins={MARKDOWN_REMARK_PLUGINS}
-                        markdownRehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-                        t={t}
-                      />
-                      <MetricsPanel
-                        answerResponse={answerResponse}
-                        metricRows={metricRows}
-                        measuredMetricsTotalMs={measuredMetricsTotalMs}
-                        lastSearchDurationMs={lastSearchDurationMs}
-                        t={t}
-                      />
-                    </article>
-                  )}
-                </motion.section>
-              )}
-            </AnimatePresence>
+            <ResultStage
+              isSearching={isSearching}
+              isSearchBarCollapsed={isSearchBarCollapsed}
+              isSearchBarCompact={isSearchBarCompact}
+              loading={loading}
+              error={error}
+              answerResponse={answerResponse}
+              searchElapsedMs={searchElapsedMs}
+              lastSearchDurationMs={lastSearchDurationMs}
+              formatElapsed={formatElapsed}
+              onResultScroll={onResultScroll}
+              onResultWheel={onResultWheel}
+              visibleCitations={visibleCitations}
+              expandedCitationKeys={expandedCitationKeys}
+              onToggleCitationExpanded={toggleCitationExpanded}
+              visibleEvidenceGroups={visibleEvidenceGroups}
+              expandedSourceKeys={expandedSourceKeys}
+              onToggleSourceExpanded={toggleSourceExpanded}
+              onOpenSourceLocation={onOpenSourceLocation}
+              markdownRemarkPlugins={MARKDOWN_REMARK_PLUGINS}
+              markdownRehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+              metricRows={metricRows}
+              measuredMetricsTotalMs={measuredMetricsTotalMs}
+              t={t}
+            />
           </main>
         </div>
 
-        <footer className="relative z-10 shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)] backdrop-blur">
-          <div className="mx-auto flex h-8 w-full max-w-5xl items-center justify-between px-6 text-[11px] text-[var(--text-secondary)] md:px-10">
-            <span>
-              {t("vaultStats", {
-                docs: stats.documents,
-                chunks: stats.chunks,
-                nodes: stats.nodes
-              })}
-            </span>
-            <span className="inline-flex items-center gap-2 text-[var(--accent)]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
-              {t("localFirstDaemon")}
-            </span>
-          </div>
-        </footer>
+        <StatusFooter t={t} stats={stats} />
 
         <AnimatePresence>
           {isSettingsOpen && (
@@ -2019,250 +1633,38 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        <AnimatePresence>
-          {isOnboardingOpen && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 z-40 flex items-center justify-center bg-[var(--overlay)] backdrop-blur-sm"
-            >
-              <motion.div
-                initial={{ opacity: 0, y: 12, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.98 }}
-                transition={{ type: "spring", damping: 24, stiffness: 220 }}
-                className="w-[680px] rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] p-5 shadow-2xl"
-              >
-                <div className="mb-4 flex items-center justify-between">
-                  <div className="text-sm tracking-[0.14em] text-[var(--accent)] uppercase">
-                    {t("setupWizard")}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsOnboardingOpen(false)}
-                    className="text-xs text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
-                  >
-                    {t("closeWizard")}
-                  </button>
-                </div>
-
-                <div className="mb-4 text-xs text-[var(--text-secondary)]">
-                  Step {onboardingStep + 1}/4
-                </div>
-
-                {onboardingStep === 0 && (
-                  <div className="space-y-3">
-                    <div className="text-sm text-[var(--text-primary)]">{t("modelProvider")}</div>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onSelectProvider("ollama_local")}
-                        className={`rounded-md border px-3 py-2 text-xs transition ${
-                          modelSettings.active_provider === "ollama_local"
-                            ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-                            : "border-[var(--border-strong)] text-[var(--text-secondary)]"
-                        }`}
-                      >
-                        {t("providerOllama")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onSelectProvider("openai_compatible")}
-                        className={`rounded-md border px-3 py-2 text-xs transition ${
-                          modelSettings.active_provider === "openai_compatible"
-                            ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-                            : "border-[var(--border-strong)] text-[var(--text-secondary)]"
-                        }`}
-                      >
-                        {t("providerOpenAI")}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {onboardingStep === 1 && (
-                  <div className="space-y-3">
-                    <div>
-                      <div className="mb-1 text-xs text-[var(--text-secondary)]">{t("modelEndpoint")}</div>
-                      <input
-                        value={activeModelProfile.endpoint}
-                        onChange={(e) => updateActiveOnboardingProfile({ endpoint: e.target.value })}
-                        className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                      />
-                    </div>
-                    {modelSettings.active_provider === "openai_compatible" && (
-                      <div>
-                        <div className="mb-1 text-xs text-[var(--text-secondary)]">{t("modelApiKey")}</div>
-                        <input
-                          value={modelSettings.remote_profile.api_key ?? ""}
-                          onChange={(e) => updateActiveOnboardingProfile({ api_key: e.target.value })}
-                          className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {onboardingStep === 2 && (
-                  <div className="space-y-3">
-                    <div>
-                      <div className="mb-1 text-xs text-[var(--text-secondary)]">{t("chatModel")}</div>
-                      <select
-                        value={activeModelProfile.chat_model}
-                        onChange={(e) => updateActiveOnboardingProfile({ chat_model: e.target.value })}
-                        className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                      >
-                        {providerModels.merged.length === 0 ? (
-                          <option value={activeModelProfile.chat_model}>{activeModelProfile.chat_model}</option>
-                        ) : null}
-                        {!providerModels.merged.includes(activeModelProfile.chat_model) ? (
-                          <option value={activeModelProfile.chat_model}>{activeModelProfile.chat_model}</option>
-                        ) : null}
-                        {providerModels.merged.map((item) => (
-                          <option key={`onboard-chat-${item}`} value={item}>
-                            {item}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <div className="mb-1 text-xs text-[var(--text-secondary)]">{t("graphModel")}</div>
-                      <select
-                        value={activeModelProfile.graph_model}
-                        onChange={(e) => updateActiveOnboardingProfile({ graph_model: e.target.value })}
-                        className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                      >
-                        {providerModels.merged.length === 0 ? (
-                          <option value={activeModelProfile.graph_model}>
-                            {activeModelProfile.graph_model}
-                          </option>
-                        ) : null}
-                        {!providerModels.merged.includes(activeModelProfile.graph_model) ? (
-                          <option value={activeModelProfile.graph_model}>
-                            {activeModelProfile.graph_model}
-                          </option>
-                        ) : null}
-                        {providerModels.merged.map((item) => (
-                          <option key={`onboard-graph-${item}`} value={item}>
-                            {item}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <div className="mb-1 text-xs text-[var(--text-secondary)]">{t("embedModel")}</div>
-                      <select
-                        value={activeModelProfile.embed_model}
-                        onChange={(e) => updateActiveOnboardingProfile({ embed_model: e.target.value })}
-                        className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
-                      >
-                        {providerModels.merged.length === 0 ? (
-                          <option value={activeModelProfile.embed_model}>
-                            {activeModelProfile.embed_model}
-                          </option>
-                        ) : null}
-                        {!providerModels.merged.includes(activeModelProfile.embed_model) ? (
-                          <option value={activeModelProfile.embed_model}>
-                            {activeModelProfile.embed_model}
-                          </option>
-                        ) : null}
-                        {providerModels.merged.map((item) => (
-                          <option key={`onboard-embed-${item}`} value={item}>
-                            {item}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                {onboardingStep === 3 && (
-                  <div className="space-y-3">
-                    <div className="text-sm text-[var(--text-primary)]">{t("testConnection")}</div>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void onProbeModelProvider()}
-                        disabled={modelBusy}
-                        className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-xs text-[var(--text-primary)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-60"
-                      >
-                        {t("testConnection")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void onRefreshProviderModels()}
-                        disabled={modelBusy}
-                        className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-xs text-[var(--text-primary)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-60"
-                      >
-                        {t("refreshModels")}
-                      </button>
-                      {modelSettings.active_provider === "ollama_local" &&
-                        modelAvailability?.missing_roles?.includes("embed") && (
-                          <button
-                            type="button"
-                            onClick={() => void onPullModel(activeModelProfile.embed_model)}
-                            disabled={modelBusy}
-                            className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-xs text-[var(--text-primary)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-60"
-                          >
-                            {t("pullMissingModels")}
-                          </button>
-                        )}
-                    </div>
-                    <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2 text-xs text-[var(--text-secondary)]">
-                      {modelAvailability?.reachable ? t("modelStatusReachable") : t("modelStatusUnreachable")}
-                      {" | "}
-                      {modelAvailability?.missing_roles?.length
-                        ? t("modelStatusMissing", {
-                            roles: modelAvailability.missing_roles.join(", ")
-                          })
-                        : t("modelStatusReady")}
-                    </div>
-                  </div>
-                )}
-
-                <div className="mt-5 flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => setOnboardingStep((prev) => Math.max(0, prev - 1))}
-                    disabled={onboardingStep === 0}
-                    className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-xs text-[var(--text-primary)] disabled:opacity-50"
-                  >
-                    {t("previousStep")}
-                  </button>
-                  {onboardingStep < 3 ? (
-                    <button
-                      type="button"
-                      onClick={() => setOnboardingStep((prev) => Math.min(3, prev + 1))}
-                      className="rounded-md border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-1.5 text-xs text-[var(--accent)]"
-                    >
-                      {t("nextStep")}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void onSaveModelSettings()
-                          .then(() => {
-                            setIsOnboardingOpen(false);
-                            setOnboardingStep(0);
-                          })
-                          .catch(() => {
-                            // keep wizard open and show global error
-                          });
-                      }}
-                      disabled={!modelSetupReady || modelBusy}
-                      className="rounded-md border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-1.5 text-xs text-[var(--accent)]"
-                    >
-                      {t("finishSetup")}
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <OnboardingOverlay
+          open={isOnboardingOpen}
+          t={t}
+          onboardingStep={onboardingStep}
+          onClose={() => setIsOnboardingOpen(false)}
+          onStepBack={() => setOnboardingStep((prev) => Math.max(0, prev - 1))}
+          onStepNext={() => setOnboardingStep((prev) => Math.min(3, prev + 1))}
+          onFinish={() => {
+            void onSaveModelSettings()
+              .then(() => {
+                setIsOnboardingOpen(false);
+                setOnboardingStep(0);
+              })
+              .catch(() => {
+                // keep wizard open and show global error
+              });
+          }}
+          onSelectProvider={onSelectProvider}
+          modelSettings={modelSettings}
+          activeModelProfile={activeModelProfile}
+          updateActiveOnboardingProfile={updateActiveOnboardingProfile}
+          providerModels={providerModels}
+          modelAvailability={modelAvailability}
+          modelBusy={modelBusy}
+          modelSetupReady={modelSetupReady}
+          onProbeModelProvider={onProbeModelProvider}
+          onRefreshProviderModels={onRefreshProviderModels}
+          onPullModel={onPullModel}
+        />
       </div>
     </div>
   );
 }
+
+

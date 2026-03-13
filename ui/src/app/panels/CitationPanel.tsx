@@ -40,7 +40,7 @@ export function CitationPanel({
           return (
             <div
               key={citation.citation_key}
-              className="relative overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-4 py-3"
+              className="surface-lite relative overflow-hidden rounded-xl px-4 py-3"
             >
               <div
                 aria-hidden="true"

@@ -1,6 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import type { Language } from "../../i18n";
+import { askVaultStructured } from "../api/desktop";
 import type { AskResponseStructured } from "../types";
 
 type UseQueryFlowParams = {
@@ -63,7 +63,7 @@ export function useQueryFlow({
 
     try {
       const scopePaths = overrideScopePaths ?? selectedScopePaths;
-      const response = await invoke<AskResponseStructured>("ask_vault_structured", {
+      const response = await askVaultStructured({
         query: query.trim(),
         lang: aiLang,
         topK: retrieveTopK,
