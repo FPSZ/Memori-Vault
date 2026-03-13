@@ -7,7 +7,8 @@ export default defineConfig({
   clearScreen: false,
   plugins: [react(), tailwindcss()],
   resolve: {
-    preserveSymlinks: true,
+    // Keep pnpm transitive dependency resolution working in CI/build.
+    preserveSymlinks: false,
     alias: {
       "@": path.resolve(__dirname, "./src")
     }

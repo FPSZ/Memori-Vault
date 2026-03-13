@@ -296,10 +296,65 @@ Overall Progress: 88%
 - 思路：最高分 chunk 放首位，次高分放末位，中间分数的放中间，对抗 LLM 注意力在长 context 中间衰减
 - [ ] 实现 chunk 重排序，在回归集上验证
 
-**中文描述型 query 多词覆盖优先（P1，已在 Phase 6 识别）**
-- 问题：`新增的岗位是什么` 被高频词 `新增` 带偏，无关文档混入
-- 思路：中文 query skeleton 词降权，document routing 的 informative-term coverage 排序，chunk rerank 的多词覆盖优先
-- [ ] 实现并在 `repo_mixed` 回归集上验证 Top-1 提升
+**中文描述型 query 检索稳定性修复（P1，已在 Phase 6 识别）**
+
+根因分析（三层叠加，缺一不可）：
+1. `broad lexical` 对高频中文词过宽，单词命中即算"有证据"（`retrieval.rs:601`）
+2. 元分析文档（如 `docs/AI.md`）含测试问题原文，通过 `docs_phrase` 抢排名（`retrieval.rs:305-307`，`docs_phrase` 优先级 = 7）
+3. gating 侧 `has_strong_document_signal` 把 `docs_phrase` 也算强信号，排序污染直接穿透到放行（`retrieval.rs:618`）
+
+GPT 修复计划（泛化去噪 + 覆盖率门控，无实体硬编码）：
+
+**Key Change 1 — Query 去噪**
+- 剥离中文问句尾巴后的语义核心词（`CJK_QUESTION_SUFFIXES` 已有，需扩展）
+- 新增通用中文虚词过滤（"的/了/吗/呢"等）降低高频噪声词权重
+- 限制 CJK 前缀回退词数量与最短长度
+- term 分级输出：`specific`（数字/标识符/长词）与 `generic`（短高频词），供排序与门控复用
+
+**Key Change 2 — 排序信号升级**
+- 新增 `distinct_term_hits` 与 `term_coverage`（命中不同词数 / 查询有效词数）
+- 对"单一 generic 词反复命中多个 chunk"的文档施加 dominant-term penalty
+- `docs_phrase` 仅在短语包含至少一个 `specific` term 时给高权重；纯问句模板短语不再强提升
+
+**Key Change 3 — 拒答门控重构**
+- 替换 `top_doc_any_lexical >= 2` 为覆盖率条件：
+  - 放行需满足：`distinct_term_hits >= 2` 且 `term_coverage >= 0.5`
+  - 或：存在 `specific` 严格命中 + 同文档多片段一致支持
+- 短查询（高歧义）继续保守拒答
+
+**Key Change 4 — 可观测性**
+- `RetrievalMetrics` 新增（向后兼容）：`top_doc_term_coverage`、`top_doc_distinct_term_hits`、`top_doc_dominant_term_ratio`、`gating_decision_reason`
+- 失败归因记录：`retrieval_miss / gating_false_refusal / synthesis_fail`
+
+**Key Change 5 — 测试语料治理**
+- smoke 验收将元分析/交接文档标记为低优先级（通过问题集配置，不写运行时硬编码路径）
+
+审查发现的实现缺口（需在动工前确认）：
+
+> **缺口 1（高）：`docs_phrase` 污染在 gating 侧未堵住**
+> Key Change 2 修了排序，但 `has_strong_document_signal` 仍把 `docs_phrase` 算强信号（`retrieval.rs:618`）。
+> 若 docs/AI.md 仍排第一，gating 会因 `has_strong_document_signal=true` 直接放行。
+> 修复必须配套：Key Change 2 降排序 + Key Change 3 同步降 `has_strong_document_signal` 中 `docs_phrase` 的权重。
+
+> **缺口 2（中）：`docs_phrase` 降权的实现路径未定义**
+> `document_reason_priority` 是纯函数，签名只有 `(reason: &str, query_family)`，拿不到 term 质量信息。
+> 需明确选择：(a) 在 `document_reason` 字符串编码质量（如 `"docs_phrase_specific"` vs `"docs_phrase_generic"`），或 (b) 改函数签名传入额外上下文。
+
+> **缺口 3（中）：虚词过滤的实现层次说错**
+> "的/了/吗/呢"在 CJK 语境下不是独立 token，`extract_query_tokens` 按非 CJK 字符切分，整句是一个 token。
+> 过滤必须在 `extract_cjk_query_phrases` 内部做字符级剥离，不是 token 级过滤。
+
+> **缺口 4（中）：`term_coverage` 分母定义不明确**
+> "查询有效词数"需明确：是剥离问句尾巴后的词数，还是所有 `chunk_terms` 数量？
+> 对"新增的岗位是什么"，剥离后得 `["新增", "岗位"]`，分母 = 2；若含"是什么"则分母 = 3。
+> 定义直接影响 0.5 阈值的实际效果。
+
+> **缺口 5（低）：`dominant-term penalty` 缺前置条件**
+> 当前 `direct_chunk_lexical_signal` 只返回 `(is_strict, score)`，不记录 per-term attribution。
+> 实现 dominant-term penalty 需先在 chunk 级别追踪每个 term 的命中情况，应标注为依赖项。
+
+- [ ] 确认 5 个实现缺口后开始动工
+- [ ] 实现并在 `repo_mixed` 回归集上验证 Top-1 提升，`gating_false_refusal` 不上升
 
 ### 7.2 稳定性 / 迁移待验证
 
@@ -330,6 +385,7 @@ Overall Progress: 88%
 ---
 
 ## Change Log
+- 2026-03-13: 扩展 Phase 7.1 中文检索稳定性修复条目，写入 GPT 完整修复计划（Key Change 1-5）及审查发现的 5 个实现缺口（docs_phrase gating 穿透、降权路径未定义、虚词过滤层次错误、term_coverage 分母未定义、dominant-term penalty 前置依赖）
 - 2026-03-13: 新增 Phase 7，整合竞品技术对比分析结论（TimeDecay、Parent Document Expansion、Primacy-Recency）、迁移测试缺口、图谱差异化方向与工程待办；删除根目录临时 PLAN.md
 - 2026-03-11: 初始化检索大重构计划书，锁定 AST + SQLite + Hybrid + Graph Secondary 路线
 - 2026-03-11: 调整计划目标，明确 50,000 份文档规模下优先解决文档级精确定位，再做片段级检索与证据链
