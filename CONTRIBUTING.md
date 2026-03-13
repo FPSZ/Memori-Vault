@@ -37,7 +37,7 @@ When in doubt, prioritize correctness, observability, and first-answer speed.
 cargo fmt --all -- --check
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
-npm --prefix ui run build
+pnpm --dir ui run build
 ```
 
 ## 5. Local Development
@@ -45,7 +45,7 @@ npm --prefix ui run build
 Desktop mode:
 
 ```bash
-npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 cargo tauri dev -p memori-desktop
 ```
 
@@ -53,7 +53,7 @@ Browser/server mode:
 
 ```bash
 cargo run -p memori-server
-npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 ```
 
 ## 6. Runtime Principles

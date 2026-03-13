@@ -74,7 +74,7 @@ ollama list
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace -- -D warnings`
 - `cargo test --workspace`
-- `npm --prefix ui run build`
+- `pnpm --dir ui run build`
 - 版本一致性：workspace / tauri / ui package
 - 发布说明：`docs/RELEASE_NOTES_v0.3.0.md`
 

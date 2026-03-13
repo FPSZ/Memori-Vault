@@ -94,13 +94,13 @@ Workspace crates:
 cargo fmt --all -- --check
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
-npm --prefix ui run build
+pnpm --dir ui run build
 ```
 
 Desktop dev:
 
 ```bash
-npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 cargo tauri dev -p memori-desktop
 ```
 
@@ -108,7 +108,7 @@ Server dev:
 
 ```bash
 cargo run -p memori-server
-npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 ```
 
 ## Notes

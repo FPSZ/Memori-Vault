@@ -188,13 +188,13 @@ if (-not $SkipUi) {
     $listenPid = Get-ListenProcessId -LocalHost $UiHost -Port $UiPort
     if ($null -eq $listenPid) {
         Write-Info ("Starting UI dev server: http://" + $UiHost + ":" + $UiPort)
-        $uiCmd = "cd /d `"$uiDir`" && npm run dev -- --host $UiHost --port $UiPort --strictPort"
+        $uiCmd = "cd /d `"$uiDir`" && pnpm run dev -- --host $UiHost --port $UiPort --strictPort"
         $uiProc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $uiCmd -PassThru
         $uiPid = $uiProc.Id
 
         $readyPid = Wait-ForPort -LocalHost $UiHost -Port $UiPort -TimeoutSec 60
         if ($null -eq $readyPid) {
-            throw "UI startup timeout. Please run npm run dev manually in ui folder."
+            throw "UI startup timeout. Please run pnpm run dev manually in ui folder."
         }
         Write-Info ("UI is ready. PID: " + $readyPid)
     }

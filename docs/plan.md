@@ -1,7 +1,7 @@
 # Memori-Vault Retrieval Rebuild Plan
 
-Last Updated: 2026-03-12 UTC  
-Current Phase: Phase 6 - Validation  
+Last Updated: 2026-03-13 UTC
+Current Phase: Phase 6 - Validation
 Overall Progress: 88%
 
 ## Status Rules
@@ -269,7 +269,69 @@ Overall Progress: 88%
   - 继续观察后再决定：FTS5 tokenizer 重配；问题存在，但要和现有 CJK query expansion、索引重建成本一起评估
 - 当前计划文档里的 `50,000` 规模目标仍然是目标态，不应被解读为已经验证完成
 
+## Phase 7: Retrieval Enhancement — Next Round
+
+**Goal**
+在 Phase 6 可用性 gate 通过后，进一步提升检索质量与产品差异化。
+
+### 7.1 检索质量提升
+
+**TimeDecay 时间衰减（P1，改动小）**
+- 参考：指数衰减模型 `0.5^(age/halfLife)`，半衰期 30 天
+- 位置：`memori-core/src/retrieval.rs` 的 `final_score` 计算
+- 思路：在 chunk 合并排序时，对 `mtime_secs` 做指数衰减加权，最近修改的文档排名更靠前
+- 前提：`file_catalog.mtime_secs` 已有，直接可用
+- [ ] 实现并在回归集上验证不降低 Top-1
+
+**Parent Document Expansion（P1，效果明显）**
+- 参考：LlamaIndex Small-to-Big Retrieval 策略
+- 位置：`memori-core/src/retrieval.rs` 证据链构建阶段
+- 思路：当某个 chunk 的 `final_score >= 0.85` 时，自动拉取同文档所有 chunk 合并上下文，上限 8000 字符
+- 效果：避免长文档只拿到碎片，回答更完整
+- [ ] 实现扩展逻辑，加字符上限防止 context 爆炸
+- [ ] 验证扩展后 answer 质量提升，延迟可接受
+
+**Primacy-Recency U 型排序（P2）**
+- 参考：arXiv 2307.03172 (Stanford/UCB "Lost in the Middle")
+- 位置：LLM context 构建时的 chunk 排列顺序
+- 思路：最高分 chunk 放首位，次高分放末位，中间分数的放中间，对抗 LLM 注意力在长 context 中间衰减
+- [ ] 实现 chunk 重排序，在回归集上验证
+
+**中文描述型 query 多词覆盖优先（P1，已在 Phase 6 识别）**
+- 问题：`新增的岗位是什么` 被高频词 `新增` 带偏，无关文档混入
+- 思路：中文 query skeleton 词降权，document routing 的 informative-term coverage 排序，chunk rerank 的多词覆盖优先
+- [ ] 实现并在 `repo_mixed` 回归集上验证 Top-1 提升
+
+### 7.2 稳定性 / 迁移待验证
+
+- [ ] trigram FTS 重建后，`replace_document_index()` 写入路径正常（GPT 审核指出的测试缺口）
+- [ ] `ext` 旧表且同时缺 `parent_dir / removed_at` 的组合形状测试
+- [ ] `documents_fts` 是 trigram+doc_id 但缺 `file_name` 的旧库能否被正确检测并重建
+- [ ] FTS 重建后 `rebuild_state=required` 正确触发全量重建，词法检索恢复正常
+
+### 7.3 差异化方向（不跟随竞品）
+
+知识图谱是当前最大差异化点，竞品均无：
+- [ ] 图谱可视化 UI（当前只有数据，没有展示入口）
+- [ ] 图谱辅助检索（当前图谱数据存在但检索时利用不足）
+- [ ] 跨文档关联推理（"A 文档提到的概念在 B 文档里有更详细的解释"）
+
+### 7.4 工程 / 架构
+
+- [ ] `memori-server` API 文档（当前无 OpenAPI spec）
+- [ ] 多用户隔离（当前 OIDC 登录后共享同一个库）
+- [ ] 增量索引进度推送（WebSocket 或 SSE）
+- [ ] `memori-storage` 模块拆分合并（GPT 进行中，编译通过，待最终审核）
+
+**Exit Criteria**
+- TimeDecay 和 Parent Document Expansion 上线后，`repo_mixed Top-1 >= 0.60`
+- 图谱可视化有基础 UI 入口
+- 迁移测试覆盖上述 4 个缺口场景
+
+---
+
 ## Change Log
+- 2026-03-13: 新增 Phase 7，整合竞品技术对比分析结论（TimeDecay、Parent Document Expansion、Primacy-Recency）、迁移测试缺口、图谱差异化方向与工程待办；删除根目录临时 PLAN.md
 - 2026-03-11: 初始化检索大重构计划书，锁定 AST + SQLite + Hybrid + Graph Secondary 路线
 - 2026-03-11: 调整计划目标，明确 50,000 份文档规模下优先解决文档级精确定位，再做片段级检索与证据链
 - 2026-03-11: 新增 `docs/RETRIEVAL_BASELINE.md`，固化当前检索链路、运行边界与失败类型

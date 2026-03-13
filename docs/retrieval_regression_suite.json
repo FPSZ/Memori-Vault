@@ -352,7 +352,7 @@
         "cargo fmt",
         "clippy",
         "test",
-        "npm build"
+        "pnpm build"
       ],
       "profile_tags": [
         "core_docs",

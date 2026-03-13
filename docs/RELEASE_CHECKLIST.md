@@ -17,8 +17,8 @@
 - [ ] 运行 `cargo fmt --all -- --check`
 - [ ] 运行 `cargo clippy --workspace -- -D warnings`
 - [ ] 运行 `cargo test --workspace`
-- [ ] 运行 `npm --prefix ui ci` 或 `npm ci --prefix ui`
-- [ ] 运行 `npm --prefix ui run build`
+- [ ] 运行 `pnpm --dir ui install --frozen-lockfile`
+- [ ] 运行 `pnpm --dir ui run build`
 - [ ] 主 CI（`rust-ci.yml`）已通过
 
 ## 3. 发布关键行为验证
@@ -46,7 +46,7 @@
 
 - `cargo test -p memori-core --lib` 已通过
 - `cargo check -p memori-core -p memori-desktop -p memori-server` 已通过
-- `npm --prefix ui run build` 已通过
+- `pnpm --dir ui run build` 已通过
 - offline regression 已跑通：
   - `offline_deterministic + core_docs`
   - `offline_deterministic + repo_mixed`

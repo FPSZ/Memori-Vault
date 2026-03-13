@@ -88,7 +88,7 @@ cargo run -p memori-server
 
 Start UI:
 ```bash
-npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 ```
 
 For enterprise/private deployment details:
@@ -128,7 +128,7 @@ Before publishing:
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace -- -D warnings`
 - `cargo test --workspace`
-- `npm --prefix ui run build`
+- `pnpm --dir ui run build`
 - Verify version consistency (`workspace`, `tauri.conf.json`, `ui/package.json`).
 - Prepare release notes in `docs/RELEASE_NOTES_v0.3.0.md`.
 

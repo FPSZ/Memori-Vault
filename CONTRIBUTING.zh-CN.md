@@ -37,7 +37,7 @@ English version: [CONTRIBUTING.md](./CONTRIBUTING.md)
 cargo fmt --all -- --check
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
-npm --prefix ui run build
+pnpm --dir ui run build
 ```
 
 ## 5. 本地开发
@@ -45,7 +45,7 @@ npm --prefix ui run build
 桌面模式：
 
 ```bash
-npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 cargo tauri dev -p memori-desktop
 ```
 
@@ -53,7 +53,7 @@ cargo tauri dev -p memori-desktop
 
 ```bash
 cargo run -p memori-server
-npm --prefix ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 ```
 
 ## 6. 运行时原则
