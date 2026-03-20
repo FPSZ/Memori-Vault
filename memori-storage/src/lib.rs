@@ -214,11 +214,14 @@ pub struct InMemoryStore {
 }
 
 mod document;
+mod pool;
 mod schema;
 mod search;
 mod store;
 mod text;
 mod vector;
+
+pub use pool::{ConnectionPool, PooledConnection, PoolError};
 
 pub(crate) use schema::*;
 pub(crate) use text::*;

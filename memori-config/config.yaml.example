@@ -1,0 +1,43 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+storage:
+  database_url: "sqlite:memori.db"
+  pool_size: 4
+
+embedding:
+  model_name: "nomic-embed-text"
+  dimensions: 768
+  api_url: null
+  api_key: null
+
+indexing:
+  mode: "Continuous"
+  resource_budget: "Balanced"
+  max_chunk_size: 1000
+  overlap_size: 200
+  event_debounce_ms: 500
+
+retrieval:
+  top_k: 20
+  rrf_k: 60.0
+  min_score_threshold: 0.3
+  query_cache_size: 256
+  query_cache_ttl_secs: 300
+  dense_weight: 1.0
+  strict_lexical_weight: 0.5
+  broad_lexical_weight: 0.3
+
+llm:
+  provider: "Ollama"
+  model_name: "qwen2.5"
+  api_url: null
+  api_key: null
+  max_tokens: 4096
+  temperature: 0.7
+
+circuit_breaker:
+  failure_threshold: 5
+  recovery_timeout_secs: 30
+  half_open_max_calls: 3
