@@ -1,3 +1,4 @@
+mod circuit_breaker;
 mod engine;
 mod graph_extractor;
 mod indexing;
