@@ -120,6 +120,9 @@ impl ResourceBudget {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RetrievalConfig {
     pub top_k: usize,
+    pub doc_top_k: usize,
+    pub chunk_candidate_k: usize,
+    pub final_answer_k: usize,
     pub rrf_k: f64,
     pub min_score_threshold: f32,
     pub query_cache_size: usize,
@@ -133,6 +136,9 @@ impl Default for RetrievalConfig {
     fn default() -> Self {
         Self {
             top_k: 20,
+            doc_top_k: 12,
+            chunk_candidate_k: 20,
+            final_answer_k: 6,
             rrf_k: 60.0,
             min_score_threshold: 0.3,
             query_cache_size: 256,
