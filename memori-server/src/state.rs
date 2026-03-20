@@ -3,17 +3,35 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
 use memori_core::MemoriEngine;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::Role;
 
 #[derive(Clone)]
 pub(crate) struct ServerState {
-    pub(crate) engine: Arc<Mutex<Option<MemoriEngine>>>,
+    pub(crate) engine: Arc<RwLock<Option<MemoriEngine>>>,
     pub(crate) init_error: Arc<Mutex<Option<String>>>,
-    pub(crate) sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
+    pub(crate) sessions: Arc<RwLock<HashMap<String, SessionInfo>>>,
     pub(crate) metrics: Arc<ServerMetrics>,
     pub(crate) audit_file_lock: Arc<Mutex<()>>,
+}
+
+impl ServerState {
+    pub async fn read_engine(&self) -> tokio::sync::RwLockReadGuard<'_, Option<MemoriEngine>> {
+        self.engine.read().await
+    }
+
+    pub async fn write_engine(&self) -> tokio::sync::RwLockWriteGuard<'_, Option<MemoriEngine>> {
+        self.engine.write().await
+    }
+
+    pub async fn read_sessions(&self) -> tokio::sync::RwLockReadGuard<'_, HashMap<String, SessionInfo>> {
+        self.sessions.read().await
+    }
+
+    pub async fn write_sessions(&self) -> tokio::sync::RwLockWriteGuard<'_, HashMap<String, SessionInfo>> {
+        self.sessions.write().await
+    }
 }
 
 #[derive(Debug, Clone)]

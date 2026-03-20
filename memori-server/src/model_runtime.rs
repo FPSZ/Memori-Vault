@@ -1,33 +1,34 @@
 use crate::*;
 
 pub(crate) async fn replace_engine(
-    engine_slot: &Arc<Mutex<Option<MemoriEngine>>>,
+    engine_slot: &Arc<RwLock<Option<MemoriEngine>>>,
     init_error: &Arc<Mutex<Option<String>>>,
     watch_root: PathBuf,
     reason: &str,
 ) -> Result<(), String> {
-    let previous_engine = {
-        let mut guard = engine_slot.lock().await;
-        guard.take()
-    };
-
-    if let Some(engine) = previous_engine {
-        match timeout(
-            Duration::from_secs(ENGINE_SHUTDOWN_TIMEOUT_SECS),
-            engine.shutdown(),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => {
-                warn!(error = %err, "关闭旧引擎失败，继续尝试重建");
+    {
+        let mut engine_guard = engine_slot.write().await;
+        if let Some(ref engine) = *engine_guard {
+            if let Err(err) = timeout(
+                Duration::from_secs(ENGINE_SHUTDOWN_TIMEOUT_SECS),
+                engine.shutdown(),
+            )
+            .await
+            {
+                match err {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        warn!(error = %err, "关闭旧引擎失败，继续尝试重建");
+                    }
+                    Err(_) => {
+                        warn!(
+                            timeout_secs = ENGINE_SHUTDOWN_TIMEOUT_SECS,
+                            "关闭旧引擎超时，继续尝试重建"
+                        );
+                    }
+                }
             }
-            Err(_) => {
-                warn!(
-                    timeout_secs = ENGINE_SHUTDOWN_TIMEOUT_SECS,
-                    "关闭旧引擎超时，继续尝试重建"
-                );
-            }
+            *engine_guard = None;
         }
     }
 
@@ -51,7 +52,7 @@ pub(crate) async fn replace_engine(
         new_engine.start_daemon().map_err(|err| err.to_string())?;
 
         {
-            let mut guard = engine_slot.lock().await;
+            let mut guard = engine_slot.write().await;
             *guard = Some(new_engine);
         }
         {

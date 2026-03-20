@@ -1,0 +1,14 @@
+[package]
+name = "memori-vector-index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Memori-Vault HNSW 向量索引"
+
+[dependencies]
+thiserror.workspace = true
+serde = { version = "1.0.228", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3.20"

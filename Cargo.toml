@@ -5,6 +5,7 @@ members = [
   "memori-storage",
   "memori-core",
   "memori-config",
+  "memori-vector-index",
   "memori-desktop", "memori-server",
 ]
 resolver = "2"

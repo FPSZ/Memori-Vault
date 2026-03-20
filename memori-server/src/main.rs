@@ -23,7 +23,7 @@ use memori_core::{
     validate_runtime_model_settings,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::{Duration, timeout};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
@@ -89,7 +89,7 @@ async fn main() {
         }
     };
 
-    let engine = Arc::new(Mutex::new(None));
+    let engine = Arc::new(RwLock::new(None));
     let init_error = Arc::new(Mutex::new(None));
     if let Err(err) =
         replace_engine(&engine, &init_error, watch_root.clone(), "server_bootstrap").await
