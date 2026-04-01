@@ -373,6 +373,7 @@ impl SqliteStore {
                 file_name,
                 matched_fields,
                 score,
+                phrase_specific: false,
             });
         }
 
@@ -436,7 +437,7 @@ impl SqliteStore {
                 continue;
             }
 
-            let Some((score, matched_fields)) = score_document_phrase_signal_match(
+            let Some((score, matched_fields, phrase_specific)) = score_document_phrase_signal_match(
                 &phrase_terms,
                 &file_name,
                 &relative_path,
@@ -452,6 +453,7 @@ impl SqliteStore {
                 file_name,
                 matched_fields,
                 score,
+                phrase_specific,
             });
         }
 

@@ -75,6 +75,7 @@ pub(crate) fn merge_document_candidates(
                 has_exact_path_signal: is_exact_path,
                 has_exact_symbol_signal: is_exact_symbol,
                 has_docs_phrase_signal: false,
+                docs_phrase_quality: None,
                 has_filename_signal: is_filename,
                 has_strict_lexical: false,
                 has_broad_lexical: false,
@@ -83,6 +84,7 @@ pub(crate) fn merge_document_candidates(
 
     for (index, doc) in phrase_docs.into_iter().enumerate() {
         let is_code_document = is_code_document_path(&doc.relative_path);
+        let phrase_quality = docs_phrase_quality_from_match(&doc);
         let score = 4.0 / (RRF_K + (index + 1) as f64);
         merged
             .entry(doc.file_path.clone())
@@ -94,6 +96,8 @@ pub(crate) fn merge_document_candidates(
                         .unwrap_or(doc.score as f64),
                 );
                 entry.has_docs_phrase_signal = true;
+                entry.docs_phrase_quality =
+                    max_phrase_quality(entry.docs_phrase_quality, Some(phrase_quality));
                 entry.document_final_score += score;
             })
             .or_insert(DocumentCandidate {
@@ -113,6 +117,7 @@ pub(crate) fn merge_document_candidates(
                 has_exact_path_signal: false,
                 has_exact_symbol_signal: false,
                 has_docs_phrase_signal: true,
+                docs_phrase_quality: Some(phrase_quality),
                 has_filename_signal: false,
                 has_strict_lexical: false,
                 has_broad_lexical: false,
@@ -151,6 +156,7 @@ pub(crate) fn merge_document_candidates(
                 has_exact_path_signal: false,
                 has_exact_symbol_signal: false,
                 has_docs_phrase_signal: false,
+                docs_phrase_quality: None,
                 has_filename_signal: false,
                 has_strict_lexical: true,
                 has_broad_lexical: false,
@@ -192,6 +198,7 @@ pub(crate) fn merge_document_candidates(
                 has_exact_path_signal: false,
                 has_exact_symbol_signal: false,
                 has_docs_phrase_signal: false,
+                docs_phrase_quality: None,
                 has_filename_signal: false,
                 has_strict_lexical: false,
                 has_broad_lexical: true,
@@ -219,8 +226,9 @@ pub(crate) fn merge_document_candidates(
         };
     }
     docs.sort_by(|a, b| {
-        document_reason_priority(&b.document_reason, query_family)
-            .cmp(&document_reason_priority(&a.document_reason, query_family))
+        document_reason_priority(&b.document_reason, b.docs_phrase_quality, query_family).cmp(
+            &document_reason_priority(&a.document_reason, a.docs_phrase_quality, query_family),
+        )
             .then_with(|| {
                 document_type_priority(b.is_code_document, query_family)
                     .cmp(&document_type_priority(a.is_code_document, query_family))
@@ -259,6 +267,29 @@ pub(crate) fn merge_document_candidates(
     docs
 }
 
+pub(crate) fn docs_phrase_quality_from_match(doc: &memori_storage::DocumentSignalMatch) -> PhraseQuality {
+    if doc.phrase_specific {
+        PhraseQuality::Specific
+    } else {
+        PhraseQuality::Generic
+    }
+}
+
+pub(crate) fn max_phrase_quality(
+    left: Option<PhraseQuality>,
+    right: Option<PhraseQuality>,
+) -> Option<PhraseQuality> {
+    match (left, right) {
+        (Some(PhraseQuality::Specific), _) | (_, Some(PhraseQuality::Specific)) => {
+            Some(PhraseQuality::Specific)
+        }
+        (Some(PhraseQuality::Generic), _) | (_, Some(PhraseQuality::Generic)) => {
+            Some(PhraseQuality::Generic)
+        }
+        (None, None) => None,
+    }
+}
+
 pub(crate) fn is_code_document_path(relative_path: &str) -> bool {
     relative_path
         .rsplit_once('.')
@@ -278,7 +309,11 @@ pub(crate) fn document_type_priority(is_code_document: bool, query_family: Query
     }
 }
 
-pub(crate) fn document_reason_priority(reason: &str, query_family: QueryFamily) -> u8 {
+pub(crate) fn document_reason_priority(
+    reason: &str,
+    phrase_quality: Option<PhraseQuality>,
+    query_family: QueryFamily,
+) -> u8 {
     match query_family {
         QueryFamily::ImplementationLookup => match reason {
             "scope" => 8,
@@ -288,29 +323,38 @@ pub(crate) fn document_reason_priority(reason: &str, query_family: QueryFamily) 
             "filename" => 4,
             "lexical_strict" => 3,
             "lexical_broad" => 2,
-            "docs_phrase" => 1,
+            "docs_phrase" => match phrase_quality {
+                Some(PhraseQuality::Specific) => 1,
+                _ => 0,
+            },
             _ => 0,
         },
         QueryFamily::DocsApiLookup => match reason {
             "scope" => 8,
-            "docs_phrase" => 7,
+            "docs_phrase" => match phrase_quality {
+                Some(PhraseQuality::Specific) => 7,
+                _ => 1,
+            },
             "mixed" => 6,
             "lexical_strict" => 5,
             "filename" => 4,
             "exact_path" => 3,
             "lexical_broad" => 2,
-            "exact_symbol" => 1,
+            "exact_symbol" => 0,
             _ => 0,
         },
         QueryFamily::DocsExplanatory => match reason {
             "scope" => 8,
-            "docs_phrase" => 7,
+            "docs_phrase" => match phrase_quality {
+                Some(PhraseQuality::Specific) => 7,
+                _ => 1,
+            },
             "mixed" => 6,
             "lexical_strict" => 5,
             "filename" => 4,
             "exact_path" => 3,
             "lexical_broad" => 2,
-            "exact_symbol" => 1,
+            "exact_symbol" => 0,
             _ => 0,
         },
     }
@@ -346,6 +390,7 @@ pub(crate) fn merge_chunk_evidence(
                 doc.document_raw_score,
                 doc.has_exact_signal,
                 doc.has_docs_phrase_signal,
+                doc.docs_phrase_quality,
                 doc.has_filename_signal,
                 doc.has_strict_lexical,
             ),
@@ -361,6 +406,7 @@ pub(crate) fn merge_chunk_evidence(
             document_raw_score,
             document_has_exact_signal,
             document_has_docs_phrase_signal,
+            document_docs_phrase_quality,
             document_has_filename_signal,
             document_has_strict_lexical,
         )) = doc_rank_by_path.get(&item.file_path).cloned()
@@ -395,6 +441,7 @@ pub(crate) fn merge_chunk_evidence(
                 document_raw_score,
                 document_has_exact_signal,
                 document_has_docs_phrase_signal,
+                document_docs_phrase_quality,
                 document_has_filename_signal,
                 document_has_strict_lexical,
                 lexical_strict_rank: Some(index + 1),
@@ -414,6 +461,7 @@ pub(crate) fn merge_chunk_evidence(
             document_raw_score,
             document_has_exact_signal,
             document_has_docs_phrase_signal,
+            document_docs_phrase_quality,
             document_has_filename_signal,
             document_has_strict_lexical,
         )) = doc_rank_by_path.get(&item.file_path).cloned()
@@ -448,6 +496,7 @@ pub(crate) fn merge_chunk_evidence(
                 document_raw_score,
                 document_has_exact_signal,
                 document_has_docs_phrase_signal,
+                document_docs_phrase_quality,
                 document_has_filename_signal,
                 document_has_strict_lexical,
                 lexical_strict_rank: None,
@@ -468,6 +517,7 @@ pub(crate) fn merge_chunk_evidence(
             document_raw_score,
             document_has_exact_signal,
             document_has_docs_phrase_signal,
+            document_docs_phrase_quality,
             document_has_filename_signal,
             document_has_strict_lexical,
         )) = doc_rank_by_path.get(&file_path).cloned()
@@ -491,6 +541,7 @@ pub(crate) fn merge_chunk_evidence(
                 document_raw_score,
                 document_has_exact_signal,
                 document_has_docs_phrase_signal,
+                document_docs_phrase_quality,
                 document_has_filename_signal,
                 document_has_strict_lexical,
                 lexical_strict_rank: None,
@@ -535,21 +586,69 @@ pub(crate) fn should_refuse_for_insufficient_evidence(
     analysis: &QueryAnalysis,
     evidence: &[MergedEvidence],
 ) -> bool {
+    evaluate_gating_decision(analysis, evidence).refuse
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GatingDecision {
+    refuse: bool,
+    reason: &'static str,
+    top_doc_distinct_term_hits: usize,
+    top_doc_term_coverage: f64,
+    top_doc_phrase_quality: Option<PhraseQuality>,
+}
+
+impl GatingDecision {
+    fn allow(
+        reason: &'static str,
+        top_doc_distinct_term_hits: usize,
+        top_doc_term_coverage: f64,
+        top_doc_phrase_quality: Option<PhraseQuality>,
+    ) -> Self {
+        Self {
+            refuse: false,
+            reason,
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        }
+    }
+
+    fn refuse(
+        reason: &'static str,
+        top_doc_distinct_term_hits: usize,
+        top_doc_term_coverage: f64,
+        top_doc_phrase_quality: Option<PhraseQuality>,
+    ) -> Self {
+        Self {
+            refuse: true,
+            reason,
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        }
+    }
+}
+
+pub(crate) fn evaluate_gating_decision(
+    analysis: &QueryAnalysis,
+    evidence: &[MergedEvidence],
+) -> GatingDecision {
     if evidence.is_empty() {
-        return true;
+        return GatingDecision::refuse("empty_evidence", 0, 0.0, None);
     }
     if matches!(
         analysis.query_intent,
         QueryIntent::ExternalFact | QueryIntent::SecretRequest | QueryIntent::MissingFileLookup
     ) {
-        return true;
+        return GatingDecision::refuse("intent_blocked", 0, 0.0, None);
     }
     if should_force_missing_file_lookup(analysis, evidence) {
-        return true;
+        return GatingDecision::refuse("forced_missing_file_lookup", 0, 0.0, None);
     }
 
     let Some(top) = evidence.first() else {
-        return true;
+        return GatingDecision::refuse("empty_evidence", 0, 0.0, None);
     };
     let top_doc_path = top.chunk.file_path.to_string_lossy().to_string();
     let top_doc_evidence = evidence
@@ -557,19 +656,23 @@ pub(crate) fn should_refuse_for_insufficient_evidence(
         .filter(|item| item.chunk.file_path.to_string_lossy() == top_doc_path)
         .collect::<Vec<_>>();
     let top_doc_count = top_doc_evidence.len();
-    let top_doc_any_lexical = top_doc_evidence
-        .iter()
-        .filter(|item| has_any_chunk_lexical(item))
-        .count();
+    let (top_doc_distinct_term_hits, top_doc_term_coverage) =
+        compute_top_doc_term_coverage(analysis, &top_doc_evidence);
     let top_doc_strict_lexical = top_doc_evidence
         .iter()
         .filter(|item| item.lexical_strict_rank.is_some())
         .count();
     let query_is_long =
         analysis.normalized_query.chars().count() >= 8 || analysis.flags.token_count >= 3;
+    let top_doc_phrase_quality = top.document_docs_phrase_quality;
 
     if top.lexical_strict_rank.is_some() && top_doc_count >= 2 && has_strong_document_signal(top) {
-        return false;
+        return GatingDecision::allow(
+            "strict_lexical_with_document_signal",
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        );
     }
 
     if top.document_rank == 1
@@ -577,17 +680,30 @@ pub(crate) fn should_refuse_for_insufficient_evidence(
         && has_any_chunk_lexical(top)
         && evidence.len() >= 2
     {
-        return false;
+        return GatingDecision::allow(
+            "top_ranked_document_signal",
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        );
     }
 
     if matches!(
         analysis.query_family,
         QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup
     ) && top.document_rank <= 3
-        && (top.document_has_docs_phrase_signal || top.document_has_strict_lexical)
+        && (matches!(
+            top.document_docs_phrase_quality,
+            Some(PhraseQuality::Specific)
+        ) || top.document_has_strict_lexical)
         && evidence.iter().take(2).any(has_any_chunk_lexical)
     {
-        return false;
+        return GatingDecision::allow(
+            "docs_family_signal",
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        );
     }
 
     if analysis.flags.is_lookup_like
@@ -595,18 +711,95 @@ pub(crate) fn should_refuse_for_insufficient_evidence(
         && has_any_chunk_lexical(top)
         && top_doc_count >= 2
     {
-        return false;
+        return GatingDecision::allow(
+            "lookup_filename_signal",
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        );
     }
 
-    if !analysis.flags.is_lookup_like && top_doc_any_lexical >= 2 && top.document_rank <= 3 {
-        return false;
+    if !analysis.flags.is_lookup_like
+        && top.document_rank <= 3
+        && top_doc_distinct_term_hits >= 2
+        && top_doc_term_coverage >= 0.5
+    {
+        return GatingDecision::allow(
+            "coverage_release",
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        );
     }
 
     if top_doc_count >= 2 && top_doc_strict_lexical >= 1 && has_strong_document_signal(top) {
-        return false;
+        return GatingDecision::allow(
+            "strict_lexical_document_consensus",
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        );
     }
 
-    !has_any_chunk_lexical(top) && top.dense_rank.is_some() && query_is_long
+    if !has_any_chunk_lexical(top) && top.dense_rank.is_some() && query_is_long {
+        return GatingDecision::refuse(
+            "dense_only_long_query",
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        );
+    }
+
+    GatingDecision::refuse(
+        "insufficient_evidence",
+        top_doc_distinct_term_hits,
+        top_doc_term_coverage,
+        top_doc_phrase_quality,
+    )
+}
+
+pub(crate) fn apply_gating_metrics(
+    metrics: &mut RetrievalMetrics,
+    analysis: &QueryAnalysis,
+    evidence: &[MergedEvidence],
+) -> bool {
+    let decision = evaluate_gating_decision(analysis, evidence);
+    metrics.top_doc_distinct_term_hits = decision.top_doc_distinct_term_hits;
+    metrics.top_doc_term_coverage = decision.top_doc_term_coverage;
+    metrics.gating_decision_reason = decision.reason.to_string();
+    metrics.docs_phrase_quality = decision
+        .top_doc_phrase_quality
+        .map(PhraseQuality::as_str)
+        .unwrap_or("none")
+        .to_string();
+    decision.refuse
+}
+
+pub(crate) fn compute_top_doc_term_coverage(
+    analysis: &QueryAnalysis,
+    top_doc_evidence: &[&MergedEvidence],
+) -> (usize, f64) {
+    let support_terms = analysis.support_terms.as_slice();
+    let support_count = support_terms.len().max(1);
+    let top_doc_text = top_doc_evidence
+        .iter()
+        .map(|item| {
+            (
+                item.chunk.content.to_ascii_lowercase(),
+                item.chunk.heading_path.join(" / ").to_ascii_lowercase(),
+                item.chunk.file_path.to_string_lossy().to_ascii_lowercase(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let distinct_hits = support_terms
+        .iter()
+        .filter(|term| {
+            top_doc_text.iter().any(|(content, heading, file_path)| {
+                chunk_text_contains_term(content, heading, file_path, term)
+            })
+        })
+        .count();
+    (distinct_hits, distinct_hits as f64 / support_count as f64)
 }
 
 pub(crate) fn has_any_chunk_lexical(item: &MergedEvidence) -> bool {
@@ -615,7 +808,10 @@ pub(crate) fn has_any_chunk_lexical(item: &MergedEvidence) -> bool {
 
 pub(crate) fn has_strong_document_signal(item: &MergedEvidence) -> bool {
     item.document_has_exact_signal
-        || item.document_has_docs_phrase_signal
+        || matches!(
+            item.document_docs_phrase_quality,
+            Some(PhraseQuality::Specific)
+        )
         || item.document_has_filename_signal
         || item.document_has_strict_lexical
         || item.document_reason == "scope"
@@ -858,6 +1054,8 @@ pub(crate) fn build_merged_evidence_from_items(items: &[EvidenceItem]) -> Vec<Me
                 "exact_path" | "exact_symbol"
             ),
             document_has_docs_phrase_signal: item.document_reason == "docs_phrase",
+            document_docs_phrase_quality: (item.document_reason == "docs_phrase")
+                .then_some(PhraseQuality::Generic),
             document_has_filename_signal: matches!(
                 item.document_reason.as_str(),
                 "filename" | "mixed"
@@ -884,6 +1082,8 @@ pub(crate) fn prepare_query_for_retrieval(question: &str) -> QueryPreparation {
     let mut metrics = RetrievalMetrics {
         query_analysis_ms: elapsed_ms_u64(query_analysis_started_at),
         query_flags: query_flags_as_labels(&analysis),
+        gating_decision_reason: "not_evaluated".to_string(),
+        docs_phrase_quality: "none".to_string(),
         ..RetrievalMetrics::default()
     };
     metrics

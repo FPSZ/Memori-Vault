@@ -83,6 +83,10 @@ export type RetrievalMetrics = {
   doc_candidate_count: number;
   chunk_candidate_count: number;
   final_evidence_count: number;
+  top_doc_distinct_term_hits?: number;
+  top_doc_term_coverage?: number;
+  gating_decision_reason?: string;
+  docs_phrase_quality?: string;
   query_flags: string[];
 };
 

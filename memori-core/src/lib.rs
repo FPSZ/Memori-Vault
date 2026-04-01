@@ -222,6 +222,10 @@ pub struct RetrievalMetrics {
     pub doc_candidate_count: usize,
     pub chunk_candidate_count: usize,
     pub final_evidence_count: usize,
+    pub top_doc_distinct_term_hits: usize,
+    pub top_doc_term_coverage: f64,
+    pub gating_decision_reason: String,
+    pub docs_phrase_quality: String,
     pub query_flags: Vec<String>,
 }
 
@@ -281,6 +285,7 @@ struct DocumentCandidate {
     has_exact_path_signal: bool,
     has_exact_symbol_signal: bool,
     has_docs_phrase_signal: bool,
+    docs_phrase_quality: Option<PhraseQuality>,
     has_filename_signal: bool,
     has_strict_lexical: bool,
     has_broad_lexical: bool,
@@ -295,6 +300,7 @@ struct MergedEvidence {
     document_raw_score: Option<f64>,
     document_has_exact_signal: bool,
     document_has_docs_phrase_signal: bool,
+    document_docs_phrase_quality: Option<PhraseQuality>,
     document_has_filename_signal: bool,
     document_has_strict_lexical: bool,
     lexical_strict_rank: Option<usize>,
@@ -303,6 +309,21 @@ struct MergedEvidence {
     dense_rank: Option<usize>,
     dense_raw_score: Option<f32>,
     final_score: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PhraseQuality {
+    Specific,
+    Generic,
+}
+
+impl PhraseQuality {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Specific => "specific",
+            Self::Generic => "generic",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -350,6 +371,7 @@ struct QueryAnalysis {
     document_routing_terms: Vec<String>,
     docs_phrase_terms: Vec<String>,
     chunk_terms: Vec<String>,
+    support_terms: Vec<String>,
     filename_like_terms: Vec<String>,
     identifier_terms: Vec<String>,
     query_intent: QueryIntent,
@@ -888,8 +910,9 @@ mod tests {
         AppState, AskStatus, EgressMode, EngineError, EnterpriseModelPolicy, MemoriEngine,
         MergedEvidence, ModelProvider, QueryFamily, QueryIntent, RuntimeModelConfig, WatchEvent,
         WatchEventKind, analyze_query, build_citations, document_signal_query,
-        is_implementation_lookup, merge_document_candidates, process_file_event,
-        should_refuse_for_insufficient_evidence, validate_runtime_model_settings,
+        apply_gating_metrics, has_strong_document_signal, is_implementation_lookup,
+        merge_document_candidates, process_file_event, should_refuse_for_insufficient_evidence,
+        validate_runtime_model_settings,
     };
     use memori_parser::DocumentChunk;
     use memori_storage::RebuildState;
@@ -993,6 +1016,7 @@ mod tests {
                 document_raw_score: Some(1.0),
                 document_has_exact_signal: false,
                 document_has_docs_phrase_signal: false,
+                document_docs_phrase_quality: None,
                 document_has_filename_signal: false,
                 document_has_strict_lexical: true,
                 lexical_strict_rank: Some(1),
@@ -1016,6 +1040,7 @@ mod tests {
                 document_raw_score: Some(0.9),
                 document_has_exact_signal: false,
                 document_has_docs_phrase_signal: false,
+                document_docs_phrase_quality: None,
                 document_has_filename_signal: false,
                 document_has_strict_lexical: true,
                 lexical_strict_rank: Some(2),
@@ -1381,6 +1406,20 @@ mod tests {
     }
 
     #[test]
+    fn analyze_query_extracts_support_terms_for_descriptive_cjk_questions() {
+        let analysis = analyze_query("新增的岗位是什么");
+        assert!(analysis.support_terms.iter().any(|term| term == "新增"));
+        assert!(analysis.support_terms.iter().any(|term| term == "岗位"));
+        assert!(!analysis.support_terms.iter().any(|term| term == "是什么"));
+        assert!(
+            !analysis
+                .support_terms
+                .iter()
+                .any(|term| term == "新增的岗位是什么")
+        );
+    }
+
+    #[test]
     fn classify_query_intent_marks_external_and_secret_queries() {
         assert_eq!(
             analyze_query("CEO of OpenAI").query_intent,
@@ -1436,6 +1475,7 @@ mod tests {
                 file_name: "week8_report.md".to_string(),
                 matched_fields: vec!["file_name".to_string()],
                 score: 120,
+                phrase_specific: false,
             }],
             Vec::new(),
             Vec::new(),
@@ -1465,6 +1505,7 @@ mod tests {
                 file_name: "lib.rs".to_string(),
                 matched_fields: vec!["exact_symbol".to_string()],
                 score: 160,
+                phrase_specific: false,
             }],
             Vec::new(),
             Vec::new(),
@@ -1495,6 +1536,7 @@ mod tests {
                 file_name: "enterprise.md".to_string(),
                 matched_fields: vec!["docs_phrase".to_string()],
                 score: 180,
+                phrase_specific: true,
             }],
             Vec::new(),
             vec![memori_storage::FtsDocumentMatch {
@@ -1510,6 +1552,66 @@ mod tests {
 
         assert_eq!(merged[0].relative_path, "docs/enterprise.md");
         assert_eq!(merged[0].document_reason, "docs_phrase");
+    }
+
+    #[test]
+    fn document_merge_demotes_generic_docs_phrase_for_docs_queries() {
+        let analysis = analyze_query("岗位是什么");
+        let merged = merge_document_candidates(
+            &analysis,
+            Vec::new(),
+            vec![memori_storage::DocumentSignalMatch {
+                file_path: "docs/overview.md".to_string(),
+                relative_path: "docs/overview.md".to_string(),
+                file_name: "overview.md".to_string(),
+                matched_fields: vec!["docs_phrase".to_string()],
+                score: 120,
+                phrase_specific: false,
+            }],
+            vec![memori_storage::FtsDocumentMatch {
+                doc_id: 1,
+                file_path: "docs/hiring.md".to_string(),
+                relative_path: "docs/hiring.md".to_string(),
+                file_name: "hiring.md".to_string(),
+                score: 1.2,
+                heading_catalog_text: "招聘计划".to_string(),
+                document_search_text: "新增 12 个岗位".to_string(),
+            }],
+            Vec::new(),
+        );
+
+        assert_eq!(merged[0].relative_path, "docs/hiring.md");
+        assert_eq!(merged[0].document_reason, "lexical_strict");
+    }
+
+    #[test]
+    fn generic_docs_phrase_is_not_treated_as_strong_signal() {
+        let item = MergedEvidence {
+            chunk: DocumentChunk {
+                file_path: PathBuf::from("docs/overview.md"),
+                content: "岗位概览".to_string(),
+                chunk_index: 0,
+                heading_path: vec!["概览".to_string()],
+                block_kind: memori_parser::ChunkBlockKind::Paragraph,
+            },
+            relative_path: "docs/overview.md".to_string(),
+            document_reason: "docs_phrase".to_string(),
+            document_rank: 1,
+            document_raw_score: Some(1.0),
+            document_has_exact_signal: false,
+            document_has_docs_phrase_signal: true,
+            document_docs_phrase_quality: Some(super::PhraseQuality::Generic),
+            document_has_filename_signal: false,
+            document_has_strict_lexical: false,
+            lexical_strict_rank: None,
+            lexical_broad_rank: Some(1),
+            lexical_raw_score: Some(0.8),
+            dense_rank: None,
+            dense_raw_score: None,
+            final_score: 1.0,
+        };
+
+        assert!(!has_strong_document_signal(&item));
     }
 
     #[test]
@@ -1550,6 +1652,7 @@ mod tests {
                 document_raw_score: Some(1.0),
                 document_has_exact_signal: false,
                 document_has_docs_phrase_signal: false,
+                document_docs_phrase_quality: None,
                 document_has_filename_signal: true,
                 document_has_strict_lexical: false,
                 lexical_strict_rank: Some(1),
@@ -1573,6 +1676,7 @@ mod tests {
                 document_raw_score: Some(1.0),
                 document_has_exact_signal: false,
                 document_has_docs_phrase_signal: false,
+                document_docs_phrase_quality: None,
                 document_has_filename_signal: true,
                 document_has_strict_lexical: false,
                 lexical_strict_rank: Some(2),
@@ -1606,6 +1710,7 @@ mod tests {
             document_raw_score: Some(0.2),
             document_has_exact_signal: false,
             document_has_docs_phrase_signal: false,
+            document_docs_phrase_quality: None,
             document_has_filename_signal: false,
             document_has_strict_lexical: false,
             lexical_strict_rank: None,
@@ -1619,6 +1724,42 @@ mod tests {
         assert!(should_refuse_for_insufficient_evidence(
             &analysis, &evidence
         ));
+    }
+
+    #[test]
+    fn non_lookup_coverage_release_populates_metrics() {
+        let analysis = analyze_query("新增的岗位是什么");
+        let evidence = vec![super::MergedEvidence {
+            chunk: DocumentChunk {
+                file_path: PathBuf::from("docs/hiring.md"),
+                content: "研发中心计划新增 12 个岗位，岗位包括后端与前端".to_string(),
+                chunk_index: 0,
+                heading_path: vec!["招聘计划".to_string()],
+                block_kind: memori_parser::ChunkBlockKind::Paragraph,
+            },
+            relative_path: "docs/hiring.md".to_string(),
+            document_reason: "lexical_broad".to_string(),
+            document_rank: 1,
+            document_raw_score: Some(0.8),
+            document_has_exact_signal: false,
+            document_has_docs_phrase_signal: false,
+            document_docs_phrase_quality: None,
+            document_has_filename_signal: false,
+            document_has_strict_lexical: false,
+            lexical_strict_rank: None,
+            lexical_broad_rank: Some(1),
+            lexical_raw_score: Some(0.6),
+            dense_rank: None,
+            dense_raw_score: None,
+            final_score: 1.0,
+        }];
+
+        let mut metrics = RetrievalMetrics::default();
+        let refused = apply_gating_metrics(&mut metrics, &analysis, &evidence);
+        assert!(!refused);
+        assert_eq!(metrics.gating_decision_reason, "coverage_release");
+        assert!(metrics.top_doc_distinct_term_hits >= 2);
+        assert!(metrics.top_doc_term_coverage >= 0.5);
     }
 
     #[test]
@@ -1638,6 +1779,7 @@ mod tests {
             document_raw_score: Some(0.1),
             document_has_exact_signal: false,
             document_has_docs_phrase_signal: false,
+            document_docs_phrase_quality: None,
             document_has_filename_signal: false,
             document_has_strict_lexical: false,
             lexical_strict_rank: None,

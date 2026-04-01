@@ -163,6 +163,8 @@ pub struct DocumentSignalMatch {
     pub file_name: String,
     pub matched_fields: Vec<String>,
     pub score: i64,
+    #[serde(default)]
+    pub phrase_specific: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,6 +236,7 @@ mod tests {
     use super::{
         CatalogEntry, INDEX_FORMAT_VERSION, RebuildState, SqliteStore, build_document_search_text,
         extract_fts_terms, extract_phrase_signal_terms, extract_signal_terms,
+        is_specific_phrase_signal_term,
     };
     use crate::VectorStore;
     use memori_parser::DocumentChunk;
@@ -659,6 +662,30 @@ mod tests {
 
         let docs_terms = extract_phrase_signal_terms("How do you start server mode?");
         assert!(docs_terms.iter().any(|term| term == "start server mode"));
+    }
+
+    #[test]
+    fn cjk_term_extractors_strip_question_tail_and_fillers() {
+        let fts_terms = extract_fts_terms("新增的岗位是什么");
+        assert!(fts_terms.iter().any(|term| term == "新增"));
+        assert!(fts_terms.iter().any(|term| term == "岗位"));
+        assert!(!fts_terms.iter().any(|term| term == "是什么"));
+
+        let signal_terms = extract_signal_terms("这个系统是做什么的");
+        assert!(signal_terms.iter().any(|term| term == "这个系统"));
+
+        let phrase_terms = extract_phrase_signal_terms("新增的岗位是什么");
+        assert!(phrase_terms.iter().any(|term| term == "新增岗位"));
+        assert!(!phrase_terms.iter().any(|term| term == "新增的岗位是什么"));
+    }
+
+    #[test]
+    fn phrase_specificity_boundaries_are_stable() {
+        assert!(!is_specific_phrase_signal_term("岗位"));
+        assert!(is_specific_phrase_signal_term("新增岗位"));
+        assert!(!is_specific_phrase_signal_term("api"));
+        assert!(is_specific_phrase_signal_term("server"));
+        assert!(is_specific_phrase_signal_term("post /api/auth"));
     }
 
     #[tokio::test]

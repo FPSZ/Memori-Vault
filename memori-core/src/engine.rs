@@ -283,7 +283,7 @@ impl MemoriEngine {
         metrics.merge_ms = elapsed_ms_u64(merge_started_at);
         metrics.chunk_candidate_count = merged.len();
 
-        if should_refuse_for_insufficient_evidence(&analysis, &merged) {
+        if apply_gating_metrics(&mut metrics, &analysis, &merged) {
             return Ok(RetrievalInspection {
                 status: AskStatus::InsufficientEvidence,
                 question,
@@ -393,6 +393,7 @@ impl MemoriEngine {
                             has_exact_path_signal: false,
                             has_exact_symbol_signal: false,
                             has_docs_phrase_signal: false,
+                            docs_phrase_quality: None,
                             has_filename_signal: false,
                             has_strict_lexical: true,
                             has_broad_lexical: true,

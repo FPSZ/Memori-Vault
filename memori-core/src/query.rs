@@ -14,6 +14,7 @@ const CJK_QUESTION_SUFFIXES: &[&str] = &[
     "在哪",
     "谁",
 ];
+const CJK_FILLER_CHARS: &[char] = &['的', '了', '吗', '呢', '啊', '吧', '呀', '嘛', '么', '是'];
 
 pub(crate) fn analyze_query(query: &str) -> QueryAnalysis {
     let normalized_query = query.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -89,6 +90,7 @@ pub(crate) fn analyze_query(query: &str) -> QueryAnalysis {
         &flags,
     );
     let docs_phrase_terms = extract_docs_phrase_terms(&raw_tokens, &document_terms, query_family);
+    let support_terms = extract_query_support_terms(&raw_tokens, &lexical_terms);
 
     QueryAnalysis {
         normalized_query: normalized_query.clone(),
@@ -100,6 +102,7 @@ pub(crate) fn analyze_query(query: &str) -> QueryAnalysis {
         },
         docs_phrase_terms,
         chunk_terms: lexical_terms,
+        support_terms,
         filename_like_terms: filename_terms,
         identifier_terms,
         query_intent,
@@ -203,25 +206,187 @@ pub(crate) fn extract_cjk_query_phrases(token: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    let mut phrases = Vec::new();
+    let stripped_tail = strip_cjk_question_tail(trimmed);
+    let mut seeds = Vec::new();
     if !is_cjk_question_phrase(trimmed) {
-        phrases.push(trimmed.to_string());
+        seeds.push(trimmed.to_string());
+    }
+    if !stripped_tail.is_empty() && !is_cjk_question_phrase(&stripped_tail) {
+        seeds.push(stripped_tail.clone());
+    }
+    seeds.extend(extract_cjk_prefix_backoff_terms(&stripped_tail));
+    seeds.extend(extract_cjk_prefix_backoff_terms(trimmed));
+
+    let mut phrases = Vec::new();
+    let mut seen = HashMap::<String, ()>::new();
+    for seed in seeds {
+        for phrase in cjk_phrase_variants(&seed) {
+            if is_valid_query_term(&phrase) && !is_cjk_question_phrase(&phrase) {
+                insert_unique_term(&mut seen, &mut phrases, &phrase);
+            }
+        }
+    }
+    phrases
+}
+
+pub(crate) fn extract_query_support_terms(
+    raw_tokens: &[String],
+    lexical_terms: &[String],
+) -> Vec<String> {
+    let mut support_terms = Vec::new();
+    let mut seen = HashMap::<String, ()>::new();
+
+    for term in lexical_terms {
+        if term.chars().any(is_cjk) {
+            continue;
+        }
+        if is_direct_lexical_support_like_term(term) {
+            insert_unique_term(&mut seen, &mut support_terms, term);
+        }
     }
 
-    for suffix in CJK_QUESTION_SUFFIXES {
-        if trimmed.ends_with(suffix) {
-            let candidate = trimmed.trim_end_matches(suffix).trim().to_string();
-            if candidate.chars().count() >= 2 {
-                phrases.push(candidate);
+    for token in raw_tokens {
+        if !token.chars().any(is_cjk) {
+            continue;
+        }
+        let cjk_with_digits = token
+            .chars()
+            .filter(|ch| is_cjk(*ch) || ch.is_ascii_digit())
+            .collect::<String>();
+        if cjk_with_digits.is_empty() {
+            continue;
+        }
+        for term in cjk_phrase_variants(&cjk_with_digits) {
+            let normalized = strip_cjk_question_tail(&term);
+            if normalized != term {
+                continue;
+            }
+            if normalized.chars().any(is_cjk) && normalized.chars().any(is_cjk_filler_char) {
+                continue;
+            }
+            if is_direct_lexical_support_like_term(&normalized) {
+                insert_unique_term(&mut seen, &mut support_terms, &normalized);
             }
         }
     }
 
-    for candidate in extract_cjk_prefix_backoff_terms(trimmed) {
-        phrases.push(candidate);
+    support_terms
+}
+
+pub(crate) fn cjk_phrase_variants(token: &str) -> Vec<String> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
     }
 
-    phrases
+    let stripped = strip_cjk_question_tail(trimmed);
+    let compacted = compact_cjk_phrase(&stripped);
+    let mut variants = Vec::new();
+    let mut seen = HashMap::<String, ()>::new();
+
+    for candidate in [trimmed.to_string(), stripped, compacted] {
+        if is_valid_query_term(&candidate) && !is_cjk_question_phrase(&candidate) {
+            insert_unique_term(&mut seen, &mut variants, &candidate);
+        }
+    }
+    for segment in split_cjk_phrase_on_fillers(trimmed) {
+        if is_valid_query_term(&segment) && !is_cjk_question_phrase(&segment) {
+            insert_unique_term(&mut seen, &mut variants, &segment);
+        }
+    }
+
+    variants
+}
+
+pub(crate) fn strip_cjk_question_tail(token: &str) -> String {
+    let mut current = token.trim().to_string();
+    if current.is_empty() {
+        return current;
+    }
+
+    loop {
+        let mut changed = false;
+        let trimmed_edges = trim_cjk_filler_edges(&current);
+        if trimmed_edges != current {
+            current = trimmed_edges;
+            changed = true;
+        }
+
+        if let Some(next) = strip_cjk_question_suffix_once(&current) {
+            current = next;
+            continue;
+        }
+
+        if !changed {
+            break;
+        }
+    }
+
+    current
+}
+
+pub(crate) fn strip_cjk_question_suffix_once(token: &str) -> Option<String> {
+    for suffix in CJK_QUESTION_SUFFIXES {
+        if token.ends_with(suffix) {
+            return Some(token.trim_end_matches(suffix).trim().to_string());
+        }
+    }
+    None
+}
+
+pub(crate) fn trim_cjk_filler_edges(token: &str) -> String {
+    token
+        .trim()
+        .trim_matches(|ch| is_cjk_filler_char(ch))
+        .trim()
+        .to_string()
+}
+
+pub(crate) fn compact_cjk_phrase(token: &str) -> String {
+    token
+        .chars()
+        .filter(|ch| (is_cjk(*ch) || ch.is_ascii_digit()) && !is_cjk_filler_char(*ch))
+        .collect::<String>()
+}
+
+pub(crate) fn split_cjk_phrase_on_fillers(token: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut seen = HashMap::<String, ()>::new();
+
+    for ch in token.chars() {
+        if is_cjk_filler_char(ch) || !is_cjk_or_digit(ch) {
+            if current.chars().count() >= 2 {
+                insert_unique_term(&mut seen, &mut segments, &current);
+            }
+            current.clear();
+            continue;
+        }
+        current.push(ch);
+    }
+
+    if current.chars().count() >= 2 {
+        insert_unique_term(&mut seen, &mut segments, &current);
+    }
+
+    segments
+}
+
+pub(crate) fn is_cjk_or_digit(ch: char) -> bool {
+    is_cjk(ch) || ch.is_ascii_digit()
+}
+
+pub(crate) fn is_cjk_filler_char(ch: char) -> bool {
+    CJK_FILLER_CHARS.contains(&ch)
+}
+
+pub(crate) fn is_direct_lexical_support_like_term(term: &str) -> bool {
+    term.chars().any(is_cjk)
+        || term.chars().any(|ch| ch.is_ascii_digit())
+        || term
+            .chars()
+            .any(|ch| matches!(ch, '.' | '/' | '\\' | '_' | '-'))
+        || term.chars().count() >= 6
 }
 
 pub(crate) fn is_cjk_question_phrase(token: &str) -> bool {
@@ -349,7 +514,7 @@ pub(crate) fn extract_docs_phrase_terms(
 
     let filtered_tokens = raw_tokens
         .iter()
-        .map(|token| normalize_ascii_token(token))
+        .map(|token| normalize_docs_phrase_token(token))
         .filter(|token| is_valid_query_term(token) && !is_english_stopword(token))
         .collect::<Vec<_>>();
 
@@ -399,6 +564,29 @@ pub(crate) fn has_ascii_camel_case(token: &str) -> bool {
         };
         left.is_ascii_lowercase() && right.is_ascii_uppercase()
     })
+}
+
+pub(crate) fn normalize_docs_phrase_token(token: &str) -> String {
+    let normalized = normalize_ascii_token(token);
+    if !normalized.chars().any(is_cjk) {
+        return normalized;
+    }
+    let cjk_with_digits = normalized
+        .chars()
+        .filter(|ch| is_cjk(*ch) || ch.is_ascii_digit())
+        .collect::<String>();
+    if cjk_with_digits.is_empty() {
+        return normalized;
+    }
+    let stripped = strip_cjk_question_tail(&cjk_with_digits);
+    let compacted = compact_cjk_phrase(&stripped);
+    if !compacted.is_empty() {
+        compacted
+    } else if !stripped.is_empty() {
+        stripped
+    } else {
+        cjk_with_digits
+    }
 }
 
 pub(crate) fn insert_unique_term(
