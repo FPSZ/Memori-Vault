@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use memori_storage::{GraphEdge, GraphNode};
 use serde::{Deserialize, Serialize};
 
-use crate::{EngineError, ModelProvider, resolve_runtime_model_config_from_env};
+use crate::{EngineError, resolve_runtime_model_config_from_env};
 
 const GRAPH_TEMPERATURE: f32 = 0.0;
 
@@ -16,28 +16,9 @@ pub struct GraphData {
 }
 
 #[derive(Debug, Serialize)]
-struct OllamaChatRequest<'a> {
-    model: &'a str,
-    stream: bool,
-    format: &'a str,
-    options: OllamaChatOptions,
-    messages: Vec<OllamaMessage<'a>>,
-}
-
-#[derive(Debug, Serialize)]
-struct OllamaChatOptions {
-    temperature: f32,
-}
-
-#[derive(Debug, Serialize)]
 struct OllamaMessage<'a> {
     role: &'a str,
     content: &'a str,
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaChatResponse {
-    message: OllamaMessageResponse,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,40 +90,22 @@ pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError
         },
     ];
 
-    let response = if runtime.provider == ModelProvider::OllamaLocal {
-        let endpoint = format!("{}/api/chat", runtime.endpoint.trim_end_matches('/'));
-        client
-            .post(endpoint)
-            .json(&OllamaChatRequest {
-                model: &model,
-                stream: false,
-                format: "json",
-                options: OllamaChatOptions {
-                    temperature: GRAPH_TEMPERATURE,
-                },
-                messages,
-            })
-            .send()
-            .await
-            .map_err(EngineError::GraphExtractRequest)?
-    } else {
-        let endpoint = format!(
-            "{}/v1/chat/completions",
-            runtime.endpoint.trim_end_matches('/')
-        );
-        let mut request = client.post(endpoint).json(&OpenAiChatCompletionRequest {
-            model: &model,
-            temperature: GRAPH_TEMPERATURE,
-            messages,
-        });
-        if let Some(key) = runtime.api_key.as_ref() {
-            request = request.bearer_auth(key);
-        }
-        request
-            .send()
-            .await
-            .map_err(EngineError::GraphExtractRequest)?
-    };
+    let endpoint = format!(
+        "{}/v1/chat/completions",
+        runtime.graph_endpoint.trim_end_matches('/')
+    );
+    let mut request = client.post(endpoint).json(&OpenAiChatCompletionRequest {
+        model: &model,
+        temperature: GRAPH_TEMPERATURE,
+        messages,
+    });
+    if let Some(key) = runtime.api_key.as_ref() {
+        request = request.bearer_auth(key);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(EngineError::GraphExtractRequest)?;
 
     let status = response.status();
     if !status.is_success() {
@@ -156,24 +119,16 @@ pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError
         });
     }
 
-    let raw_content = if runtime.provider == ModelProvider::OllamaLocal {
-        let parsed: OllamaChatResponse = response
-            .json()
-            .await
-            .map_err(EngineError::GraphExtractDeserialize)?;
-        parsed.message.content
-    } else {
-        let parsed: OpenAiChatCompletionResponse = response
-            .json()
-            .await
-            .map_err(EngineError::GraphExtractDeserialize)?;
-        parsed
-            .choices
-            .into_iter()
-            .next()
-            .map(|c| c.message.content)
-            .unwrap_or_default()
-    };
+    let parsed: OpenAiChatCompletionResponse = response
+        .json()
+        .await
+        .map_err(EngineError::GraphExtractDeserialize)?;
+    let raw_content = parsed
+        .choices
+        .into_iter()
+        .next()
+        .map(|c| c.message.content)
+        .unwrap_or_default();
 
     parse_graph_data(&raw_content)
 }

@@ -16,6 +16,28 @@ const CJK_QUESTION_SUFFIXES: &[&str] = &[
 ];
 const CJK_FILLER_CHARS: &[char] = &['的', '了', '吗', '呢', '啊', '吧', '呀', '嘛', '么', '是'];
 
+/// 中文技术文档高频噪声词：这些词在几乎所有文档中都会出现，
+/// 如果作为 strict lexical hit 会严重污染 rankings。
+/// 它们在 support_terms 中被过滤，在 direct_chunk_lexical_signal 中只算 broad hit。
+pub(crate) const CJK_DOC_NOISE_TERMS: &[&str] = &[
+    "新增", "添加", "更新", "修改", "删除", "移除",
+    "功能", "特性", "支持", "使用", "启用", "禁用",
+    "配置", "设置", "方法", "函数", "文件",
+    "说明", "描述", "介绍", "文档",
+    "问题", "错误", "修复", "解决", "优化",
+    "实现", "创建", "生成", "构建",
+    "数据", "信息", "内容",
+    "用户", "系统", "应用", "程序", "项目", "代码",
+    "需要", "可以", "通过", "进行",
+    "确保", "验证", "检查", "测试",
+    "默认", "自动", "手动",
+    "主要", "重要", "关键", "核心",
+    "基本", "标准", "规范", "规则",
+    "步骤", "过程", "结果",
+    "相关", "包含", "包括",
+    "基于", "根据", "按照",
+];
+
 pub(crate) fn analyze_query(query: &str) -> QueryAnalysis {
     let normalized_query = query.split_whitespace().collect::<Vec<_>>().join(" ");
     let raw_tokens = extract_query_tokens(&normalized_query);
@@ -262,6 +284,9 @@ pub(crate) fn extract_query_support_terms(
                 continue;
             }
             if normalized.chars().any(is_cjk) && normalized.chars().any(is_cjk_filler_char) {
+                continue;
+            }
+            if CJK_DOC_NOISE_TERMS.contains(&normalized.as_str()) {
                 continue;
             }
             if is_direct_lexical_support_like_term(&normalized) {

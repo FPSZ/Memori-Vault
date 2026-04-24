@@ -1,122 +1,91 @@
 # Memori-Vault
 
-English: current page  
-中文文档: [README.zh-CN.md](./README.zh-CN.md)  
-Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md) | [中文贡献指南](./CONTRIBUTING.zh-CN.md)
-Tutorial: [docs/TUTORIAL.md](./docs/TUTORIAL.md) | 中文辅助: [docs/TUTORIAL.zh-CN.md](./docs/TUTORIAL.zh-CN.md)
-
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-111111?style=flat-square)](./LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/Rust-1.85%2B-111111?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![CI](https://img.shields.io/github/actions/workflow/status/FPSZ/Memori-Vault/rust-ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/FPSZ/Memori-Vault/actions/workflows/rust-ci.yml)
 
-Memori-Vault is a local-first memory engine for personal and team knowledge.
-It combines semantic chunking, vector retrieval, and asynchronous Graph-RAG extraction on Ollama + SQLite, while keeping first-answer speed stable under background indexing.
+**Local-first verifiable memory engine.**  
+Your documents stay on your machine. Every answer tells you exactly where it came from.
 
-## Highlights (Current)
+[中文文档](./README.zh-CN.md) · [Contributing](./CONTRIBUTING.md) · [Tutorial](./docs/TUTORIAL.md)
 
-- Local-first ingestion pipeline (`.md` / `.txt`) with watcher + semantic chunking.
-- Structured retrieval pipeline with document routing, chunk retrieval, citations, and evidence output.
-- Async indexing refactor:
-  - fast path for searchable chunks first
-  - deferred graph build in background queue
-- Indexing strategy controls:
-  - `continuous | manual | scheduled`
-  - resource budget `low | balanced | fast`
-  - pause/resume + trigger reindex
-- Settings center (right drawer):
-  - UI language and AI answer language (separate)
-  - model provider profiles (local Ollama / remote OpenAI-compatible)
-  - watch folder switching
-  - top-k retrieval control
-  - personalization (font, size, theme)
-- Search scope selector:
-  - nested folder expand/collapse
-  - multi-select files/folders
-- Source cards:
-  - markdown preview for `.md`
-  - expand/collapse
-  - open file location
+---
 
-## Current Validation Status
+## Why not a generic RAG?
 
-- Local-first runtime and enterprise policy gates are implemented.
-- Citation validity is currently strong in the checked-in offline regression corpus.
-- Retrieval precision is not yet at a strong mixed-corpus bar.
-  - `core_docs` offline baseline: `Top-1=0.6970` on 6 indexed documents
-  - `repo_mixed` offline baseline: `Top-1=0.4773` on 11 indexed documents
-- These are small checked-in regression baselines, not a validated 50k-document accuracy result.
-- Live local-model validation is still blocked on local Ollama / embedding availability on the current machine.
+Most RAG tools give you an answer and a list of "sources."  
+Memori-Vault gives you an **auditable evidence chain**: which document, which chunk, which matching terms, and why it was ranked there. If the context is insufficient, it says so—instead of hallucinating.
 
-Current posture:
+|  | Typical RAG | Memori-Vault |
+|---|---|---|
+| **Storage** | Cloud vector DB or remote service | Single SQLite file on your disk |
+| **Evidence** | "Sources" list | Document + chunk + hit terms + score contribution |
+| **CJK / Chinese** | Often an afterthought | First-class tokenization, query analysis, and ranking |
+| **Citation integrity** | Best-effort | Verified: every claim must trace to a indexed chunk |
+| **Agent integration** | Custom API wrappers | Native MCP server + standard HTTP API |
+| **Deployment** | SaaS or Docker-heavy | Single binary: `cargo run` or Tauri desktop |
+| **License** | Often AGPL / proprietary | Apache 2.0 |
 
-- docs-only retrieval is usable as an internal baseline
-- mixed-corpus retrieval should still be treated as beta/internal validation, not as a finished accuracy claim
+---
 
-Details: [docs/RETRIEVAL_BASELINE.md](./docs/RETRIEVAL_BASELINE.md)
+## What it does
 
-## Runtime Modes
+1. **Watches your folder** (Markdown, TXT, PDF, DOCX) and indexes chunks automatically.
+2. **Answers questions** using local LLMs (llama.cpp / vLLM / Ollama) with structured citations.
+3. **Builds a knowledge graph** in the background—entities, relations, source chunks—without blocking search.
+4. **Exposes an MCP server** so Claude, Codex, and other agents can query your vault with structured tools.
 
-1. Desktop mode:
-- Tauri shell + UI + IPC backend.
+---
 
-2. Server mode:
-- `memori-server` exposes HTTP APIs for local/browser access and private deployment.
-- The current product experience is desktop-first; browser-facing UI support is still being aligned with the server runtime.
+## Current Status (v0.3.0)
 
-## Enterprise (Private Deployment v1 Preview)
+- **Desktop (Tauri)**: fully functional. Search, settings, scope selection, citations, source preview.
+- **Server mode**: HTTP API available for browser/local network and private deployment.
+- **Retrieval**: citation validity is solid. Document-level Top-1 is improving (see [baseline](./docs/RETRIEVAL_BASELINE.md)).
+- **Enterprise**: private-deployment preview with RBAC, audit, and egress policy.
 
-- Single-tenant private deployment for engineering organizations.
-- Preview auth/session entry plus API RBAC (`viewer/user/operator/admin`).
-- Admin APIs for health, metrics, policy, audit, reindex, pause/resume.
-- Model governance: local-first with remote egress allowlist enforcement.
-- Deployment assets included (`deploy/systemd`, env template, backup/restore scripts).
+> **Not a 50k-doc enterprise claim yet.** The current baseline is a checked-in regression suite on small corpora. We're iterating on ranking stability before scaling benchmarks.
 
-Current note:
-- Enterprise deployment is available as a private deployment preview in `v0.3.0`.
-- Auth/session flows are suitable for controlled internal environments first and will continue to harden in later releases.
+---
 
-Details: [docs/enterprise.md](./docs/enterprise.md)
+## Quick Start
+
+```bash
+# 1. Clone
+git clone https://github.com/FPSZ/Memori-Vault.git
+cd Memori-Vault
+
+# 2. Desktop dev (requires llama.cpp or Ollama running)
+pnpm --dir ui install
+pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+cargo tauri dev -p memori-desktop
+
+# 3. Server dev
+cargo run -p memori-server
+```
+
+Set your model endpoints:
+```bash
+export MEMORI_CHAT_ENDPOINT=http://localhost:8001      # qwen3:14b
+export MEMORI_GRAPH_ENDPOINT=http://localhost:8002     # qwen3:8b
+export MEMORI_EMBED_ENDPOINT=http://localhost:8003     # Qwen3-Embedding-4B
+```
+
+---
 
 ## Architecture
 
-Workspace crates:
-- `memori-vault`: watch/debounce/event stream
-- `memori-parser`: parse/chunk
-- `memori-storage`: SQLite + vector/graph/task metadata
-- `memori-core`: orchestration, retrieval, indexing worker
-- `memori-desktop`: Tauri commands and desktop lifecycle
-- `memori-server`: Axum APIs
-- `ui`: React + Vite + Tailwind v4 frontend
+| Crate | Responsibility |
+|---|---|
+| `memori-vault` | File watcher, debounce, event stream |
+| `memori-parser` | Parse & semantic chunk (Markdown, TXT, PDF, DOCX) |
+| `memori-storage` | SQLite: vectors, FTS, graph nodes/edges, task queue |
+| `memori-core` | Orchestration, retrieval pipeline, indexing worker |
+| `memori-desktop` | Tauri commands & desktop lifecycle |
+| `memori-server` | Axum HTTP API + MCP endpoint |
+| `ui` | React + Vite + Tailwind v4 |
 
-## Development Quick Start
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace -- -D warnings
-cargo test --workspace
-pnpm --dir ui run build
-```
-
-Desktop dev:
-
-```bash
-pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
-cargo tauri dev -p memori-desktop
-```
-
-Server dev:
-
-```bash
-cargo run -p memori-server
-pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
-```
-
-## Notes
-
-- Ollama local runtime is recommended for local provider mode.
-- Remote provider mode is optional and user-configured.
-- Enterprise policy can enforce `local_only` or remote allowlist mode.
-- Legacy theme key `memori-theme-mode` is migration-only; active key is `memori-theme`.
+---
 
 ## License
 

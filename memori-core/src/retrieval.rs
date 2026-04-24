@@ -85,7 +85,13 @@ pub(crate) fn merge_document_candidates(
     for (index, doc) in phrase_docs.into_iter().enumerate() {
         let is_code_document = is_code_document_path(&doc.relative_path);
         let phrase_quality = docs_phrase_quality_from_match(&doc);
-        let score = 4.0 / (RRF_K + (index + 1) as f64);
+        // docs_phrase 权重根据 query family 动态调整：
+        // ImplementationLookup 场景下降低权重，防止 meta-analysis 文档压过代码文档
+        let score = if matches!(query_family, QueryFamily::ImplementationLookup) {
+            2.0
+        } else {
+            3.5
+        } / (RRF_K + (index + 1) as f64);
         merged
             .entry(doc.file_path.clone())
             .and_modify(|entry| {
@@ -366,10 +372,16 @@ pub(crate) fn is_implementation_lookup(analysis: &QueryAnalysis) -> bool {
 }
 
 pub(crate) fn is_routing_noise_document(relative_path: &str) -> bool {
+    let lower = relative_path.to_ascii_lowercase();
     matches!(
-        relative_path.to_ascii_lowercase().as_str(),
+        lower.as_str(),
         "readme.md" | "docs/plan.md" | "docs/tutorial.md"
-    )
+    ) || lower.starts_with("docs/ai")  // docs/AI.md, docs/ai-overview.md 等 meta-analysis
+        || lower == "docs/structure.md"
+        || lower == "docs/architecture.md"
+        || lower == "docs/overview.md"
+        || lower == "docs/design.md"
+        || lower == "docs/roadmap.md"
 }
 
 pub(crate) fn merge_chunk_evidence(
@@ -722,7 +734,7 @@ pub(crate) fn evaluate_gating_decision(
     if !analysis.flags.is_lookup_like
         && top.document_rank <= 3
         && top_doc_distinct_term_hits >= 2
-        && top_doc_term_coverage >= 0.5
+        && top_doc_term_coverage >= 0.4
     {
         return GatingDecision::allow(
             "coverage_release",
@@ -808,13 +820,12 @@ pub(crate) fn has_any_chunk_lexical(item: &MergedEvidence) -> bool {
 
 pub(crate) fn has_strong_document_signal(item: &MergedEvidence) -> bool {
     item.document_has_exact_signal
-        || matches!(
-            item.document_docs_phrase_quality,
-            Some(PhraseQuality::Specific)
-        )
         || item.document_has_filename_signal
         || item.document_has_strict_lexical
         || item.document_reason == "scope"
+    // NOTE: docs_phrase 被故意排除在外。
+    // meta-analysis 文档（如 docs/AI.md）容易产生虚假的 Specific docs_phrase 信号，
+    // 如果算 strong signal 会污染 rankings 并错误穿透 gating。
 }
 
 pub(crate) fn direct_chunk_lexical_signal(
@@ -842,7 +853,12 @@ pub(crate) fn direct_chunk_lexical_signal(
             continue;
         }
         if chunk_text_contains_term(&content, &heading, &file_path, term) {
-            if term.chars().any(is_cjk)
+            let is_noise = term.chars().any(is_cjk)
+                && CJK_DOC_NOISE_TERMS.contains(&term.as_str());
+            if is_noise {
+                // 高频 CJK 噪声词只算 broad hit，防止无关文档被拉入 rankings
+                broad_hits += 1;
+            } else if term.chars().any(is_cjk)
                 || term.chars().any(|ch| ch.is_ascii_digit())
                 || term
                     .chars()

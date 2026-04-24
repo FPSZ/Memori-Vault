@@ -636,11 +636,18 @@ pub(crate) fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         return 0.0;
     }
 
-    let len = a.len().min(b.len());
-    if len == 0 {
-        return 0.0;
+    if a.len() != b.len() {
+        // 维度不匹配意味着索引中混入了不同 embedding 模型的向量，
+        // 必须重建索引后才能切换模型。此处 panic 防止静默错误分数污染排序。
+        panic!(
+            "cosine_similarity dimension mismatch: query={}, stored={}. \
+             Rebuild index after switching embedding models.",
+            a.len(),
+            b.len()
+        );
     }
 
+    let len = a.len();
     let mut dot = 0.0_f32;
     let mut norm_a = 0.0_f32;
     let mut norm_b = 0.0_f32;

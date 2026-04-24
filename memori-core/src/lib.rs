@@ -42,6 +42,9 @@ pub const MEMORI_MODEL_API_KEY_ENV: &str = "MEMORI_MODEL_API_KEY";
 pub const MEMORI_CHAT_MODEL_ENV: &str = "MEMORI_CHAT_MODEL";
 pub const MEMORI_GRAPH_MODEL_ENV: &str = "MEMORI_GRAPH_MODEL";
 pub const MEMORI_EMBED_MODEL_ENV: &str = "MEMORI_EMBED_MODEL";
+pub const MEMORI_CHAT_ENDPOINT_ENV: &str = "MEMORI_CHAT_ENDPOINT";
+pub const MEMORI_GRAPH_ENDPOINT_ENV: &str = "MEMORI_GRAPH_ENDPOINT";
+pub const MEMORI_EMBED_ENDPOINT_ENV: &str = "MEMORI_EMBED_ENDPOINT";
 const QUERY_EMBEDDING_CACHE_SIZE: usize = 256;
 const QUERY_EMBEDDING_CACHE_TTL_SECS: i64 = 300;
 const DEFAULT_DOC_TOP_K: usize = 12;
@@ -493,11 +496,13 @@ pub struct PolicyViolation {
 #[derive(Debug, Clone)]
 pub struct RuntimeModelConfig {
     pub provider: ModelProvider,
-    pub endpoint: String,
-    pub api_key: Option<String>,
+    pub chat_endpoint: String,
     pub chat_model: String,
+    pub graph_endpoint: String,
     pub graph_model: String,
+    pub embed_endpoint: String,
     pub embed_model: String,
+    pub api_key: Option<String>,
 }
 
 pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
@@ -509,8 +514,15 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
         ModelProvider::OllamaLocal => DEFAULT_MODEL_ENDPOINT_OLLAMA,
         ModelProvider::OpenAiCompatible => DEFAULT_MODEL_ENDPOINT_OPENAI,
     };
-    let endpoint =
+    let fallback_endpoint =
         std::env::var(MEMORI_MODEL_ENDPOINT_ENV).unwrap_or_else(|_| endpoint_default.to_string());
+
+    let chat_endpoint = std::env::var(MEMORI_CHAT_ENDPOINT_ENV)
+        .unwrap_or_else(|_| fallback_endpoint.clone());
+    let graph_endpoint = std::env::var(MEMORI_GRAPH_ENDPOINT_ENV)
+        .unwrap_or_else(|_| fallback_endpoint.clone());
+    let embed_endpoint = std::env::var(MEMORI_EMBED_ENDPOINT_ENV)
+        .unwrap_or_else(|_| fallback_endpoint);
 
     let api_key = std::env::var(MEMORI_MODEL_API_KEY_ENV).ok().and_then(|v| {
         let trimmed = v.trim().to_string();
@@ -530,11 +542,13 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
 
     RuntimeModelConfig {
         provider,
-        endpoint,
-        api_key,
+        chat_endpoint,
         chat_model,
+        graph_endpoint,
         graph_model,
+        embed_endpoint,
         embed_model,
+        api_key,
     }
 }
 
@@ -628,30 +642,39 @@ pub fn validate_runtime_model_settings(
     policy: &EnterpriseModelPolicy,
     runtime: &RuntimeModelConfig,
 ) -> Result<(), PolicyViolation> {
-    validate_provider_request(
-        policy,
-        runtime.provider,
-        &runtime.endpoint,
-        &[
-            runtime.chat_model.clone(),
-            runtime.graph_model.clone(),
-            runtime.embed_model.clone(),
-        ],
-    )
-    .map_err(|violation| match violation.code.as_str() {
-        "policy_violation" => PolicyViolation {
-            code: "runtime_blocked_by_policy".to_string(),
-            message: "Runtime model configuration rejected before startup".to_string(),
-        },
-        _ => violation,
-    })
+    for (name, endpoint) in [
+        ("chat", &runtime.chat_endpoint),
+        ("graph", &runtime.graph_endpoint),
+        ("embed", &runtime.embed_endpoint),
+    ] {
+        if let Err(violation) = validate_provider_request(
+            policy,
+            runtime.provider,
+            endpoint,
+            &[
+                runtime.chat_model.clone(),
+                runtime.graph_model.clone(),
+                runtime.embed_model.clone(),
+            ],
+        ) {
+            return Err(match violation.code.as_str() {
+                "policy_violation" => PolicyViolation {
+                    code: "runtime_blocked_by_policy".to_string(),
+                    message: format!(
+                        "Runtime model configuration rejected for {name} endpoint before startup"
+                    ),
+                },
+                _ => violation,
+            });
+        }
+    }
+    Ok(())
 }
 
-/// 极简 Ollama Embedding 客户端。
+/// 统一 Embedding 客户端（兼容 llama-server / vLLM / OpenAI 的 /v1/embeddings）。
 #[derive(Debug, Clone)]
 pub struct OllamaEmbeddingClient {
     http: reqwest::Client,
-    provider: ModelProvider,
     base_url: String,
     api_key: Option<String>,
     model: String,
@@ -662,8 +685,7 @@ impl Default for OllamaEmbeddingClient {
         let runtime = resolve_runtime_model_config_from_env();
         Self {
             http: reqwest::Client::new(),
-            provider: runtime.provider,
-            base_url: runtime.endpoint,
+            base_url: runtime.embed_endpoint,
             api_key: runtime.api_key,
             model: runtime.embed_model,
         }
@@ -674,7 +696,6 @@ impl OllamaEmbeddingClient {
     pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             http: reqwest::Client::new(),
-            provider: ModelProvider::OllamaLocal,
             base_url: base_url.into(),
             api_key: None,
             model: model.into(),
@@ -686,69 +707,9 @@ impl OllamaEmbeddingClient {
     }
 
     pub async fn embed_text(&self, prompt: &str) -> Result<Vec<f32>, OllamaClientError> {
-        if self.provider == ModelProvider::OpenAiCompatible {
-            return self.embed_text_openai_compatible(&self.model, prompt).await;
-        }
-
-        match self.embed_text_with_model(&self.model, prompt).await {
-            // Ollama 常见 tag 省略场景：`nomic-embed-text` 实际只有 `nomic-embed-text:latest`
-            // 若命中 404 not found 且当前 model 无 tag，则自动回退一次。
-            Err(OllamaClientError::HttpStatus { status, body })
-                if status == 404 && body.contains("not found") && !self.model.contains(':') =>
-            {
-                let fallback_model = format!("{}:latest", self.model);
-                self.embed_text_with_model(&fallback_model, prompt).await
-            }
-            other => other,
-        }
-    }
-
-    async fn embed_text_with_model(
-        &self,
-        model: &str,
-        prompt: &str,
-    ) -> Result<Vec<f32>, OllamaClientError> {
-        let url = format!("{}/api/embeddings", self.base_url.trim_end_matches('/'));
-
-        let response = self
-            .http
-            .post(url)
-            .json(&OllamaEmbeddingRequest { model, prompt })
-            .send()
-            .await
-            .map_err(OllamaClientError::Request)?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body = match response.text().await {
-                Ok(text) => text,
-                Err(err) => format!("<读取响应体失败: {err}>"),
-            };
-
-            return Err(OllamaClientError::HttpStatus {
-                status: status.as_u16(),
-                body,
-            });
-        }
-
-        let parsed: OllamaEmbeddingResponse =
-            response.json().await.map_err(OllamaClientError::Request)?;
-
-        if parsed.embedding.is_empty() {
-            return Err(OllamaClientError::EmptyEmbedding);
-        }
-
-        Ok(parsed.embedding)
-    }
-
-    async fn embed_text_openai_compatible(
-        &self,
-        model: &str,
-        prompt: &str,
-    ) -> Result<Vec<f32>, OllamaClientError> {
         let url = format!("{}/v1/embeddings", self.base_url.trim_end_matches('/'));
         let mut request = self.http.post(url).json(&OpenAiEmbeddingRequest {
-            model,
+            model: &self.model,
             input: prompt,
         });
         if let Some(key) = self.api_key.as_ref() {
@@ -783,17 +744,6 @@ impl OllamaEmbeddingClient {
         }
         Ok(embedding)
     }
-}
-
-#[derive(Debug, serde::Serialize)]
-struct OllamaEmbeddingRequest<'a> {
-    model: &'a str,
-    prompt: &'a str,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct OllamaEmbeddingResponse {
-    embedding: Vec<f32>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1070,11 +1020,13 @@ mod tests {
         };
         let runtime = RuntimeModelConfig {
             provider: ModelProvider::OpenAiCompatible,
-            endpoint: "https://api.openai.com/v1".to_string(),
-            api_key: Some("secret".to_string()),
+            chat_endpoint: "https://api.openai.com/v1".to_string(),
             chat_model: "gpt-4o-mini".to_string(),
+            graph_endpoint: "https://api.openai.com/v1".to_string(),
             graph_model: "gpt-4o-mini".to_string(),
+            embed_endpoint: "https://api.openai.com/v1".to_string(),
             embed_model: "text-embedding-3-small".to_string(),
+            api_key: Some("secret".to_string()),
         };
 
         let violation = validate_runtime_model_settings(&policy, &runtime)
@@ -1091,11 +1043,13 @@ mod tests {
         };
         let runtime = RuntimeModelConfig {
             provider: ModelProvider::OpenAiCompatible,
-            endpoint: "https://models.company.local/v1".to_string(),
-            api_key: None,
+            chat_endpoint: "https://models.company.local/v1".to_string(),
             chat_model: "approved-chat".to_string(),
+            graph_endpoint: "https://models.company.local/v1".to_string(),
             graph_model: "approved-chat".to_string(),
+            embed_endpoint: "https://models.company.local/v1".to_string(),
             embed_model: "denied-embed".to_string(),
+            api_key: None,
         };
 
         let violation = validate_runtime_model_settings(&policy, &runtime)

@@ -4,122 +4,89 @@
 [![Rust 1.85+](https://img.shields.io/badge/Rust-1.85%2B-111111?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![CI](https://img.shields.io/github/actions/workflow/status/FPSZ/Memori-Vault/rust-ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/FPSZ/Memori-Vault/actions/workflows/rust-ci.yml)
 
-中文文档：当前页  
-English: [README.md](./README.md)  
-贡献指南：[CONTRIBUTING.zh-CN.md](./CONTRIBUTING.zh-CN.md) | English: [CONTRIBUTING.md](./CONTRIBUTING.md)
-教程（英文主）：[docs/TUTORIAL.md](./docs/TUTORIAL.md) | 中文辅助：[docs/TUTORIAL.zh-CN.md](./docs/TUTORIAL.zh-CN.md)
+**本地优先、可验证的记忆引擎。**  
+你的文档留在本地机器上。每个答案都会告诉你它来自哪里。
 
-## 项目简介
+[English](./README.md) · [贡献指南](./CONTRIBUTING.zh-CN.md) · [教程](./docs/TUTORIAL.zh-CN.md)
 
-Memori-Vault 是一个本地优先（Local-First）的记忆引擎，面向个人与团队知识场景。
-它集成语义分块、向量检索与异步 Graph-RAG 抽取（Ollama + SQLite），并优先保证首问响应速度。
+---
 
-## 当前能力
+## 为什么不是普通 RAG？
 
-- 本地文档摄入：监听 `.md/.txt`，自动解析与分块。
-- 结构化检索链路：document routing + chunk retrieval + citations/evidence 输出。
-- 异步索引重构：
-  - 快路径：先向量化并可检索
-  - 慢路径：图谱任务入队后台补齐
-- 索引策略可配置：
-  - 模式：`continuous | manual | scheduled`
-  - 资源档位：`low | balanced | fast`
-  - 支持暂停/恢复与手动重建
-- 设置中心（右侧抽屉）：
-  - UI 语言与 AI 回答语言分离
-  - 模型来源（本地 Ollama / 远程 OpenAI-compatible）
-  - 读取目录切换
-  - Top-K 检索条数
-  - 个性化（字体、字号、深浅主题）
-- 检索范围选择：
-  - 支持多选文件/目录
-  - 支持子目录分层展开
-- 来源卡片增强：
-  - Markdown 预览
-  - 展开/折叠
-  - 打开文件位置
+大多数 RAG 工具给你一个答案和一份"来源"列表。  
+Memori-Vault 给你的是**可审计的证据链**：哪个文档、哪个片段、哪些匹配词、以及它为什么排在那里。如果上下文不足，它会明确说——而不是编造。
 
-## 当前验证状态
+|  | 典型 RAG | Memori-Vault |
+|---|---|---|
+| **存储** | 云端向量数据库或远程服务 | 本地单一 SQLite 文件 |
+| **证据** | "来源"列表 | 文档 + 片段 + 命中词 + 分数贡献 |
+| **中文/CJK** | 通常是事后补丁 | 原生级分词、查询分析和排序 |
+| **引用完整性** | 尽力而为 | 已验证：每个说法必须追溯到已索引片段 |
+| **Agent 集成** | 自定义 API 封装 | 原生 MCP 服务器 + 标准 HTTP API |
+| **部署** | SaaS 或重型 Docker | 单一二进制：`cargo run` 或 Tauri 桌面端 |
+| **协议** | 常为 AGPL / 闭源 | Apache 2.0 |
 
-- 本地优先运行时和企业策略收口已经落地。
-- 当前 checked-in 离线回归里，citation validity 仍然可靠。
-- 但检索精度，尤其是 mixed corpus 的文档级 Top-1，还没有达到可以放心对外承诺的程度。
-  - `core_docs` 离线基线：`6` 份文档上 `Top-1=0.6970`
-  - `repo_mixed` 离线基线：`11` 份文档上 `Top-1=0.4773`
-- 这些数字只是当前仓库小样本回归结果，不是 50,000 文档规模的验证结论。
-- 当前机器上的 `live_embedding` 仍被本地 Ollama / embedding 可用性阻塞。
+---
 
-当前口径：
+## 功能概述
 
-- docs-only 检索可以作为内部基线继续推进
-- mixed corpus 检索仍应按 beta / 内部验证口径描述，不能写成高精度已完成
+1. **监听文件夹**（Markdown、TXT、PDF、DOCX），自动解析并分块索引。
+2. **回答问题**：使用本地大模型（llama.cpp / vLLM / Ollama），附带结构化引用。
+3. **后台构建知识图谱**：实体、关系、来源片段——不阻塞搜索。
+4. **暴露 MCP 服务器**：Claude、Codex 等 Agent 可通过标准工具查询你的知识库。
 
-详细基线见：[`docs/RETRIEVAL_BASELINE.md`](./docs/RETRIEVAL_BASELINE.md)
+---
 
-## 运行模式
+## 当前状态（v0.3.0）
 
-1. 桌面模式（Tauri）：
-- UI + IPC + 本地桌面壳。
+- **桌面端（Tauri）**：功能完整。搜索、设置、范围选择、引用、来源预览。
+- **服务端模式**：HTTP API 可用，支持浏览器/局域网接入和私有化部署。
+- **检索质量**：引用可靠性已验证。文档级 Top-1 持续优化中（见[基线报告](./docs/RETRIEVAL_BASELINE.md)）。
+- **企业版**：私有化部署预览，含 RBAC、审计、外连策略。
 
-2. 服务端模式（Server）：
-- `memori-server` 提供 HTTP API，可用于本地/浏览器接入与私有化部署。
-- 当前产品体验仍以桌面版为主，面向浏览器的 UI 闭环仍在持续对齐中。
+> **尚未承诺 50,000 文档规模的企业级精度。** 当前基线是小样本回归测试集上的结果。我们正持续迭代排序稳定性，再推进大规模基准测试。
 
-## 企业化能力（私有化 v1 预览）
+---
 
-- 面向研发组织的单租户私有化部署形态。
-- 预览阶段认证/会话入口 + API 级 RBAC（`viewer/user/operator/admin`）。
-- 管理接口覆盖：健康检查、指标、策略、审计、重建、暂停/恢复。
-- 模型治理：本地优先，远程外连由白名单策略控制。
-- 附带部署资产（`deploy/systemd`、env 模板、备份/恢复脚本）。
+## 快速开始
 
-当前说明：
-- `v0.3.0` 的企业能力以私有化预览形态提供。
-- 认证与会话链路当前更适合受控内部环境，后续版本会继续补强安全细节。
+```bash
+# 1. 克隆
+git clone https://github.com/FPSZ/Memori-Vault.git
+cd Memori-Vault
 
-详细说明：[`docs/enterprise.zh-CN.md`](./docs/enterprise.zh-CN.md)
+# 2. 桌面端开发（需先启动 llama.cpp 或 Ollama）
+pnpm --dir ui install
+pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
+cargo tauri dev -p memori-desktop
+
+# 3. 服务端开发
+cargo run -p memori-server
+```
+
+配置模型端点：
+```bash
+export MEMORI_CHAT_ENDPOINT=http://localhost:8001      # qwen3:14b
+export MEMORI_GRAPH_ENDPOINT=http://localhost:8002     # qwen3:8b
+export MEMORI_EMBED_ENDPOINT=http://localhost:8003     # Qwen3-Embedding-4B
+```
+
+---
 
 ## 架构
 
-工作区模块：
-- `memori-vault`：监听、防抖、事件通道
-- `memori-parser`：解析与分块
-- `memori-storage`：SQLite、向量/图谱/任务元数据
-- `memori-core`：引擎编排、检索链路、后台索引 worker
-- `memori-desktop`：Tauri 命令与桌面生命周期
-- `memori-server`：Axum HTTP 接口
-- `ui`：React + Vite + Tailwind v4 前端
+| 模块 | 职责 |
+|---|---|
+| `memori-vault` | 文件监听、防抖、事件流 |
+| `memori-parser` | 解析与语义分块（Markdown、TXT、PDF、DOCX） |
+| `memori-storage` | SQLite：向量、FTS、图谱节点/边、任务队列 |
+| `memori-core` | 引擎编排、检索链路、后台索引 worker |
+| `memori-desktop` | Tauri 命令与桌面生命周期 |
+| `memori-server` | Axum HTTP API + MCP 端点 |
+| `ui` | React + Vite + Tailwind v4 |
 
-## 开发快速开始
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --workspace -- -D warnings
-cargo test --workspace
-pnpm --dir ui run build
-```
-
-桌面开发：
-
-```bash
-pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
-cargo tauri dev -p memori-desktop
-```
-
-服务端开发：
-
-```bash
-cargo run -p memori-server
-pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
-```
-
-## 说明
-
-- 本地模式建议先启动 Ollama。
-- 远程模式为可选项，由用户自行配置 endpoint/key/model。
-- 企业策略支持 `local_only` 与 allowlist 外连模式。
-- 主题旧键 `memori-theme-mode` 仅用于迁移读取，当前使用 `memori-theme`。
+---
 
 ## 许可证
 
-Apache License 2.0。
+Apache License 2.0.
