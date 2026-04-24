@@ -517,12 +517,12 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
     let fallback_endpoint =
         std::env::var(MEMORI_MODEL_ENDPOINT_ENV).unwrap_or_else(|_| endpoint_default.to_string());
 
-    let chat_endpoint = std::env::var(MEMORI_CHAT_ENDPOINT_ENV)
-        .unwrap_or_else(|_| fallback_endpoint.clone());
-    let graph_endpoint = std::env::var(MEMORI_GRAPH_ENDPOINT_ENV)
-        .unwrap_or_else(|_| fallback_endpoint.clone());
-    let embed_endpoint = std::env::var(MEMORI_EMBED_ENDPOINT_ENV)
-        .unwrap_or_else(|_| fallback_endpoint);
+    let chat_endpoint =
+        std::env::var(MEMORI_CHAT_ENDPOINT_ENV).unwrap_or_else(|_| fallback_endpoint.clone());
+    let graph_endpoint =
+        std::env::var(MEMORI_GRAPH_ENDPOINT_ENV).unwrap_or_else(|_| fallback_endpoint.clone());
+    let embed_endpoint =
+        std::env::var(MEMORI_EMBED_ENDPOINT_ENV).unwrap_or_else(|_| fallback_endpoint);
 
     let api_key = std::env::var(MEMORI_MODEL_API_KEY_ENV).ok().and_then(|v| {
         let trimmed = v.trim().to_string();
@@ -859,8 +859,8 @@ mod tests {
     use super::{
         AppState, AskStatus, EgressMode, EngineError, EnterpriseModelPolicy, MemoriEngine,
         MergedEvidence, ModelProvider, QueryFamily, QueryIntent, RuntimeModelConfig, WatchEvent,
-        WatchEventKind, analyze_query, build_citations, document_signal_query,
-        apply_gating_metrics, has_strong_document_signal, is_implementation_lookup,
+        WatchEventKind, analyze_query, apply_gating_metrics, build_citations,
+        document_signal_query, has_strong_document_signal, is_implementation_lookup,
         merge_document_candidates, process_file_event, should_refuse_for_insufficient_evidence,
         validate_runtime_model_settings,
     };

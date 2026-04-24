@@ -1,37 +1,37 @@
-# Contributing to Memori-Vault (English)
+# Contributing to Memori-Vault（中文）
 
-Thanks for contributing.
+感谢贡献。
 
-Memori-Vault is a local-first memory system with desktop and server runtimes.
-When in doubt, prioritize correctness, observability, and first-answer speed.
+Memori-Vault 是一个本地优先的记忆系统，支持桌面版与服务端模式。
+如有取舍冲突，优先保证：正确性、可观测性、首问速度。
 
-中文版本: [CONTRIBUTING.zh-CN.md](./CONTRIBUTING.zh-CN.md)
+English version: [CONTRIBUTING.en.md](./CONTRIBUTING.en.md)
 
-## 1. Read First
+## 1. 先读文档
 
-- Product overview: `README.md`
-- Chinese overview: `README.zh-CN.md`
-- Engineering rules: `AI.md`
-- UI baseline: `UI.md`
+- 产品概览：`README.md`
+- 英文概览：`README.zh-CN.md`
+- 工程规则：`AI.md`
+- UI 基线：`UI.md`
 
-## 2. Repository Layout
+## 2. 仓库结构
 
-- `memori-vault`: file watch/debounce/event stream
-- `memori-parser`: parse/chunk logic
-- `memori-storage`: SQLite persistence and retrieval
-- `memori-core`: orchestration, search pipeline, indexing worker
-- `memori-desktop`: Tauri IPC shell
-- `memori-server`: Axum HTTP shell
-- `ui`: React + Vite + Tailwind v4
+- `memori-vault`：监听/防抖/事件通道
+- `memori-parser`：解析与分块
+- `memori-storage`：SQLite 持久化与检索
+- `memori-core`：编排、检索链路、后台索引 worker
+- `memori-desktop`：Tauri IPC 壳层
+- `memori-server`：Axum HTTP 壳层
+- `ui`：React + Vite + Tailwind v4
 
-## 3. Prerequisites
+## 3. 环境要求
 
-- Rust stable (`1.85+` recommended)
+- Rust stable（建议 `1.85+`）
 - Node.js 20+
 - npm
-- Ollama (for local model mode)
+- Ollama（本地模型模式需要）
 
-## 4. Quality Gates (Required)
+## 4. 必过质量门
 
 ```bash
 cargo fmt --all -- --check
@@ -40,48 +40,47 @@ cargo test --workspace
 pnpm --dir ui run build
 ```
 
-## 5. Local Development
+## 5. 本地开发
 
-Desktop mode:
+桌面模式：
 
 ```bash
 pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 cargo tauri dev -p memori-desktop
 ```
 
-Browser/server mode:
+服务端/浏览器模式：
 
 ```bash
 cargo run -p memori-server
 pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 ```
 
-## 6. Runtime Principles
+## 6. 运行时原则
 
-1. Keep retrieval available even if graph extraction fails.
-2. Do not block first answer on full graph completion.
-3. Maintain profile isolation for model settings:
-- local provider profile and remote provider profile must not overwrite each other.
-4. Keep desktop IPC and server HTTP semantics aligned.
+1. 图谱失败不能拖垮检索主流程。
+2. 首问不能被图谱全量构建阻塞。
+3. 模型设置本地/远程 profile 必须隔离，不允许互相覆盖。
+4. 桌面 IPC 与服务端 HTTP 语义保持一致。
 
-## 7. Documentation Rule
+## 7. 文档同步规则
 
-If behavior or interface changes, update docs in the same PR:
+只要行为或接口变更，必须同 PR 更新：
 - `README.md` + `README.zh-CN.md`
 - `CONTRIBUTING.md` + `CONTRIBUTING.zh-CN.md`
-- `AI.md` (engineering rules)
-- `UI.md` (if visual/interaction baseline changed)
+- `AI.md`（工程规则）
+- `UI.md`（视觉交互基线变化时）
 
-## 8. PR Checklist
+## 8. PR 检查清单
 
-- Scope and motivation are clear.
-- DTO/API/IPC changes are documented.
-- Migration impact is described (settings/storage).
-- Manual test steps included.
-- UI screenshots/GIF provided for UI changes.
+- 说明变更动机和边界。
+- 记录 DTO/API/IPC 变化。
+- 说明配置或存储迁移影响。
+- 提供手动验证步骤。
+- UI 变更附截图/GIF。
 
-## 9. Security & Privacy
+## 9. 安全与隐私
 
-- Never commit local databases, model files, private documents, or secrets.
-- No hidden telemetry.
-- Keep keys/config handling explicit and documented.
+- 不提交本地数据库、模型文件、隐私文档、密钥。
+- 禁止隐式遥测。
+- 密钥与配置策略需可见、可审计、可迁移。

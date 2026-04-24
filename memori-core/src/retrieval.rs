@@ -232,9 +232,12 @@ pub(crate) fn merge_document_candidates(
         };
     }
     docs.sort_by(|a, b| {
-        document_reason_priority(&b.document_reason, b.docs_phrase_quality, query_family).cmp(
-            &document_reason_priority(&a.document_reason, a.docs_phrase_quality, query_family),
-        )
+        document_reason_priority(&b.document_reason, b.docs_phrase_quality, query_family)
+            .cmp(&document_reason_priority(
+                &a.document_reason,
+                a.docs_phrase_quality,
+                query_family,
+            ))
             .then_with(|| {
                 document_type_priority(b.is_code_document, query_family)
                     .cmp(&document_type_priority(a.is_code_document, query_family))
@@ -273,7 +276,9 @@ pub(crate) fn merge_document_candidates(
     docs
 }
 
-pub(crate) fn docs_phrase_quality_from_match(doc: &memori_storage::DocumentSignalMatch) -> PhraseQuality {
+pub(crate) fn docs_phrase_quality_from_match(
+    doc: &memori_storage::DocumentSignalMatch,
+) -> PhraseQuality {
     if doc.phrase_specific {
         PhraseQuality::Specific
     } else {
@@ -853,8 +858,7 @@ pub(crate) fn direct_chunk_lexical_signal(
             continue;
         }
         if chunk_text_contains_term(&content, &heading, &file_path, term) {
-            let is_noise = term.chars().any(is_cjk)
-                && CJK_DOC_NOISE_TERMS.contains(&term.as_str());
+            let is_noise = term.chars().any(is_cjk) && CJK_DOC_NOISE_TERMS.contains(&term.as_str());
             if is_noise {
                 // 高频 CJK 噪声词只算 broad hit，防止无关文档被拉入 rankings
                 broad_hits += 1;
