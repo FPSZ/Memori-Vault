@@ -4,86 +4,112 @@
 [![Rust 1.85+](https://img.shields.io/badge/Rust-1.85%2B-111111?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![CI](https://img.shields.io/github/actions/workflow/status/FPSZ/Memori-Vault/rust-ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/FPSZ/Memori-Vault/actions/workflows/rust-ci.yml)
 
-**Local-first verifiable memory engine.**  
-Your documents stay on your machine. Every answer tells you exactly where it came from.
+**Ask your documents. Know exactly where the answer came from.**
 
-[中文文档](./README.zh-CN.md) · [Contributing](./CONTRIBUTING.md) · [Tutorial](./docs/TUTORIAL.md)
+[中文](./README.zh-CN.md) · [Contributing](./CONTRIBUTING.md) · [Tutorial](./docs/TUTORIAL.md)
 
 ---
 
-## Why not a generic RAG?
+## What problem does it solve?
 
-Most RAG tools give you an answer and a list of "sources."  
-Memori-Vault gives you an **auditable evidence chain**: which document, which chunk, which matching terms, and why it was ranked there. If the context is insufficient, it says so—instead of hallucinating.
+You have thousands of Markdown notes, PDFs, DOCX files, and code docs scattered across folders. You want to ask questions and get **precise, traceable answers** — not a hallucinated summary with a vague "Sources" list.
 
-|  | Typical RAG | Memori-Vault |
+Memori-Vault is a **local-first memory engine** that watches your folders, indexes everything into a single SQLite file, and answers questions with **auditable evidence**: exact chunk, matching terms, score contribution, and source file. If the context is insufficient, it says so — instead of making things up.
+
+No cloud. No Docker. No vector database. Just a single binary and your files.
+
+---
+
+## Why not Anything-LLM / Quivr / other RAG tools?
+
+| What you care about | Typical RAG | Memori-Vault |
 |---|---|---|
-| **Storage** | Cloud vector DB or remote service | Single SQLite file on your disk |
-| **Evidence** | "Sources" list | Document + chunk + hit terms + score contribution |
-| **CJK / Chinese** | Often an afterthought | First-class tokenization, query analysis, and ranking |
-| **Citation integrity** | Best-effort | Verified: every claim must trace to a indexed chunk |
-| **Agent integration** | Custom API wrappers | Native MCP server + standard HTTP API |
-| **Deployment** | SaaS or Docker-heavy | Single binary: `cargo run` or Tauri desktop |
-| **License** | Often AGPL / proprietary | Apache 2.0 |
+| **Where is my data?** | Cloud service or remote vector DB | Single SQLite file on your disk |
+| **Can I run it offline?** | Usually needs internet | Fully offline with local models |
+| **How do I know the answer is true?** | "Sources" list | Chunk-level citation with hit terms and score trace |
+| **Chinese / CJK documents?** | Often an afterthought | Native tokenization, query analysis, and ranking |
+| **Agent integration** | Custom API wrappers | Native MCP server — Claude, Codex, OpenCode plug-and-play |
+| **Deployment** | Docker-heavy SaaS | Single binary: `cargo run` or Tauri desktop app |
+| **License** | AGPL or proprietary | **Apache 2.0** — commercial use, no restrictions |
 
 ---
 
-## What it does
+## Core strengths
 
-1. **Watches your folder** (Markdown, TXT, PDF, DOCX) and indexes chunks automatically.
-2. **Answers questions** using local LLMs (llama.cpp / vLLM / Ollama) with structured citations.
-3. **Builds a knowledge graph** in the background—entities, relations, source chunks—without blocking search.
-4. **Exposes an MCP server** so Claude, Codex, and other agents can query your vault with structured tools.
+### 1. Verifiable answers, not guesses
+Every answer includes:
+- **Which document** and **which chunk** the claim comes from
+- **Which query terms** matched and where
+- **Why it ranked first** — dense score, lexical score, phrase match, path match
+- **Gating decision** — if context is insufficient, it refuses instead of hallucinating
+
+### 2. Native Chinese / CJK support
+Built from the ground up for Chinese documents:
+- CJK-aware query parsing with suffix stripping ("是什么", "怎么") and filler handling
+- 48-term high-frequency noise filtering ("新增", "功能", "支持") to reduce false matches
+- Mixed-script segmentation for queries like "实现 async 方法"
+
+### 3. One binary, zero dependencies
+- **Rust** — memory-safe, fast, single static binary
+- **SQLite** — vectors, full-text search, graph metadata, and task queue in one file
+- **Tauri desktop + Axum server** — same core code, desktop or server deployment
+- No Python. No Docker. No Postgres. No Milvus.
+
+### 4. Background Graph-RAG without blocking search
+Entity and relation extraction runs in a background queue. Search works immediately after chunk indexing — you don't wait for graph completion.
+
+### 5. Agent-ready via MCP
+Claude Code, Codex, and OpenCode can query your vault through standard MCP tools (`ask`, `search`, `get_source`) — not custom HTTP wrappers.
 
 ---
 
-## Current Status (v0.3.0)
-
-- **Desktop (Tauri)**: fully functional. Search, settings, scope selection, citations, source preview.
-- **Server mode**: HTTP API available for browser/local network and private deployment.
-- **Retrieval**: citation validity is solid. Document-level Top-1 is improving (see [baseline](./docs/RETRIEVAL_BASELINE.md)).
-- **Enterprise**: private-deployment preview with RBAC, audit, and egress policy.
-
-> **Not a 50k-doc enterprise claim yet.** The current baseline is a checked-in regression suite on small corpora. We're iterating on ranking stability before scaling benchmarks.
-
----
-
-## Quick Start
+## Quick start
 
 ```bash
-# 1. Clone
+# Clone
 git clone https://github.com/FPSZ/Memori-Vault.git
 cd Memori-Vault
 
-# 2. Desktop dev (requires llama.cpp or Ollama running)
+# Desktop dev (needs a local LLM backend: llama.cpp, vLLM, or Ollama)
 pnpm --dir ui install
 pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 cargo tauri dev -p memori-desktop
 
-# 3. Server dev
+# Or server only
 cargo run -p memori-server
 ```
 
-Set your model endpoints:
+Configure your model endpoints:
 ```bash
-export MEMORI_CHAT_ENDPOINT=http://localhost:8001      # qwen3:14b
-export MEMORI_GRAPH_ENDPOINT=http://localhost:8002     # qwen3:8b
-export MEMORI_EMBED_ENDPOINT=http://localhost:8003     # Qwen3-Embedding-4B
+export MEMORI_CHAT_ENDPOINT=http://localhost:8001    # e.g. qwen3:14b
+export MEMORI_GRAPH_ENDPOINT=http://localhost:8002   # e.g. qwen3:8b
+export MEMORI_EMBED_ENDPOINT=http://localhost:8003   # e.g. Qwen3-Embedding-4B
 ```
 
 ---
 
 ## Architecture
 
-| Crate | Responsibility |
+| Crate | What it does |
 |---|---|
 | `memori-vault` | File watcher, debounce, event stream |
-| `memori-parser` | Parse & semantic chunk (Markdown, TXT, PDF, DOCX) |
-| `memori-storage` | SQLite: vectors, FTS, graph nodes/edges, task queue |
-| `memori-core` | Orchestration, retrieval pipeline, indexing worker |
-| `memori-desktop` | Tauri commands & desktop lifecycle |
+| `memori-parser` | Parse and semantically chunk Markdown, TXT, PDF, DOCX |
+| `memori-storage` | SQLite: dense vectors, FTS, graph nodes/edges, task queue |
+| `memori-core` | Retrieval pipeline, indexing worker, orchestration |
+| `memori-desktop` | Tauri commands and desktop lifecycle |
 | `memori-server` | Axum HTTP API + MCP endpoint |
 | `ui` | React + Vite + Tailwind v4 |
+
+---
+
+## Current status (v0.3.0)
+
+- **Desktop**: fully functional — search, citations, source preview, scope selection, settings.
+- **Server mode**: HTTP API for browser/local network and private deployment.
+- **Retrieval**: citation validity is solid. Document-level Top-1 is improving ([baseline](./docs/RETRIEVAL_BASELINE.md)).
+- **Enterprise**: private-deployment preview with RBAC, audit logs, and egress policy.
+
+> This is not a 50,000-document enterprise claim yet. The current baseline is a checked-in regression suite on small corpora. We're iterating on ranking stability before scaling benchmarks.
 
 ---
 
