@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+﻿use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::SocketAddr;
@@ -16,8 +16,8 @@ use memori_core::{
     AskResponseStructured, AskStatus, DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL,
     DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER, DEFAULT_OLLAMA_EMBED_MODEL, EgressMode,
     EngineError, EnterpriseModelPolicy, IndexingConfig, IndexingMode, IndexingStatus,
-    MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_MODEL_ENV,
-    MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,
+    MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV,
+    MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,
     ModelProvider, ResourceBudget, RuntimeModelConfig, ScheduleWindow, VaultStats,
     normalize_policy_endpoint, resolve_runtime_model_config_from_env, validate_provider_request,
     validate_runtime_model_settings,
@@ -40,6 +40,7 @@ const DEFAULT_SESSION_TTL_SECS: i64 = 8 * 60 * 60;
 mod audit;
 mod auth;
 mod dto;
+mod mcp;
 mod model_runtime;
 mod routes;
 mod settings_io;
@@ -48,6 +49,7 @@ mod state;
 pub(crate) use audit::*;
 pub(crate) use auth::*;
 pub(crate) use dto::*;
+// mcp types are accessed via crate::mcp:: path, no need for glob re-export
 pub(crate) use model_runtime::*;
 pub(crate) use routes::*;
 pub(crate) use settings_io::*;
@@ -104,6 +106,13 @@ async fn main() {
         metrics: Arc::new(ServerMetrics::default()),
         audit_file_lock: Arc::new(Mutex::new(())),
     };
+    if std::env::args().any(|arg| arg == "--mcp-stdio") {
+        if let Err(err) = mcp::transport_stdio::run_stdio_server(app_state).await {
+            error!(error = %err, "memori-server MCP stdio exited with error");
+        }
+        return;
+    }
+
     let app = build_router(app_state);
 
     let bind_addr = resolve_bind_addr();

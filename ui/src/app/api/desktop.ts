@@ -9,6 +9,8 @@ import type {
 import type {
   EnterprisePolicyDto,
   IndexingStatusDto,
+  McpSettingsDto,
+  McpStatusDto,
   ModelAvailabilityDto,
   ModelProvider,
   ModelSettingsDto,
@@ -17,7 +19,9 @@ import type {
 
 type ProviderModelsPayload = {
   provider: ModelProvider;
-  endpoint: string;
+  chatEndpoint: string;
+  graphEndpoint: string;
+  embedEndpoint: string;
   apiKey: string | null;
   modelsRoot: string | null;
 };
@@ -96,12 +100,7 @@ export function validateModelSetup() {
   return invoke<ModelAvailabilityDto>("validate_model_setup");
 }
 
-export function probeModelProvider(payload: {
-  provider: ModelProvider;
-  endpoint: string;
-  apiKey: string | null;
-  modelsRoot: string | null;
-}) {
+export function probeModelProvider(payload: ProviderModelsPayload) {
   return invoke<ModelAvailabilityDto>("probe_model_provider", payload);
 }
 
@@ -128,6 +127,26 @@ export function searchFiles(payload: {
 
 export function openSourceLocation(path: string) {
   return invoke("open_source_location", { path });
+}
+
+export function readFileContent(path: string) {
+  return invoke<string>("read_file_content", { path });
+}
+
+export function getMcpSettings() {
+  return invoke<McpSettingsDto>("get_mcp_settings");
+}
+
+export function setMcpSettings(payload: McpSettingsDto) {
+  return invoke<McpSettingsDto>("set_mcp_settings", { payload });
+}
+
+export function getMcpStatus() {
+  return invoke<McpStatusDto>("get_mcp_status");
+}
+
+export function copyMcpClientConfig(client: string) {
+  return invoke<string>("copy_mcp_client_config", { client });
 }
 
 export function setWatchRoot(path: string) {

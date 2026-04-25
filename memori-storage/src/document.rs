@@ -222,6 +222,189 @@ impl SqliteStore {
         Ok(records)
     }
 
+    pub async fn get_chunk_by_id(&self, chunk_id: i64) -> Result<Option<ChunkRecord>, StorageError> {
+        let conn_guard = self.lock_conn()?;
+        conn_guard
+            .query_row(
+                "SELECT id, doc_id, chunk_index, content, heading_path_json, block_kind, char_len
+                 FROM chunks
+                 WHERE id = ?1",
+                params![chunk_id],
+                map_chunk_record,
+            )
+            .optional()
+            .map_err(map_sqlite_error)
+    }
+
+    pub async fn get_document_by_id(
+        &self,
+        doc_id: i64,
+    ) -> Result<Option<DocumentRecord>, StorageError> {
+        let conn_guard = self.lock_conn()?;
+        conn_guard
+            .query_row(
+                "SELECT d.id, d.file_path, d.relative_path, d.file_name, d.file_ext, d.last_modified, d.indexed_at,
+                        d.chunk_count, d.content_char_count, d.heading_catalog_text, d.document_search_text
+                 FROM documents d
+                 INNER JOIN file_catalog fc ON fc.file_path = d.file_path
+                 WHERE d.id = ?1
+                   AND fc.removed_at IS NULL",
+                params![doc_id],
+                map_document_record,
+            )
+            .optional()
+            .map_err(map_sqlite_error)
+    }
+
+    pub async fn search_graph_nodes(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<GraphNode>, StorageError> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit = i64::try_from(limit.min(50)).unwrap_or(20);
+        let pattern = format!("%{}%", trimmed.replace('%', "\\%").replace('_', "\\_"));
+        let conn_guard = self.lock_conn()?;
+        let mut stmt = conn_guard
+            .prepare(
+                "SELECT id, label, name, description
+                 FROM nodes
+                 WHERE id LIKE ?1 ESCAPE '\\'
+                    OR label LIKE ?1 ESCAPE '\\'
+                    OR name LIKE ?1 ESCAPE '\\'
+                    OR COALESCE(description, '') LIKE ?1 ESCAPE '\\'
+                 ORDER BY name ASC, id ASC
+                 LIMIT ?2",
+            )
+            .map_err(map_sqlite_error)?;
+        let rows = stmt
+            .query_map(params![pattern, limit], |row| {
+                Ok(GraphNode {
+                    id: row.get(0)?,
+                    label: row.get(1)?,
+                    name: row.get(2)?,
+                    description: row.get(3)?,
+                })
+            })
+            .map_err(map_sqlite_error)?;
+        let mut nodes = Vec::new();
+        for row in rows {
+            nodes.push(row.map_err(map_sqlite_error)?);
+        }
+        Ok(nodes)
+    }
+
+    pub async fn get_graph_neighbors(
+        &self,
+        node_id: &str,
+        limit: usize,
+    ) -> Result<GraphNeighbors, StorageError> {
+        let node_id = node_id.trim();
+        if node_id.is_empty() {
+            return Ok(GraphNeighbors::default());
+        }
+        let limit = i64::try_from(limit.min(100)).unwrap_or(30);
+        let conn_guard = self.lock_conn()?;
+        let center = conn_guard
+            .query_row(
+                "SELECT id, label, name, description FROM nodes WHERE id = ?1",
+                params![node_id],
+                |row| {
+                    Ok(GraphNode {
+                        id: row.get(0)?,
+                        label: row.get(1)?,
+                        name: row.get(2)?,
+                        description: row.get(3)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(map_sqlite_error)?;
+
+        let mut edge_stmt = conn_guard
+            .prepare(
+                "SELECT id, source_node, target_node, relation
+                 FROM edges
+                 WHERE source_node = ?1 OR target_node = ?1
+                 ORDER BY relation ASC, id ASC
+                 LIMIT ?2",
+            )
+            .map_err(map_sqlite_error)?;
+        let edge_rows = edge_stmt
+            .query_map(params![node_id, limit], |row| {
+                Ok(GraphEdge {
+                    id: row.get(0)?,
+                    source_node: row.get(1)?,
+                    target_node: row.get(2)?,
+                    relation: row.get(3)?,
+                })
+            })
+            .map_err(map_sqlite_error)?;
+        let mut edges = Vec::new();
+        let mut neighbor_ids = HashSet::new();
+        for row in edge_rows {
+            let edge = row.map_err(map_sqlite_error)?;
+            if edge.source_node == node_id {
+                neighbor_ids.insert(edge.target_node.clone());
+            } else {
+                neighbor_ids.insert(edge.source_node.clone());
+            }
+            edges.push(edge);
+        }
+
+        let mut nodes = Vec::new();
+        if !neighbor_ids.is_empty() {
+            let ids = neighbor_ids.into_iter().collect::<Vec<_>>();
+            let placeholders = make_placeholders(ids.len());
+            let query = format!(
+                "SELECT id, label, name, description FROM nodes WHERE id IN ({})",
+                placeholders
+            );
+            let mut node_stmt = conn_guard.prepare(&query).map_err(map_sqlite_error)?;
+            let node_rows = node_stmt
+                .query_map(params_from_iter(ids.iter()), |row| {
+                    Ok(GraphNode {
+                        id: row.get(0)?,
+                        label: row.get(1)?,
+                        name: row.get(2)?,
+                        description: row.get(3)?,
+                    })
+                })
+                .map_err(map_sqlite_error)?;
+            for row in node_rows {
+                nodes.push(row.map_err(map_sqlite_error)?);
+            }
+        }
+
+        let mut source_chunks = Vec::new();
+        let mut chunk_stmt = conn_guard
+            .prepare(
+                "SELECT c.id, c.doc_id, c.chunk_index, c.content, c.heading_path_json, c.block_kind, c.char_len
+                 FROM chunk_nodes cn
+                 INNER JOIN chunks c ON c.id = cn.chunk_id
+                 WHERE cn.node_id = ?1
+                 ORDER BY c.id ASC
+                 LIMIT 20",
+            )
+            .map_err(map_sqlite_error)?;
+        let chunk_rows = chunk_stmt
+            .query_map(params![node_id], map_chunk_record)
+            .map_err(map_sqlite_error)?;
+        for row in chunk_rows {
+            source_chunks.push(row.map_err(map_sqlite_error)?);
+        }
+
+        Ok(GraphNeighbors {
+            center,
+            nodes,
+            edges,
+            source_chunks,
+        })
+    }
+
     pub async fn replace_document_index(
         &self,
         file_path: &Path,
@@ -935,6 +1118,43 @@ impl SqliteStore {
             )
             .map_err(map_sqlite_error)?;
         Ok(())
+    }
+
+    pub async fn reset_running_graph_tasks(&self) -> Result<u64, StorageError> {
+        let now = current_unix_timestamp_secs()?;
+        let conn_guard = self.lock_conn()?;
+        let changed = conn_guard
+            .execute(
+                "UPDATE graph_task_queue
+                 SET status = 'pending', updated_at = ?1
+                 WHERE status = 'running'",
+                params![now],
+            )
+            .map_err(map_sqlite_error)?;
+        u64::try_from(changed).map_err(|_| StorageError::NegativeCount {
+            table: "graph_task_queue",
+            count: changed as i64,
+        })
+    }
+
+    pub async fn mark_orphan_graph_tasks_done(&self) -> Result<u64, StorageError> {
+        let now = current_unix_timestamp_secs()?;
+        let conn_guard = self.lock_conn()?;
+        let changed = conn_guard
+            .execute(
+                "UPDATE graph_task_queue
+                 SET status = 'done', updated_at = ?1
+                 WHERE status IN ('pending', 'running')
+                   AND NOT EXISTS (
+                     SELECT 1 FROM chunks c WHERE c.id = graph_task_queue.chunk_id
+                   )",
+                params![now],
+            )
+            .map_err(map_sqlite_error)?;
+        u64::try_from(changed).map_err(|_| StorageError::NegativeCount {
+            table: "graph_task_queue",
+            count: changed as i64,
+        })
     }
 
     pub async fn count_graph_backlog(&self) -> Result<u64, StorageError> {

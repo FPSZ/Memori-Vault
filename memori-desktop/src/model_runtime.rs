@@ -102,7 +102,9 @@ pub(crate) fn describe_engine_error(err: EngineError) -> String {
 #[derive(Debug, Clone)]
 pub(crate) struct ActiveRuntimeModelSettings {
     pub(crate) provider: ModelProvider,
-    pub(crate) endpoint: String,
+    pub(crate) chat_endpoint: String,
+    pub(crate) graph_endpoint: String,
+    pub(crate) embed_endpoint: String,
     pub(crate) api_key: Option<String>,
     pub(crate) models_root: Option<String>,
     pub(crate) chat_model: String,
@@ -113,11 +115,13 @@ pub(crate) struct ActiveRuntimeModelSettings {
 pub(crate) fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> RuntimeModelConfig {
     RuntimeModelConfig {
         provider: settings.provider,
-        endpoint: settings.endpoint.clone(),
-        api_key: settings.api_key.clone(),
+        chat_endpoint: settings.chat_endpoint.clone(),
         chat_model: settings.chat_model.clone(),
+        graph_endpoint: settings.graph_endpoint.clone(),
         graph_model: settings.graph_model.clone(),
+        embed_endpoint: settings.embed_endpoint.clone(),
         embed_model: settings.embed_model.clone(),
+        api_key: settings.api_key.clone(),
     }
 }
 
@@ -169,6 +173,22 @@ pub(crate) fn provider_to_string(provider: ModelProvider) -> String {
     }
 }
 
+fn resolve_endpoint(
+    explicit: Option<String>,
+    single: Option<String>,
+    legacy: Option<String>,
+    specific_env: &str,
+    generic_env: &str,
+    default: &str,
+) -> String {
+    explicit
+        .or(single)
+        .or(legacy)
+        .or_else(|| std::env::var(specific_env).ok())
+        .or_else(|| std::env::var(generic_env).ok())
+        .unwrap_or_else(|| default.to_string())
+}
+
 pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
     let fallback_provider = settings.active_provider.clone().unwrap_or_else(|| {
         settings.provider.clone().unwrap_or_else(|| {
@@ -182,55 +202,55 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
         .map(|value| ModelProvider::from_value(&value))
         .unwrap_or(active_provider);
 
-    let local_endpoint = settings
-        .local_endpoint
-        .clone()
-        .or_else(|| {
-            if ModelProvider::from_value(
-                settings
-                    .provider
-                    .as_deref()
-                    .unwrap_or(fallback_provider.as_str()),
-            ) == ModelProvider::OllamaLocal
-            {
-                settings.endpoint.clone()
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            if env_provider == ModelProvider::OllamaLocal {
-                std::env::var(MEMORI_MODEL_ENDPOINT_ENV).ok()
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| DEFAULT_MODEL_ENDPOINT_OLLAMA.to_string());
+    let local_chat_endpoint = resolve_endpoint(
+        settings.local_chat_endpoint.clone(),
+        settings.local_endpoint.clone(),
+        settings.endpoint.clone(),
+        MEMORI_CHAT_ENDPOINT_ENV,
+        MEMORI_MODEL_ENDPOINT_ENV,
+        DEFAULT_CHAT_ENDPOINT,
+    );
+    let local_graph_endpoint = resolve_endpoint(
+        settings.local_graph_endpoint.clone(),
+        settings.local_endpoint.clone(),
+        settings.endpoint.clone(),
+        MEMORI_GRAPH_ENDPOINT_ENV,
+        MEMORI_MODEL_ENDPOINT_ENV,
+        DEFAULT_GRAPH_ENDPOINT,
+    );
+    let local_embed_endpoint = resolve_endpoint(
+        settings.local_embed_endpoint.clone(),
+        settings.local_endpoint.clone(),
+        settings.endpoint.clone(),
+        MEMORI_EMBED_ENDPOINT_ENV,
+        MEMORI_MODEL_ENDPOINT_ENV,
+        DEFAULT_EMBED_ENDPOINT,
+    );
 
-    let remote_endpoint = settings
-        .remote_endpoint
-        .clone()
-        .or_else(|| {
-            if ModelProvider::from_value(
-                settings
-                    .provider
-                    .as_deref()
-                    .unwrap_or(fallback_provider.as_str()),
-            ) == ModelProvider::OpenAiCompatible
-            {
-                settings.endpoint.clone()
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            if env_provider == ModelProvider::OpenAiCompatible {
-                std::env::var(MEMORI_MODEL_ENDPOINT_ENV).ok()
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| memori_core::DEFAULT_MODEL_ENDPOINT_OPENAI.to_string());
+    let remote_chat_endpoint = resolve_endpoint(
+        settings.remote_chat_endpoint.clone(),
+        settings.remote_endpoint.clone(),
+        settings.endpoint.clone(),
+        MEMORI_CHAT_ENDPOINT_ENV,
+        MEMORI_MODEL_ENDPOINT_ENV,
+        DEFAULT_CHAT_ENDPOINT,
+    );
+    let remote_graph_endpoint = resolve_endpoint(
+        settings.remote_graph_endpoint.clone(),
+        settings.remote_endpoint.clone(),
+        settings.endpoint.clone(),
+        MEMORI_GRAPH_ENDPOINT_ENV,
+        MEMORI_MODEL_ENDPOINT_ENV,
+        DEFAULT_GRAPH_ENDPOINT,
+    );
+    let remote_embed_endpoint = resolve_endpoint(
+        settings.remote_embed_endpoint.clone(),
+        settings.remote_endpoint.clone(),
+        settings.endpoint.clone(),
+        MEMORI_EMBED_ENDPOINT_ENV,
+        MEMORI_MODEL_ENDPOINT_ENV,
+        DEFAULT_EMBED_ENDPOINT,
+    );
 
     let local_chat_model = settings
         .local_chat_model
@@ -305,7 +325,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                 None
             }
         })
-        .unwrap_or_else(|| DEFAULT_OLLAMA_EMBED_MODEL.to_string());
+        .unwrap_or_else(|| DEFAULT_EMBED_MODEL_QWEN3.to_string());
 
     let remote_chat_model = settings
         .remote_chat_model
@@ -380,7 +400,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                 None
             }
         })
-        .unwrap_or_else(|| DEFAULT_OLLAMA_EMBED_MODEL.to_string());
+        .unwrap_or_else(|| DEFAULT_EMBED_MODEL_QWEN3.to_string());
 
     let remote_api_key = settings
         .remote_api_key
@@ -410,14 +430,18 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
     ModelSettingsDto {
         active_provider: provider_to_string(active_provider),
         local_profile: LocalModelProfileDto {
-            endpoint: normalize_endpoint(ModelProvider::OllamaLocal, &local_endpoint),
+            chat_endpoint: normalize_endpoint(ModelProvider::OllamaLocal, &local_chat_endpoint),
+            graph_endpoint: normalize_endpoint(ModelProvider::OllamaLocal, &local_graph_endpoint),
+            embed_endpoint: normalize_endpoint(ModelProvider::OllamaLocal, &local_embed_endpoint),
             models_root: normalize_optional_text(settings.local_models_root.clone()),
             chat_model: local_chat_model,
             graph_model: local_graph_model,
             embed_model: local_embed_model,
         },
         remote_profile: RemoteModelProfileDto {
-            endpoint: normalize_endpoint(ModelProvider::OpenAiCompatible, &remote_endpoint),
+            chat_endpoint: normalize_endpoint(ModelProvider::OpenAiCompatible, &remote_chat_endpoint),
+            graph_endpoint: normalize_endpoint(ModelProvider::OpenAiCompatible, &remote_graph_endpoint),
+            embed_endpoint: normalize_endpoint(ModelProvider::OpenAiCompatible, &remote_embed_endpoint),
             api_key: remote_api_key,
             chat_model: remote_chat_model,
             graph_model: remote_graph_model,
@@ -430,11 +454,23 @@ pub(crate) fn normalize_model_settings_payload(
     payload: ModelSettingsDto,
 ) -> Result<ModelSettingsDto, String> {
     let active_provider = ModelProvider::from_value(&payload.active_provider);
-    let local_endpoint =
-        normalize_endpoint(ModelProvider::OllamaLocal, &payload.local_profile.endpoint);
-    let remote_endpoint = normalize_endpoint(
+    let local_chat_endpoint =
+        normalize_endpoint(ModelProvider::OllamaLocal, &payload.local_profile.chat_endpoint);
+    let local_graph_endpoint =
+        normalize_endpoint(ModelProvider::OllamaLocal, &payload.local_profile.graph_endpoint);
+    let local_embed_endpoint =
+        normalize_endpoint(ModelProvider::OllamaLocal, &payload.local_profile.embed_endpoint);
+    let remote_chat_endpoint = normalize_endpoint(
         ModelProvider::OpenAiCompatible,
-        &payload.remote_profile.endpoint,
+        &payload.remote_profile.chat_endpoint,
+    );
+    let remote_graph_endpoint = normalize_endpoint(
+        ModelProvider::OpenAiCompatible,
+        &payload.remote_profile.graph_endpoint,
+    );
+    let remote_embed_endpoint = normalize_endpoint(
+        ModelProvider::OpenAiCompatible,
+        &payload.remote_profile.embed_endpoint,
     );
 
     let local_chat_model = payload.local_profile.chat_model.trim().to_string();
@@ -463,14 +499,18 @@ pub(crate) fn normalize_model_settings_payload(
     Ok(ModelSettingsDto {
         active_provider: provider_to_string(active_provider),
         local_profile: LocalModelProfileDto {
-            endpoint: local_endpoint,
+            chat_endpoint: local_chat_endpoint,
+            graph_endpoint: local_graph_endpoint,
+            embed_endpoint: local_embed_endpoint,
             models_root: local_models_root,
             chat_model: local_chat_model,
             graph_model: local_graph_model,
             embed_model: local_embed_model,
         },
         remote_profile: RemoteModelProfileDto {
-            endpoint: remote_endpoint,
+            chat_endpoint: remote_chat_endpoint,
+            graph_endpoint: remote_graph_endpoint,
+            embed_endpoint: remote_embed_endpoint,
             api_key: normalize_optional_text(payload.remote_profile.api_key),
             chat_model: remote_chat_model,
             graph_model: remote_graph_model,
@@ -483,29 +523,49 @@ pub(crate) fn resolve_active_runtime_settings(
     settings: &ModelSettingsDto,
 ) -> ActiveRuntimeModelSettings {
     let active_provider = ModelProvider::from_value(&settings.active_provider);
-    if active_provider == ModelProvider::OpenAiCompatible {
-        return ActiveRuntimeModelSettings {
-            provider: ModelProvider::OpenAiCompatible,
-            endpoint: normalize_endpoint(
-                ModelProvider::OpenAiCompatible,
-                &settings.remote_profile.endpoint,
-            ),
-            api_key: normalize_optional_text(settings.remote_profile.api_key.clone()),
-            models_root: None,
-            chat_model: settings.remote_profile.chat_model.trim().to_string(),
-            graph_model: settings.remote_profile.graph_model.trim().to_string(),
-            embed_model: settings.remote_profile.embed_model.trim().to_string(),
-        };
-    }
 
     ActiveRuntimeModelSettings {
-        provider: ModelProvider::OllamaLocal,
-        endpoint: normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.endpoint),
-        api_key: None,
-        models_root: normalize_optional_text(settings.local_profile.models_root.clone()),
-        chat_model: settings.local_profile.chat_model.trim().to_string(),
-        graph_model: settings.local_profile.graph_model.trim().to_string(),
-        embed_model: settings.local_profile.embed_model.trim().to_string(),
+        provider: active_provider,
+        chat_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
+            normalize_endpoint(ModelProvider::OpenAiCompatible, &settings.remote_profile.chat_endpoint)
+        } else {
+            normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.chat_endpoint)
+        },
+        graph_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
+            normalize_endpoint(ModelProvider::OpenAiCompatible, &settings.remote_profile.graph_endpoint)
+        } else {
+            normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.graph_endpoint)
+        },
+        embed_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
+            normalize_endpoint(ModelProvider::OpenAiCompatible, &settings.remote_profile.embed_endpoint)
+        } else {
+            normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.embed_endpoint)
+        },
+        api_key: if active_provider == ModelProvider::OpenAiCompatible {
+            normalize_optional_text(settings.remote_profile.api_key.clone())
+        } else {
+            None
+        },
+        models_root: if active_provider == ModelProvider::OllamaLocal {
+            normalize_optional_text(settings.local_profile.models_root.clone())
+        } else {
+            None
+        },
+        chat_model: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.chat_model.trim().to_string()
+        } else {
+            settings.local_profile.chat_model.trim().to_string()
+        },
+        graph_model: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.graph_model.trim().to_string()
+        } else {
+            settings.local_profile.graph_model.trim().to_string()
+        },
+        embed_model: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.embed_model.trim().to_string()
+        } else {
+            settings.local_profile.embed_model.trim().to_string()
+        },
     }
 }
 
@@ -534,7 +594,9 @@ pub(crate) fn resolve_configured_active_runtime_settings(
     let active = resolve_active_runtime_settings(&model_settings);
 
     let configured = if explicit_provider == ModelProvider::OpenAiCompatible {
-        !active.endpoint.trim().is_empty()
+        !active.chat_endpoint.trim().is_empty()
+            && !active.graph_endpoint.trim().is_empty()
+            && !active.embed_endpoint.trim().is_empty()
             && active
                 .api_key
                 .as_deref()
@@ -544,7 +606,9 @@ pub(crate) fn resolve_configured_active_runtime_settings(
             && !active.graph_model.trim().is_empty()
             && !active.embed_model.trim().is_empty()
     } else {
-        !active.endpoint.trim().is_empty()
+        !active.chat_endpoint.trim().is_empty()
+            && !active.graph_endpoint.trim().is_empty()
+            && !active.embed_endpoint.trim().is_empty()
             && !active.chat_model.trim().is_empty()
             && !active.graph_model.trim().is_empty()
             && !active.embed_model.trim().is_empty()
@@ -607,7 +671,10 @@ pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) 
             MEMORI_MODEL_PROVIDER_ENV,
             provider_to_string(settings.provider),
         );
-        std::env::set_var(MEMORI_MODEL_ENDPOINT_ENV, &settings.endpoint);
+        std::env::set_var(MEMORI_MODEL_ENDPOINT_ENV, &settings.chat_endpoint);
+        std::env::set_var(MEMORI_CHAT_ENDPOINT_ENV, &settings.chat_endpoint);
+        std::env::set_var(MEMORI_GRAPH_ENDPOINT_ENV, &settings.graph_endpoint);
+        std::env::set_var(MEMORI_EMBED_ENDPOINT_ENV, &settings.embed_endpoint);
         std::env::set_var(MEMORI_CHAT_MODEL_ENV, &settings.chat_model);
         std::env::set_var(MEMORI_GRAPH_MODEL_ENV, &settings.graph_model);
         std::env::set_var(MEMORI_EMBED_MODEL_ENV, &settings.embed_model);

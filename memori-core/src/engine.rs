@@ -296,7 +296,7 @@ impl MemoriEngine {
 
         let final_evidence = merged.into_iter().take(final_answer_k).collect::<Vec<_>>();
         metrics.final_evidence_count = final_evidence.len();
-        let status = if final_evidence.len() < 2 {
+        let status = if final_evidence.is_empty() {
             AskStatus::InsufficientEvidence
         } else {
             AskStatus::Answered
@@ -752,7 +752,9 @@ impl MemoriEngine {
                             .unwrap_or("index_upgrade_required"),
                     )
                     .await?;
-                } else {
+                }
+
+                if metadata.rebuild_state == RebuildState::Ready {
                     {
                         let mut runtime = state.indexing_runtime.write().await;
                         runtime.phase = "scanning".to_string();

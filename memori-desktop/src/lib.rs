@@ -6,10 +6,12 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use memori_core::{
-    AskResponseStructured, AskStatus, DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL,
-    DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER, DEFAULT_OLLAMA_EMBED_MODEL, EgressMode,
+    AskResponseStructured, AskStatus, DEFAULT_CHAT_ENDPOINT, DEFAULT_CHAT_MODEL,
+    DEFAULT_EMBED_ENDPOINT, DEFAULT_GRAPH_ENDPOINT, DEFAULT_GRAPH_MODEL,
+    DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER, EgressMode,
     EngineError, EnterpriseModelPolicy, IndexingConfig, IndexingMode, IndexingStatus,
-    MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_MODEL_ENV,
+    MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_ENDPOINT_ENV,
+    MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV, MEMORI_GRAPH_MODEL_ENV,
     MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,
     ModelProvider, ResourceBudget, RuntimeModelConfig, ScheduleWindow, VaultStats,
     normalize_policy_endpoint, validate_provider_request, validate_runtime_model_settings,
@@ -152,9 +154,14 @@ pub fn run() {
             pull_model,
             set_local_models_root,
             scan_local_model_files,
+            get_mcp_settings,
+            set_mcp_settings,
+            get_mcp_status,
+            copy_mcp_client_config,
             set_watch_root,
             list_search_scopes,
             open_source_location,
+            read_file_content,
             rank_settings_query
         ])
         .run(tauri::generate_context!())

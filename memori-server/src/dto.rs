@@ -30,6 +30,12 @@ pub(crate) struct AppSettings {
     pub(crate) oidc_client_id: Option<String>,
     pub(crate) oidc_redirect_uri: Option<String>,
     pub(crate) oidc_roles_claim: Option<String>,
+    pub(crate) mcp_enabled: Option<bool>,
+    pub(crate) mcp_transports: Option<Vec<String>>,
+    pub(crate) mcp_http_bind: Option<String>,
+    pub(crate) mcp_http_port: Option<u16>,
+    pub(crate) mcp_access_mode: Option<String>,
+    pub(crate) mcp_audit_enabled: Option<bool>,
     // legacy fields for backwards compatibility
     pub(crate) provider: Option<String>,
     pub(crate) endpoint: Option<String>,
@@ -275,6 +281,29 @@ pub(crate) struct RankSettingsResponse {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct HealthResponse {
     pub(crate) ok: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub(crate) struct McpSettingsDto {
+    pub(crate) enabled: bool,
+    pub(crate) transports: Vec<String>,
+    pub(crate) http_bind: String,
+    pub(crate) http_port: u16,
+    pub(crate) access_mode: String,
+    pub(crate) audit_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
+pub(crate) struct McpStatusDto {
+    pub(crate) enabled: bool,
+    pub(crate) protocol_version: String,
+    pub(crate) http_endpoint: String,
+    pub(crate) stdio_command: String,
+    pub(crate) tools_count: usize,
+    pub(crate) resources_count: usize,
+    pub(crate) prompts_count: usize,
 }
 
 #[derive(Debug, Serialize)]

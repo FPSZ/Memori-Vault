@@ -50,7 +50,10 @@ struct OpenAiChatChoice {
 /// - temperature 固定为 0.0，减少幻觉与结构漂移
 /// - 解析失败时返回 EngineError，不允许 panic
 pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
 
     let runtime = resolve_runtime_model_config_from_env();
     let model = runtime.graph_model.clone();

@@ -599,6 +599,7 @@ pub(crate) fn merge_chunk_evidence(
     items
 }
 
+#[cfg(test)]
 pub(crate) fn should_refuse_for_insufficient_evidence(
     analysis: &QueryAnalysis,
     evidence: &[MergedEvidence],
@@ -743,6 +744,19 @@ pub(crate) fn evaluate_gating_decision(
     {
         return GatingDecision::allow(
             "coverage_release",
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        );
+    }
+
+    if top.document_rank <= 3
+        && has_any_chunk_lexical(top)
+        && top_doc_distinct_term_hits >= 3
+        && top_doc_term_coverage >= 0.65
+    {
+        return GatingDecision::allow(
+            "high_coverage_lexical_release",
             top_doc_distinct_term_hits,
             top_doc_term_coverage,
             top_doc_phrase_quality,
@@ -1174,7 +1188,11 @@ pub(crate) fn build_text_context_from_evidence(evidence: &[MergedEvidence]) -> S
 pub(crate) fn build_reference_excerpt(file_path: &Path, chunk_content: &str) -> String {
     const TARGET_EXCERPT_CHARS: usize = 1600;
 
-    let Ok(raw) = std::fs::read_to_string(file_path) else {
+    let raw = if let Some(text) = memori_parser::extract_document_text(file_path) {
+        text
+    } else if let Ok(text) = std::fs::read_to_string(file_path) {
+        text
+    } else {
         return chunk_content.to_string();
     };
 

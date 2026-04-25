@@ -177,6 +177,14 @@ pub struct GraphTaskRecord {
     pub retry_count: i64,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct GraphNeighbors {
+    pub center: Option<GraphNode>,
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<GraphEdge>,
+    pub source_chunks: Vec<ChunkRecord>,
+}
+
 #[derive(Debug, Clone)]
 struct CachedVector {
     chunk_id: i64,

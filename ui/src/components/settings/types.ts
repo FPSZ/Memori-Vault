@@ -7,9 +7,13 @@ export type ModelProvider = "ollama_local" | "openai_compatible";
 export type IndexingMode = "continuous" | "manual" | "scheduled";
 export type ResourceBudget = "low" | "balanced" | "fast";
 export type ModelRole = "chat_model" | "graph_model" | "embed_model";
+export type McpTransport = "stdio" | "http";
+export type McpTransportMode = "stdio" | "http" | "both";
 
 export type LocalModelProfileDto = {
-  endpoint: string;
+  chat_endpoint: string;
+  graph_endpoint: string;
+  embed_endpoint: string;
   models_root?: string | null;
   chat_model: string;
   graph_model: string;
@@ -17,7 +21,9 @@ export type LocalModelProfileDto = {
 };
 
 export type RemoteModelProfileDto = {
-  endpoint: string;
+  chat_endpoint: string;
+  graph_endpoint: string;
+  embed_endpoint: string;
   api_key?: string | null;
   chat_model: string;
   graph_model: string;
@@ -70,6 +76,25 @@ export type IndexingStatusDto = {
   parser_format_version: number;
 };
 
+export type McpSettingsDto = {
+  enabled: boolean;
+  transports: McpTransport[];
+  http_bind: string;
+  http_port: number;
+  access_mode: "full_control" | "read_only";
+  audit_enabled: boolean;
+};
+
+export type McpStatusDto = {
+  enabled: boolean;
+  protocol_version: string;
+  http_endpoint: string;
+  stdio_command: string;
+  tools_count: number;
+  resources_count: number;
+  prompts_count: number;
+};
+
 export type SettingsModalProps = {
   open: boolean;
   onBack: () => void;
@@ -117,4 +142,11 @@ export type SettingsModalProps = {
   onTriggerReindex: () => Promise<void>;
   onPauseIndexing: () => Promise<void>;
   onResumeIndexing: () => Promise<void>;
+  mcpSettings: McpSettingsDto;
+  mcpStatus: McpStatusDto | null;
+  mcpBusy: boolean;
+  mcpMessage: string | null;
+  onMcpSettingsChange: (next: McpSettingsDto) => void;
+  onSaveMcpSettings: () => Promise<void>;
+  onCopyMcpClientConfig: (client: string) => Promise<void>;
 };

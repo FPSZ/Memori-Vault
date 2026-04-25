@@ -45,6 +45,7 @@ pub(crate) fn build_router(app_state: ServerState) -> Router {
         .route("/api/indexing/resume", post(resume_indexing_handler))
         .route("/api/ask", post(ask_handler))
         .route("/api/ask_legacy", post(ask_legacy_handler))
+        .route("/mcp", post(mcp::transport_http::mcp_http_handler))
         .route("/api/settings", get(get_app_settings_handler))
         .route("/api/model-settings", get(get_model_settings_handler))
         .route("/api/model-settings", post(set_model_settings_handler))

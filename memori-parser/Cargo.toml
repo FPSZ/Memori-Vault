@@ -9,3 +9,6 @@ description = "Memori-Vault 解析模块占位骨架"
 [dependencies]
 pulldown-cmark = "0.13.0"
 thiserror.workspace = true
+lopdf = "0.35"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"

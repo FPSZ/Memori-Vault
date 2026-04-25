@@ -4,8 +4,8 @@
   "version": "0.3.0",
   "identifier": "com.memori.vault.desktop",
   "build": {
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "",
+    "beforeDevCommand": "cd ../ui && pnpm run dev",
+    "beforeBuildCommand": "cd ../ui && pnpm run build",
     "frontendDist": "../ui/dist",
     "devUrl": "http://localhost:1420"
   },

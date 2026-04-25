@@ -1,5 +1,7 @@
 use super::*;
 
+const EMBEDDING_CHUNK_TIMEOUT_SECS: u64 = 120;
+
 pub(crate) async fn process_file_event(
     state: &Arc<AppState>,
     event: &WatchEvent,
@@ -93,16 +95,20 @@ pub(crate) async fn process_file_event(
         .await
         .ok()
         .flatten();
+    let previous_index_is_ready = previous_state
+        .as_ref()
+        .is_some_and(|prev| prev.index_status == "ready");
     if let Some(prev) = previous_state.as_ref()
         && prev.file_size == file_size
         && prev.mtime_secs == mtime_secs
+        && previous_index_is_ready
     {
         debug!(path = %event.path.display(), "文件元数据未变化，跳过重建索引");
         set_runtime_idle(state, None).await;
         return;
     }
 
-    let raw_text = match tokio::fs::read_to_string(&event.path).await {
+    let raw_text = match read_document_text(&event.path).await {
         Ok(text) => text,
         Err(err) => {
             warn!(
@@ -117,8 +123,9 @@ pub(crate) async fn process_file_event(
         }
     };
     let file_hash = hash_text(&raw_text);
-    if let Some(prev) = previous_state
+    if let Some(prev) = previous_state.as_ref()
         && prev.content_hash == file_hash
+        && previous_index_is_ready
     {
         debug!(path = %event.path.display(), "文件内容哈希未变化，跳过重建索引");
         if let Err(err) = state
@@ -215,17 +222,51 @@ pub(crate) async fn process_file_event(
         runtime.phase = "embedding".to_string();
     }
 
-    let mut embeddings = Vec::with_capacity(chunks.len());
+    info!(
+        path = %event.path.display(),
+        chunk_count = chunks.len(),
+        model = state.embedding_client.model_name(),
+        timeout_secs = EMBEDDING_CHUNK_TIMEOUT_SECS,
+        "indexing embedding started"
+    );
 
-    // 优先完成 embedding 与向量落盘，避免图谱抽取耗时导致 stats 长时间保持 0。
-    for chunk in &chunks {
-        match state.embedding_client.embed_text(&chunk.content).await {
-            Ok(embedding) => embeddings.push(embedding),
-            Err(err) => {
+    let mut embeddings = Vec::with_capacity(chunks.len());
+    for (chunk_position, chunk) in chunks.iter().enumerate() {
+        let chunk_number = chunk_position + 1;
+        debug!(
+            path = %event.path.display(),
+            chunk_index = chunk.chunk_index,
+            chunk_number = chunk_number,
+            chunk_count = chunks.len(),
+            char_len = chunk.content.chars().count(),
+            "embedding chunk started"
+        );
+
+        match tokio::time::timeout(
+            Duration::from_secs(EMBEDDING_CHUNK_TIMEOUT_SECS),
+            state.embedding_client.embed_text(&chunk.content),
+        )
+        .await
+        {
+            Ok(Ok(embedding)) => {
+                debug!(
+                    path = %event.path.display(),
+                    chunk_index = chunk.chunk_index,
+                    chunk_number = chunk_number,
+                    chunk_count = chunks.len(),
+                    dim = embedding.len(),
+                    "embedding chunk finished"
+                );
+                embeddings.push(embedding);
+            }
+            Ok(Err(err)) => {
                 error!(
                     path = %event.path.display(),
+                    chunk_index = chunk.chunk_index,
+                    chunk_number = chunk_number,
+                    chunk_count = chunks.len(),
                     error = %err,
-                    "无法连接本地大模型，请确保 Ollama 已启动"
+                    "embedding chunk failed"
                 );
                 let _ = state
                     .vector_store
@@ -242,8 +283,41 @@ pub(crate) async fn process_file_event(
                 runtime.phase = "idle".to_string();
                 return;
             }
+            Err(_) => {
+                let err = format!(
+                    "embedding chunk timed out after {EMBEDDING_CHUNK_TIMEOUT_SECS}s"
+                );
+                error!(
+                    path = %event.path.display(),
+                    chunk_index = chunk.chunk_index,
+                    chunk_number = chunk_number,
+                    chunk_count = chunks.len(),
+                    timeout_secs = EMBEDDING_CHUNK_TIMEOUT_SECS,
+                    "embedding chunk timed out"
+                );
+                let _ = state
+                    .vector_store
+                    .mark_file_index_failed(
+                        &event.path,
+                        file_size,
+                        mtime_secs,
+                        &file_hash,
+                        &err,
+                    )
+                    .await;
+                let mut runtime = state.indexing_runtime.write().await;
+                runtime.last_error = Some(err);
+                runtime.phase = "idle".to_string();
+                return;
+            }
         }
     }
+
+    info!(
+        path = %event.path.display(),
+        chunk_count = chunks.len(),
+        "indexing embedding finished"
+    );
 
     if let Err(err) = state
         .vector_store
@@ -276,6 +350,17 @@ pub(crate) async fn process_file_event(
         runtime.last_error = Some(err.to_string());
         runtime.phase = "idle".to_string();
         return;
+    }
+    if let Err(err) = state
+        .vector_store
+        .upsert_file_index_state(&event.path, file_size, mtime_secs, &file_hash)
+        .await
+    {
+        warn!(
+            path = %event.path.display(),
+            error = %err,
+            "failed to refresh real file metadata after indexing"
+        );
     }
 
     for chunk in chunks {
@@ -312,7 +397,7 @@ pub(crate) async fn process_file_event(
     }
 
     if let Some(tx) = graph_notify_tx {
-        let _ = tx.send(()).await;
+        let _ = tx.try_send(());
     }
 
     set_runtime_idle(state, None).await;
@@ -361,6 +446,20 @@ pub(crate) async fn run_graph_worker(
     mut notify_rx: mpsc::Receiver<()>,
 ) -> Result<(), EngineError> {
     info!("memori-core graph worker started");
+    match state.vector_store.reset_running_graph_tasks().await {
+        Ok(count) if count > 0 => {
+            info!(count = count, "reset interrupted running graph tasks to pending");
+        }
+        Ok(_) => {}
+        Err(err) => warn!(error = %err, "failed to reset interrupted graph tasks"),
+    }
+    match state.vector_store.mark_orphan_graph_tasks_done().await {
+        Ok(count) if count > 0 => {
+            warn!(count = count, "discarded orphan graph tasks before graph extraction");
+        }
+        Ok(_) => {}
+        Err(err) => warn!(error = %err, "failed to discard orphan graph tasks"),
+    }
     let mut channel_closed = false;
 
     loop {
@@ -376,36 +475,126 @@ pub(crate) async fn run_graph_worker(
             continue;
         }
 
-        match state.vector_store.fetch_next_graph_task().await? {
-            Some(task) => {
-                {
-                    let mut runtime = state.indexing_runtime.write().await;
-                    runtime.phase = "graphing".to_string();
-                }
-                let graph_data = match extract_entities(&task.content).await {
-                    Ok(data) => data,
-                    Err(err) => {
-                        warn!(
-                            chunk_id = task.chunk_id,
-                            retry = task.retry_count + 1,
-                            error = %err,
-                            "图谱抽取失败，任务将重试"
-                        );
-                        state
-                            .vector_store
-                            .mark_graph_task_failed(task.task_id, task.retry_count + 1)
-                            .await?;
-                        let mut runtime = state.indexing_runtime.write().await;
-                        runtime.last_error = Some(err.to_string());
-                        continue;
-                    }
-                };
+        // 一次收集一批任务，并行处理以减少 LLM 等待时间。
+        // 注意：llama-server --parallel 参数决定并发槽位数，需与其保持一致。
+        const GRAPH_BATCH_SIZE: usize = 2;
+        let mut tasks = Vec::with_capacity(GRAPH_BATCH_SIZE);
+        while tasks.len() < GRAPH_BATCH_SIZE {
+            match state.vector_store.fetch_next_graph_task().await? {
+                Some(task) => tasks.push(task),
+                None => break,
+            }
+        }
 
-                if let Err(err) = state
-                    .vector_store
-                    .insert_graph(task.chunk_id, graph_data.nodes, graph_data.edges)
-                    .await
-                {
+        if tasks.is_empty() {
+            if channel_closed {
+                if state.vector_store.count_graph_backlog().await.unwrap_or(0) == 0 {
+                    break;
+                }
+            } else {
+                match notify_rx.recv().await {
+                    Some(_) => {}
+                    None => channel_closed = true,
+                }
+            }
+            let cfg = state.indexing_runtime.read().await.config.clone();
+            sleep(graph_worker_idle_delay(cfg.resource_budget)).await;
+            continue;
+        }
+
+        {
+            let mut runtime = state.indexing_runtime.write().await;
+            runtime.phase = "graphing".to_string();
+        }
+
+        // 并行图谱抽取（附带原始索引确保结果对应正确）
+        let mut live_tasks = Vec::with_capacity(tasks.len());
+        for task in tasks {
+            match state.vector_store.get_chunk_by_id(task.chunk_id).await {
+                Ok(Some(_)) => live_tasks.push(task),
+                Ok(None) => {
+                    warn!(
+                        chunk_id = task.chunk_id,
+                        "graph task points to a deleted chunk; marking it done before LLM extraction"
+                    );
+                    state.vector_store.mark_graph_task_done(task.task_id).await?;
+                }
+                Err(err) => {
+                    warn!(
+                        chunk_id = task.chunk_id,
+                        error = %err,
+                        "failed to verify graph task chunk before extraction"
+                    );
+                    state
+                        .vector_store
+                        .mark_graph_task_failed(task.task_id, task.retry_count + 1)
+                        .await?;
+                }
+            }
+        }
+        let tasks = live_tasks;
+        if tasks.is_empty() {
+            let mut runtime = state.indexing_runtime.write().await;
+            runtime.phase = "idle".to_string();
+            runtime.last_error = None;
+            continue;
+        }
+
+        let mut set = tokio::task::JoinSet::new();
+        for (idx, task) in tasks.iter().enumerate() {
+            let content = task.content.clone();
+            set.spawn(async move { (idx, extract_entities(&content).await) });
+        }
+        let mut results: Vec<Option<Result<GraphData, EngineError>>> =
+            (0..tasks.len()).map(|_| None).collect();
+        while let Some(result) = set.join_next().await {
+            match result {
+                Ok((idx, Ok(data))) => results[idx] = Some(Ok(data)),
+                Ok((idx, Err(err))) => results[idx] = Some(Err(err)),
+                Err(join_err) => {
+                    warn!(error = %join_err, "图谱抽取任务异常终止");
+                }
+            }
+        }
+
+        // 顺序落盘（SQLite 单写更安全）
+        let mut had_error = false;
+        for (task, result) in tasks.into_iter().zip(results.into_iter()) {
+            let graph_data = match result {
+                Some(Ok(data)) => data,
+                Some(Err(err)) => {
+                    warn!(
+                        chunk_id = task.chunk_id,
+                        retry = task.retry_count + 1,
+                        error = %err,
+                        "图谱抽取失败，任务将重试"
+                    );
+                    state
+                        .vector_store
+                        .mark_graph_task_failed(task.task_id, task.retry_count + 1)
+                        .await?;
+                    had_error = true;
+                    continue;
+                }
+                None => continue,
+            };
+
+            if let Err(err) = state
+                .vector_store
+                .insert_graph(task.chunk_id, graph_data.nodes, graph_data.edges)
+                .await
+            {
+                // ChunkNotFound 意味着对应 chunk 已被重新索引删除，重试无意义，直接丢弃任务。
+                if err.to_string().contains("chunk_id 不存在") || err.to_string().contains("ChunkNotFound") {
+                    warn!(
+                        chunk_id = task.chunk_id,
+                        "对应 chunk 已被删除，丢弃过期图谱任务"
+                    );
+                    state
+                        .vector_store
+                        .mark_graph_task_done(task.task_id)
+                        .await?;
+                } else {
                     warn!(
                         chunk_id = task.chunk_id,
                         retry = task.retry_count + 1,
@@ -416,33 +605,21 @@ pub(crate) async fn run_graph_worker(
                         .vector_store
                         .mark_graph_task_failed(task.task_id, task.retry_count + 1)
                         .await?;
-                    let mut runtime = state.indexing_runtime.write().await;
-                    runtime.last_error = Some(err.to_string());
-                    continue;
+                    had_error = true;
                 }
+                continue;
+            }
 
-                state
-                    .vector_store
-                    .mark_graph_task_done(task.task_id)
-                    .await?;
-                let mut runtime = state.indexing_runtime.write().await;
-                runtime.phase = "idle".to_string();
-                runtime.last_error = None;
-            }
-            None => {
-                if channel_closed {
-                    if state.vector_store.count_graph_backlog().await.unwrap_or(0) == 0 {
-                        break;
-                    }
-                } else {
-                    match notify_rx.recv().await {
-                        Some(_) => {}
-                        None => channel_closed = true,
-                    }
-                }
-                let cfg = state.indexing_runtime.read().await.config.clone();
-                sleep(graph_worker_idle_delay(cfg.resource_budget)).await;
-            }
+            state
+                .vector_store
+                .mark_graph_task_done(task.task_id)
+                .await?;
+        }
+
+        let mut runtime = state.indexing_runtime.write().await;
+        runtime.phase = "idle".to_string();
+        if !had_error {
+            runtime.last_error = None;
         }
     }
 
@@ -543,7 +720,7 @@ pub(crate) async fn run_full_rebuild(
                 old_path: None,
                 observed_at: SystemTime::now(),
             };
-            process_file_event(state, &event, graph_notify_tx, Some(root), true).await;
+            process_file_event(state, &event, None, Some(root), true).await;
 
             let runtime = state.indexing_runtime.read().await.clone();
             if let Some(message) = runtime.last_error.filter(|msg| !msg.trim().is_empty()) {
@@ -566,6 +743,11 @@ pub(crate) async fn run_full_rebuild(
 
     match rebuild_result {
         Ok(()) => {
+            if !previous_paused
+                && let Some(tx) = graph_notify_tx
+            {
+                let _ = tx.try_send(());
+            }
             set_runtime_idle(state, None).await;
             Ok(())
         }
@@ -651,5 +833,35 @@ pub(crate) fn is_supported_text_file(path: &std::path::Path) -> bool {
     let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
         return false;
     };
-    ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("txt")
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "md" | "txt" | "docx" | "pdf"
+    )
+}
+
+/// Read document text. For binary formats (docx/pdf) delegates to memori-parser extraction.
+async fn read_document_text(path: &std::path::Path) -> Result<String, std::io::Error> {
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if ext == "docx" || ext == "pdf" {
+        // Binary formats: run extraction on blocking thread pool
+        let path_buf = path.to_path_buf();
+        match tokio::task::spawn_blocking(move || memori_parser::extract_document_text(&path_buf)).await {
+            Ok(Some(text)) => Ok(text),
+            Ok(None) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to extract text from {}", path.display()),
+            )),
+            Err(join_err) => Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Extraction task panicked: {join_err}"),
+            )),
+        }
+    } else {
+        tokio::fs::read_to_string(path).await
+    }
 }

@@ -182,12 +182,32 @@ export function ModelsTab({
           </div>
         </AnimatedPanel>
 
-        <SettingCard title={t("modelEndpoint")}>
+        <SettingCard title={t("chatEndpoint")}>
           <div className="w-[320px]">
             <CyberInput
-              value={activeProfile.endpoint}
-              onChange={(value) => updateActiveProfile({ endpoint: value })}
-              placeholder={activeProvider === "ollama_local" ? "http://localhost:11434" : "https://api.openai.com"}
+              value={activeProfile.chat_endpoint}
+              onChange={(value) => updateActiveProfile({ chat_endpoint: value })}
+              placeholder={activeProvider === "ollama_local" ? "http://localhost:18001" : "https://api.openai.com"}
+            />
+          </div>
+        </SettingCard>
+
+        <SettingCard title={t("graphEndpoint")}>
+          <div className="w-[320px]">
+            <CyberInput
+              value={activeProfile.graph_endpoint}
+              onChange={(value) => updateActiveProfile({ graph_endpoint: value })}
+              placeholder={activeProvider === "ollama_local" ? "http://localhost:18002" : "https://api.openai.com"}
+            />
+          </div>
+        </SettingCard>
+
+        <SettingCard title={t("embedEndpoint")}>
+          <div className="w-[320px]">
+            <CyberInput
+              value={activeProfile.embed_endpoint}
+              onChange={(value) => updateActiveProfile({ embed_endpoint: value })}
+              placeholder={activeProvider === "ollama_local" ? "http://localhost:18003" : "https://api.openai.com"}
             />
           </div>
         </SettingCard>

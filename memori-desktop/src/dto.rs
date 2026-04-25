@@ -11,11 +11,17 @@ pub(crate) struct AppSettings {
     pub(crate) schedule_end: Option<String>,
     pub(crate) active_provider: Option<String>,
     pub(crate) local_endpoint: Option<String>,
+    pub(crate) local_chat_endpoint: Option<String>,
+    pub(crate) local_graph_endpoint: Option<String>,
+    pub(crate) local_embed_endpoint: Option<String>,
     pub(crate) local_models_root: Option<String>,
     pub(crate) local_chat_model: Option<String>,
     pub(crate) local_graph_model: Option<String>,
     pub(crate) local_embed_model: Option<String>,
     pub(crate) remote_endpoint: Option<String>,
+    pub(crate) remote_chat_endpoint: Option<String>,
+    pub(crate) remote_graph_endpoint: Option<String>,
+    pub(crate) remote_embed_endpoint: Option<String>,
     pub(crate) remote_api_key: Option<String>,
     pub(crate) remote_chat_model: Option<String>,
     pub(crate) remote_graph_model: Option<String>,
@@ -28,6 +34,12 @@ pub(crate) struct AppSettings {
     pub(crate) window_width: Option<u32>,
     pub(crate) window_height: Option<u32>,
     pub(crate) window_maximized: Option<bool>,
+    pub(crate) mcp_enabled: Option<bool>,
+    pub(crate) mcp_transports: Option<Vec<String>>,
+    pub(crate) mcp_http_bind: Option<String>,
+    pub(crate) mcp_http_port: Option<u16>,
+    pub(crate) mcp_access_mode: Option<String>,
+    pub(crate) mcp_audit_enabled: Option<bool>,
     // legacy fields for backwards compatibility
     pub(crate) provider: Option<String>,
     pub(crate) endpoint: Option<String>,
@@ -57,7 +69,9 @@ pub(crate) struct SetIndexingModePayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct LocalModelProfileDto {
-    pub(crate) endpoint: String,
+    pub(crate) chat_endpoint: String,
+    pub(crate) graph_endpoint: String,
+    pub(crate) embed_endpoint: String,
     pub(crate) models_root: Option<String>,
     pub(crate) chat_model: String,
     pub(crate) graph_model: String,
@@ -66,7 +80,9 @@ pub(crate) struct LocalModelProfileDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RemoteModelProfileDto {
-    pub(crate) endpoint: String,
+    pub(crate) chat_endpoint: String,
+    pub(crate) graph_endpoint: String,
+    pub(crate) embed_endpoint: String,
     pub(crate) api_key: Option<String>,
     pub(crate) chat_model: String,
     pub(crate) graph_model: String,
@@ -131,4 +147,25 @@ pub(crate) struct SearchScopeItem {
     pub(crate) relative_path: String,
     pub(crate) is_dir: bool,
     pub(crate) depth: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct McpSettingsDto {
+    pub(crate) enabled: bool,
+    pub(crate) transports: Vec<String>,
+    pub(crate) http_bind: String,
+    pub(crate) http_port: u16,
+    pub(crate) access_mode: String,
+    pub(crate) audit_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct McpStatusDto {
+    pub(crate) enabled: bool,
+    pub(crate) protocol_version: String,
+    pub(crate) http_endpoint: String,
+    pub(crate) stdio_command: String,
+    pub(crate) tools_count: usize,
+    pub(crate) resources_count: usize,
+    pub(crate) prompts_count: usize,
 }

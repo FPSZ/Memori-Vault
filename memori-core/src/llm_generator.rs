@@ -72,7 +72,10 @@ pub async fn generate_answer(
         },
     ];
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     let mut request = client.post(endpoint).json(&OpenAiChatCompletionRequest {
         model: &model,
         temperature: ANSWER_TEMPERATURE,

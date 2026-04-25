@@ -9,6 +9,7 @@ import {
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AnimatePresence, motion } from "framer-motion";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -23,6 +24,8 @@ import type {
   FontScale,
   IndexingMode,
   IndexingStatusDto,
+  McpSettingsDto,
+  McpStatusDto,
   ModelAvailabilityDto,
   ModelProvider,
   ModelSettingsDto,
@@ -36,21 +39,26 @@ import {
   getAppSettings,
   getEnterprisePolicy,
   getIndexingStatus,
+  getMcpSettings,
+  getMcpStatus,
   getModelSettings,
   getVaultStats,
   listProviderModels,
   openSourceLocation,
+  readFileContent,
   pauseIndexing,
   probeModelProvider,
   pullModel,
   resumeIndexing,
   setEnterprisePolicy as saveEnterprisePolicyRemote,
   setIndexingMode as saveIndexingModeRemote,
+  setMcpSettings as saveMcpSettingsRemote,
   setModelSettings as saveModelSettingsRemote,
   setWatchRoot as saveWatchRootRemote,
   searchFiles,
   triggerReindex,
-  validateModelSetup
+  validateModelSetup,
+  copyMcpClientConfig
 } from "./app/api/desktop";
 import { buildVisibleCitations, buildVisibleEvidenceGroups } from "./app/evidence";
 import {
@@ -63,9 +71,12 @@ import { useQueryFlow } from "./app/hooks/useQueryFlow";
 import { useAppearanceSync } from "./app/hooks/useAppearanceSync";
 import { useScopeManager } from "./app/hooks/useScopeManager";
 import { useWindowControls } from "./app/hooks/useWindowControls";
+import { FilePreview } from "./app/layout/FilePreview";
+import { GraphView } from "./app/layout/GraphView";
 import { OnboardingOverlay } from "./app/layout/OnboardingOverlay";
 import { ResultStage } from "./app/layout/ResultStage";
 import { SearchStage } from "./app/layout/SearchStage";
+import { Sidebar } from "./app/layout/Sidebar";
 import { StatusFooter } from "./app/layout/StatusFooter";
 import { TitleBar } from "./app/layout/TitleBar";
 import type {
@@ -96,14 +107,18 @@ const MODEL_NOT_CONFIGURED_CODE = "model_not_configured";
 const DEFAULT_MODEL_SETTINGS: ModelSettingsDto = {
   active_provider: "ollama_local",
   local_profile: {
-    endpoint: "http://localhost:11434",
+    chat_endpoint: "http://localhost:18001",
+    graph_endpoint: "http://localhost:18002",
+    embed_endpoint: "http://localhost:18003",
     models_root: "",
-    chat_model: "qwen2.5:7b",
-    graph_model: "qwen2.5:7b",
-    embed_model: "nomic-embed-text:latest"
+    chat_model: "qwen3-14b",
+    graph_model: "qwen3-8b",
+    embed_model: "Qwen3-Embedding-4B"
   },
   remote_profile: {
-    endpoint: "https://api.openai.com",
+    chat_endpoint: "https://api.openai.com",
+    graph_endpoint: "https://api.openai.com",
+    embed_endpoint: "https://api.openai.com",
     api_key: "",
     chat_model: "gpt-4o-mini",
     graph_model: "gpt-4o-mini",
@@ -115,6 +130,15 @@ const DEFAULT_ENTERPRISE_POLICY: EnterprisePolicyDto = {
   egress_mode: "local_only",
   allowed_model_endpoints: [],
   allowed_models: []
+};
+
+const DEFAULT_MCP_SETTINGS: McpSettingsDto = {
+  enabled: false,
+  transports: ["http", "stdio"],
+  http_bind: "127.0.0.1",
+  http_port: 3757,
+  access_mode: "full_control",
+  audit_enabled: true
 };
 
 function detectDefaultLanguage(): Language {
@@ -147,7 +171,7 @@ function resolveInitialThemeMode(): ThemeMode {
   if (legacy === "a" || legacy === "b") {
     return "dark";
   }
-  return "dark";
+  return "light";
 }
 
 function resolveInitialFontPreset(): FontPreset {
@@ -182,6 +206,23 @@ function resolveInitialRetrieveTopK(): number {
     return parsed;
   }
   return 20;
+}
+
+const SIDEBAR_WIDTH_STORAGE_KEY = "memori-sidebar-width";
+const DEFAULT_SIDEBAR_WIDTH = 220;
+const MIN_SIDEBAR_WIDTH = 160;
+const MAX_SIDEBAR_WIDTH = 480;
+
+function resolveInitialSidebarWidth(): number {
+  if (typeof window === "undefined") {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+  const saved = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+  const parsed = Number.parseInt(saved ?? "", 10);
+  if (Number.isFinite(parsed) && parsed >= MIN_SIDEBAR_WIDTH && parsed <= MAX_SIDEBAR_WIDTH) {
+    return parsed;
+  }
+  return DEFAULT_SIDEBAR_WIDTH;
 }
 
 function normalizeIndexingMode(value: string | null | undefined): IndexingMode {
@@ -279,6 +320,10 @@ export default function App() {
   const [modelSettings, setModelSettings] = useState<ModelSettingsDto>(DEFAULT_MODEL_SETTINGS);
   const [enterprisePolicy, setEnterprisePolicy] =
     useState<EnterprisePolicyDto>(DEFAULT_ENTERPRISE_POLICY);
+  const [mcpSettings, setMcpSettings] = useState<McpSettingsDto>(DEFAULT_MCP_SETTINGS);
+  const [mcpStatus, setMcpStatus] = useState<McpStatusDto | null>(null);
+  const [mcpBusy, setMcpBusy] = useState(false);
+  const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [modelAvailability, setModelAvailability] = useState<ModelAvailabilityDto | null>(null);
   const [providerModels, setProviderModels] = useState<ProviderModelsDto>({
     from_folder: [],
@@ -295,6 +340,12 @@ export default function App() {
   const [indexingBusy, setIndexingBusy] = useState(false);
   const [stats, setStats] = useState<VaultStats>({ documents: 0, chunks: 0, nodes: 0 });
   const [error, setError] = useState<string | null>(null);
+  const [previewFilePath, setPreviewFilePath] = useState<string | null>(null);
+  const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => resolveInitialSidebarWidth());
+  const sidebarWidthRef = useRef<number>(sidebarWidth);
+  useEffect(() => { sidebarWidthRef.current = sidebarWidth; }, [sidebarWidth]);
+  const [graphViewOpen, setGraphViewOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const compactHoverUnlockTimerRef = useRef<number | null>(null);
   const fileMatchesCloseTimerRef = useRef<number | null>(null);
@@ -531,11 +582,15 @@ export default function App() {
         }
         const profileConfigured =
           settings.active_provider === "ollama_local"
-            ? settings.local_profile.endpoint.trim().length > 0 &&
+            ? settings.local_profile.chat_endpoint.trim().length > 0 &&
+              settings.local_profile.graph_endpoint.trim().length > 0 &&
+              settings.local_profile.embed_endpoint.trim().length > 0 &&
               settings.local_profile.chat_model.trim().length > 0 &&
               settings.local_profile.graph_model.trim().length > 0 &&
               settings.local_profile.embed_model.trim().length > 0
-            : settings.remote_profile.endpoint.trim().length > 0 &&
+            : settings.remote_profile.chat_endpoint.trim().length > 0 &&
+              settings.remote_profile.graph_endpoint.trim().length > 0 &&
+              settings.remote_profile.embed_endpoint.trim().length > 0 &&
               (settings.remote_profile.api_key || "").trim().length > 0 &&
               settings.remote_profile.chat_model.trim().length > 0 &&
               settings.remote_profile.graph_model.trim().length > 0 &&
@@ -554,7 +609,9 @@ export default function App() {
               : settings.remote_profile;
           const models = await listProviderModels({
             provider: settings.active_provider,
-            endpoint: profile.endpoint,
+            chatEndpoint: profile.chat_endpoint,
+            graphEndpoint: profile.graph_endpoint,
+            embedEndpoint: profile.embed_endpoint,
             apiKey:
               settings.active_provider === "openai_compatible"
                 ? settings.remote_profile.api_key || null
@@ -592,6 +649,20 @@ export default function App() {
       }
     };
 
+    const loadMcpSettings = async () => {
+      try {
+        const [settings, status] = await Promise.all([getMcpSettings(), getMcpStatus()]);
+        if (active) {
+          setMcpSettings(settings);
+          setMcpStatus(status);
+        }
+      } catch (error) {
+        if (active) {
+          setError(toUiErrorMessage(error));
+        }
+      }
+    };
+
     const loadModelAvailability = async () => {
       try {
         const availability = await validateModelSetup();
@@ -612,6 +683,7 @@ export default function App() {
     void loadSettings();
     void loadIndexingStatus();
     void loadEnterprisePolicy();
+    void loadMcpSettings();
     void loadModelSettings().then(() => {
       void loadModelAvailability();
     });
@@ -654,11 +726,15 @@ export default function App() {
     const refreshOnProviderChange = async () => {
       const profileConfigured =
         modelSettings.active_provider === "ollama_local"
-          ? modelSettings.local_profile.endpoint.trim().length > 0 &&
+          ? modelSettings.local_profile.chat_endpoint.trim().length > 0 &&
+            modelSettings.local_profile.graph_endpoint.trim().length > 0 &&
+            modelSettings.local_profile.embed_endpoint.trim().length > 0 &&
             modelSettings.local_profile.chat_model.trim().length > 0 &&
             modelSettings.local_profile.graph_model.trim().length > 0 &&
             modelSettings.local_profile.embed_model.trim().length > 0
-          : modelSettings.remote_profile.endpoint.trim().length > 0 &&
+          : modelSettings.remote_profile.chat_endpoint.trim().length > 0 &&
+            modelSettings.remote_profile.graph_endpoint.trim().length > 0 &&
+            modelSettings.remote_profile.embed_endpoint.trim().length > 0 &&
             (modelSettings.remote_profile.api_key || "").trim().length > 0 &&
             modelSettings.remote_profile.chat_model.trim().length > 0 &&
             modelSettings.remote_profile.graph_model.trim().length > 0 &&
@@ -674,7 +750,9 @@ export default function App() {
             : modelSettings.remote_profile;
         const models = await listProviderModels({
           provider: modelSettings.active_provider,
-          endpoint: profile.endpoint,
+          chatEndpoint: profile.chat_endpoint,
+          graphEndpoint: profile.graph_endpoint,
+          embedEndpoint: profile.embed_endpoint,
           apiKey:
             modelSettings.active_provider === "openai_compatible"
               ? modelSettings.remote_profile.api_key || null
@@ -882,7 +960,9 @@ export default function App() {
       const availability = await withTimeout(
         probeModelProvider({
           provider: modelSettings.active_provider,
-          endpoint: activeModelProfile.endpoint,
+          chatEndpoint: activeModelProfile.chat_endpoint,
+          graphEndpoint: activeModelProfile.graph_endpoint,
+          embedEndpoint: activeModelProfile.embed_endpoint,
           apiKey:
             modelSettings.active_provider === "openai_compatible"
               ? modelSettings.remote_profile.api_key || null
@@ -919,7 +999,9 @@ export default function App() {
       const models = await withTimeout(
         listProviderModels({
           provider: modelSettings.active_provider,
-          endpoint: activeModelProfile.endpoint,
+          chatEndpoint: activeModelProfile.chat_endpoint,
+          graphEndpoint: activeModelProfile.graph_endpoint,
+          embedEndpoint: activeModelProfile.embed_endpoint,
           apiKey:
             modelSettings.active_provider === "openai_compatible"
               ? modelSettings.remote_profile.api_key || null
@@ -964,10 +1046,18 @@ export default function App() {
         const refreshedModels = await withTimeout(
           listProviderModels({
             provider: saved.active_provider,
-            endpoint:
+            chatEndpoint:
               saved.active_provider === "ollama_local"
-                ? saved.local_profile.endpoint
-                : saved.remote_profile.endpoint,
+                ? saved.local_profile.chat_endpoint
+                : saved.remote_profile.chat_endpoint,
+            graphEndpoint:
+              saved.active_provider === "ollama_local"
+                ? saved.local_profile.graph_endpoint
+                : saved.remote_profile.graph_endpoint,
+            embedEndpoint:
+              saved.active_provider === "ollama_local"
+                ? saved.local_profile.embed_endpoint
+                : saved.remote_profile.embed_endpoint,
             apiKey:
               saved.active_provider === "openai_compatible"
                 ? saved.remote_profile.api_key || null
@@ -1032,7 +1122,7 @@ export default function App() {
         pullModel({
           model,
           provider: modelSettings.active_provider,
-          endpoint: activeModelProfile.endpoint,
+          endpoint: activeModelProfile.chat_endpoint,
           apiKey:
             modelSettings.active_provider === "openai_compatible"
               ? modelSettings.remote_profile.api_key || null
@@ -1045,7 +1135,9 @@ export default function App() {
       const refreshedModels = await withTimeout(
         listProviderModels({
           provider: modelSettings.active_provider,
-          endpoint: activeModelProfile.endpoint,
+          chatEndpoint: activeModelProfile.chat_endpoint,
+          graphEndpoint: activeModelProfile.graph_endpoint,
+          embedEndpoint: activeModelProfile.embed_endpoint,
           apiKey:
             modelSettings.active_provider === "openai_compatible"
               ? modelSettings.remote_profile.api_key || null
@@ -1101,7 +1193,9 @@ export default function App() {
     if (next.active_provider === "ollama_local") {
       const models = await listProviderModels({
         provider: next.active_provider,
-        endpoint: next.local_profile.endpoint,
+        chatEndpoint: next.local_profile.chat_endpoint,
+        graphEndpoint: next.local_profile.graph_endpoint,
+        embedEndpoint: next.local_profile.embed_endpoint,
         apiKey: null,
         modelsRoot: selected
       });
@@ -1120,9 +1214,46 @@ export default function App() {
     setProviderModels((prev) => ({ ...prev, from_folder: [], merged: prev.from_service }));
   };
 
+  const onSaveMcpSettings = async () => {
+    setMcpBusy(true);
+    setMcpMessage(null);
+    try {
+      const saved = await withTimeout(
+        saveMcpSettingsRemote(mcpSettings),
+        MODEL_ACTION_TIMEOUT_MS,
+        uiLang === "zh-CN" ? "保存 MCP 配置超时，请重试。" : "Saving MCP settings timed out."
+      );
+      setMcpSettings(saved);
+      const status = await getMcpStatus();
+      setMcpStatus(status);
+      setMcpMessage(uiLang === "zh-CN" ? "MCP 配置已保存。" : "MCP settings saved.");
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      setMcpMessage(message);
+      throw err;
+    } finally {
+      setMcpBusy(false);
+    }
+  };
+
+  const onCopyMcpClientConfig = async (client: string) => {
+    try {
+      const config = await copyMcpClientConfig(client);
+      await navigator.clipboard.writeText(config);
+      setMcpMessage(uiLang === "zh-CN" ? "客户端配置已复制。" : "Client config copied.");
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      setMcpMessage(message);
+    }
+  };
+
   const updateActiveOnboardingProfile = (
     patch: Partial<{
-      endpoint: string;
+      chat_endpoint: string;
+      graph_endpoint: string;
+      embed_endpoint: string;
       api_key?: string | null;
       chat_model: string;
       graph_model: string;
@@ -1173,6 +1304,22 @@ export default function App() {
     } catch (err) {
       setError(toUiErrorMessage(err));
     }
+  };
+
+  const onPreviewFile = async (path: string) => {
+    if (!path) return;
+    try {
+      const content = await readFileContent(path);
+      setPreviewFilePath(path);
+      setPreviewContent(content);
+    } catch (err) {
+      setError(toUiErrorMessage(err));
+    }
+  };
+
+  const onCloseFilePreview = () => {
+    setPreviewFilePath(null);
+    setPreviewContent(null);
   };
 
   const onPickWatchRoot = async () => {
@@ -1246,7 +1393,7 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen bg-[var(--bg-canvas)] text-[var(--text-primary)]">
-      <div className="relative flex h-full w-full flex-col overflow-hidden bg-[var(--bg-canvas)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
+      <div className="relative flex h-full w-full flex-col overflow-hidden bg-[var(--bg-canvas)]">
         <TitleBar
           t={t}
           headerWatchRoot={headerWatchRoot}
@@ -1260,84 +1407,169 @@ export default function App() {
           onClose={onClose}
         />
 
-        <div className="relative z-10 flex-1 overflow-hidden">
+        <div className="relative z-10 flex flex-1 overflow-hidden">
+          <div style={{ width: sidebarWidth }} className="shrink-0 h-full overflow-hidden">
+            <Sidebar
+              t={t}
+              watchRoot={watchRoot}
+              scopeItems={scopeItems}
+              scopeLoading={scopeLoading}
+              expandedScopeDirs={expandedScopeDirs}
+              stats={stats}
+              onToggleScopeDirExpanded={onToggleScopeDirExpanded}
+              onPreviewFile={onPreviewFile}
+              onToggleSettings={() => setIsSettingsOpen((prev) => !prev)}
+            />
+          </div>
+
+          {/* Sidebar resizer */}
           <div
-            className={`pointer-events-none absolute inset-0 z-0 ${
-              themeMode === "dark"
-                ? "bg-[radial-gradient(104%_74%_at_50%_-10%,rgba(181,210,238,0.17),transparent_64%),radial-gradient(70%_52%_at_18%_34%,rgba(111,154,200,0.1),transparent_76%),radial-gradient(66%_50%_at_84%_36%,rgba(104,145,189,0.09),transparent_78%),linear-gradient(180deg,#121b28_0%,#111926_46%,#101722_100%)]"
-                : "bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(255,255,255,0.82),transparent_62%),radial-gradient(72%_54%_at_18%_30%,rgba(196,220,244,0.42),transparent_78%),radial-gradient(68%_52%_at_84%_34%,rgba(205,225,244,0.36),transparent_80%),linear-gradient(180deg,#f8fbff_0%,#f4f8fd_56%,#f2f6fb_100%)]"
-            }`}
+            className="relative z-20 w-[5px] shrink-0 cursor-col-resize hover:bg-[var(--accent-soft)] active:bg-[var(--accent)] transition-colors"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startX = e.clientX;
+              const startWidth = sidebarWidthRef.current;
+              const onMouseMove = (moveEvent: MouseEvent) => {
+                const delta = moveEvent.clientX - startX;
+                const newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, startWidth + delta));
+                setSidebarWidth(newWidth);
+              };
+              const onMouseUp = () => {
+                window.removeEventListener("mousemove", onMouseMove);
+                window.removeEventListener("mouseup", onMouseUp);
+                window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidthRef.current));
+              };
+              window.addEventListener("mousemove", onMouseMove);
+              window.addEventListener("mouseup", onMouseUp);
+            }}
           />
 
-          <main className="relative z-10 mx-auto h-full w-full max-w-5xl px-6 pb-4 md:px-10">
-            <SearchStage
-              isSearching={isSearching}
-              isSearchBarCollapsed={isSearchBarCollapsed}
-              isSearchBarCompact={isSearchBarCompact}
-              allowCompactHoverExpand={allowCompactHoverExpand}
-              isSearchInputFocused={isSearchInputFocused}
-              scopeMenuOpen={scopeMenuOpen}
-              scopeLoading={scopeLoading}
-              scopeItems={scopeItems}
-              visibleScopeItems={visibleScopeItems}
-              selectedScopeSet={selectedScopeSet}
-              selectedScopeLabel={selectedScopeLabel}
-              scopeChildrenCountByParentKey={scopeChildrenCountByParentKey}
-              expandedScopeDirs={expandedScopeDirs}
-              fileMatchesOpen={fileMatchesOpen}
-              fileMatches={fileMatches}
-              watchRoot={watchRoot}
-              showSearchDone={showSearchDone}
-              loading={loading}
-              modelSetupNotConfigured={modelSetupNotConfigured}
-              query={query}
-              uiLang={uiLang}
-              searchPlaceholder={searchPlaceholder}
-              t={t}
-              searchInputRef={searchInputRef}
-              scopeMenuRef={scopeMenuRef}
-              fileMatchesCloseTimerRef={fileMatchesCloseTimerRef}
-              setQuery={setQuery}
-              setIsSearchBarHovering={setIsSearchBarHovering}
-              setScopeMenuOpen={setScopeMenuOpen}
-              setIsSearchInputFocused={setIsSearchInputFocused}
-              setFileMatchesOpen={setFileMatchesOpen}
-              setSelectedScopePaths={setSelectedScopePaths}
-              onKeyDown={onKeyDown}
-              onClearScopeSelection={onClearScopeSelection}
-              onToggleScopePath={onToggleScopePath}
-              onToggleScopeDirExpanded={onToggleScopeDirExpanded}
-            />
+          <div className="relative flex flex-1 overflow-hidden">
+            {/* Search panel */}
+            <motion.div
+              className="absolute inset-0 z-10 flex flex-col overflow-hidden"
+              animate={{ x: graphViewOpen ? "-100%" : 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            >
+              <div
+                className={`pointer-events-none absolute inset-0 z-0 ${
+                  themeMode === "dark"
+                    ? "bg-[radial-gradient(104%_74%_at_50%_-10%,rgba(181,210,238,0.17),transparent_64%),radial-gradient(70%_52%_at_18%_34%,rgba(111,154,200,0.1),transparent_76%),radial-gradient(66%_50%_at_84%_36%,rgba(104,145,189,0.09),transparent_78%),linear-gradient(180deg,#121b28_0%,#111926_46%,#101722_100%)]"
+                    : "bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(255,255,255,0.82),transparent_62%),radial-gradient(72%_54%_at_18%_30%,rgba(196,220,244,0.42),transparent_78%),radial-gradient(68%_52%_at_84%_34%,rgba(205,225,244,0.36),transparent_80%),linear-gradient(180deg,#f8fbff_0%,#f4f8fd_56%,#f2f6fb_100%)]"
+                }`}
+              />
 
-            <ResultStage
-              isSearching={isSearching}
-              isSearchBarCollapsed={isSearchBarCollapsed}
-              isSearchBarCompact={isSearchBarCompact}
-              loading={loading}
-              error={error}
-              answerResponse={answerResponse}
-              searchElapsedMs={searchElapsedMs}
-              lastSearchDurationMs={lastSearchDurationMs}
-              formatElapsed={formatElapsed}
-              onResultScroll={onResultScroll}
-              onResultWheel={onResultWheel}
-              visibleCitations={visibleCitations}
-              expandedCitationKeys={expandedCitationKeys}
-              onToggleCitationExpanded={toggleCitationExpanded}
-              visibleEvidenceGroups={visibleEvidenceGroups}
-              expandedSourceKeys={expandedSourceKeys}
-              onToggleSourceExpanded={toggleSourceExpanded}
-              onOpenSourceLocation={onOpenSourceLocation}
-              markdownRemarkPlugins={MARKDOWN_REMARK_PLUGINS}
-              markdownRehypePlugins={MARKDOWN_REHYPE_PLUGINS}
-              metricRows={metricRows}
-              measuredMetricsTotalMs={measuredMetricsTotalMs}
-              t={t}
-            />
-          </main>
+              <main className="relative z-10 flex flex-1 flex-col overflow-hidden">
+                <SearchStage
+                  isSearching={isSearching}
+                  isSearchBarCollapsed={isSearchBarCollapsed}
+                  isSearchBarCompact={isSearchBarCompact}
+                  allowCompactHoverExpand={allowCompactHoverExpand}
+                  isSearchInputFocused={isSearchInputFocused}
+                  scopeMenuOpen={scopeMenuOpen}
+                  scopeLoading={scopeLoading}
+                  scopeItems={scopeItems}
+                  visibleScopeItems={visibleScopeItems}
+                  selectedScopeSet={selectedScopeSet}
+                  selectedScopeLabel={selectedScopeLabel}
+                  scopeChildrenCountByParentKey={scopeChildrenCountByParentKey}
+                  expandedScopeDirs={expandedScopeDirs}
+                  fileMatchesOpen={fileMatchesOpen}
+                  fileMatches={fileMatches}
+                  watchRoot={watchRoot}
+                  showSearchDone={showSearchDone}
+                  loading={loading}
+                  modelSetupNotConfigured={modelSetupNotConfigured}
+                  query={query}
+                  uiLang={uiLang}
+                  searchPlaceholder={searchPlaceholder}
+                  t={t}
+                  searchInputRef={searchInputRef}
+                  scopeMenuRef={scopeMenuRef}
+                  fileMatchesCloseTimerRef={fileMatchesCloseTimerRef}
+                  setQuery={setQuery}
+                  setIsSearchBarHovering={setIsSearchBarHovering}
+                  setScopeMenuOpen={setScopeMenuOpen}
+                  setIsSearchInputFocused={setIsSearchInputFocused}
+                  setFileMatchesOpen={setFileMatchesOpen}
+                  setSelectedScopePaths={setSelectedScopePaths}
+                  onKeyDown={onKeyDown}
+                  onClearScopeSelection={onClearScopeSelection}
+                  onToggleScopePath={onToggleScopePath}
+                  onToggleScopeDirExpanded={onToggleScopeDirExpanded}
+                />
+
+                <div className="flex-1 overflow-y-auto">
+                  {previewFilePath && previewContent !== null ? (
+                    <FilePreview
+                      t={t}
+                      filePath={previewFilePath}
+                      content={previewContent}
+                      onClose={onCloseFilePreview}
+                    />
+                  ) : (
+                    <ResultStage
+                      isSearching={isSearching}
+                      isSearchBarCollapsed={isSearchBarCollapsed}
+                      isSearchBarCompact={isSearchBarCompact}
+                      loading={loading}
+                      error={error}
+                      answerResponse={answerResponse}
+                      searchElapsedMs={searchElapsedMs}
+                      lastSearchDurationMs={lastSearchDurationMs}
+                      formatElapsed={formatElapsed}
+                      onResultScroll={onResultScroll}
+                      onResultWheel={onResultWheel}
+                      visibleCitations={visibleCitations}
+                      expandedCitationKeys={expandedCitationKeys}
+                      onToggleCitationExpanded={toggleCitationExpanded}
+                      visibleEvidenceGroups={visibleEvidenceGroups}
+                      expandedSourceKeys={expandedSourceKeys}
+                      onToggleSourceExpanded={toggleSourceExpanded}
+                      onOpenSourceLocation={onOpenSourceLocation}
+                      markdownRemarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                      markdownRehypePlugins={MARKDOWN_REHYPE_PLUGINS}
+                      metricRows={metricRows}
+                      measuredMetricsTotalMs={measuredMetricsTotalMs}
+                      t={t}
+                    />
+                  )}
+                </div>
+              </main>
+
+              <StatusFooter t={t} stats={stats} />
+            </motion.div>
+
+            {/* Edge toggle button */}
+            <button
+              type="button"
+              onClick={() => setGraphViewOpen((prev) => !prev)}
+              className="absolute right-0 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-1 rounded-l-lg border border-r-0 border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-1.5 py-3 text-xs text-[var(--text-secondary)] shadow-sm transition hover:bg-[var(--bg-surface-2)] hover:text-[var(--accent)]"
+            >
+              {graphViewOpen ? (
+                <>
+                  <ChevronRight className="h-3.5 w-3.5" />
+                  <span className="[writing-mode:vertical-rl]">搜索</span>
+                </>
+              ) : (
+                <>
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  <span className="[writing-mode:vertical-rl]">图谱</span>
+                </>
+              )}
+            </button>
+
+            {/* Graph panel */}
+            <motion.div
+              className="absolute inset-0 z-20 flex flex-col overflow-hidden bg-[var(--bg-canvas)]"
+              initial={{ x: "100%" }}
+              animate={{ x: graphViewOpen ? 0 : "100%" }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            >
+              <GraphView />
+            </motion.div>
+          </div>
         </div>
-
-        <StatusFooter t={t} stats={stats} />
 
         <AnimatePresence>
           {isSettingsOpen && (
@@ -1395,6 +1627,13 @@ export default function App() {
                 onTriggerReindex={onTriggerReindex}
                 onPauseIndexing={onPauseIndexing}
                 onResumeIndexing={onResumeIndexing}
+                mcpSettings={mcpSettings}
+                mcpStatus={mcpStatus}
+                mcpBusy={mcpBusy}
+                mcpMessage={mcpMessage}
+                onMcpSettingsChange={setMcpSettings}
+                onSaveMcpSettings={onSaveMcpSettings}
+                onCopyMcpClientConfig={onCopyMcpClientConfig}
               />
             </motion.div>
           )}

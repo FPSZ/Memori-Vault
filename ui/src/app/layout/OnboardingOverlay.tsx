@@ -114,10 +114,10 @@ export function OnboardingOverlay({
             {onboardingStep === 1 && (
               <div className="space-y-3">
                 <div>
-                  <div className="mb-1 text-xs text-[var(--text-secondary)]">{t("modelEndpoint")}</div>
+                  <div className="mb-1 text-xs text-[var(--text-secondary)]">{t("chatEndpoint")}</div>
                   <input
-                    value={activeModelProfile.endpoint}
-                    onChange={(e) => updateActiveOnboardingProfile({ endpoint: e.target.value })}
+                    value={activeModelProfile.chat_endpoint}
+                    onChange={(e) => updateActiveOnboardingProfile({ chat_endpoint: e.target.value })}
                     className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
                   />
                 </div>

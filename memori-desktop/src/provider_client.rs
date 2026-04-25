@@ -1,32 +1,5 @@
 use crate::*;
 
-pub(crate) async fn fetch_provider_models(
-    provider: ModelProvider,
-    endpoint: &str,
-    api_key: Option<&str>,
-    models_root: Option<&str>,
-) -> Result<ProviderModelsDto, ProviderModelFetchError> {
-    match provider {
-        ModelProvider::OllamaLocal => {
-            let from_folder = models_root
-                .map(PathBuf::from)
-                .map(|root| scan_local_model_files_from_root(&root))
-                .transpose()
-                .map_err(|err| ProviderModelFetchError {
-                    code: "models_root_invalid".to_string(),
-                    message: err,
-                })?
-                .unwrap_or_default();
-            let from_service = list_ollama_models(endpoint).await?;
-            Ok(merge_model_candidates(from_folder, from_service))
-        }
-        ModelProvider::OpenAiCompatible => {
-            let from_service = list_openai_compatible_models(endpoint, api_key).await?;
-            Ok(merge_model_candidates(Vec::new(), from_service))
-        }
-    }
-}
-
 pub(crate) fn merge_model_candidates(
     from_folder: Vec<String>,
     from_service: Vec<String>,
@@ -42,6 +15,62 @@ pub(crate) fn merge_model_candidates(
         from_folder,
         from_service,
         merged: merged_set.into_iter().collect(),
+    }
+}
+
+pub(crate) async fn fetch_models_all_endpoints(
+    provider: ModelProvider,
+    chat_endpoint: &str,
+    graph_endpoint: &str,
+    embed_endpoint: &str,
+    api_key: Option<&str>,
+    models_root: Option<&str>,
+) -> Result<(ProviderModelsDto, Vec<ProviderModelFetchError>), ProviderModelFetchError> {
+    let mut errors = Vec::new();
+
+    match provider {
+        ModelProvider::OllamaLocal => {
+            let from_folder = models_root
+                .map(PathBuf::from)
+                .map(|root| scan_local_model_files_from_root(&root))
+                .transpose()
+                .map_err(|err| ProviderModelFetchError {
+                    code: "models_root_invalid".to_string(),
+                    message: err,
+                })?
+                .unwrap_or_default();
+
+            let mut from_service = Vec::new();
+            for endpoint in [chat_endpoint, graph_endpoint, embed_endpoint] {
+                match list_ollama_models(endpoint).await {
+                    Ok(models) => from_service.extend(models),
+                    Err(err) => errors.push(err),
+                }
+            }
+
+            let mut service_set = BTreeSet::new();
+            for m in from_service {
+                service_set.insert(m);
+            }
+            let from_service_deduped: Vec<String> = service_set.into_iter().collect();
+            Ok((merge_model_candidates(from_folder, from_service_deduped), errors))
+        }
+        ModelProvider::OpenAiCompatible => {
+            let mut from_service = Vec::new();
+            for endpoint in [chat_endpoint, graph_endpoint, embed_endpoint] {
+                match list_openai_compatible_models(endpoint, api_key).await {
+                    Ok(models) => from_service.extend(models),
+                    Err(err) => errors.push(err),
+                }
+            }
+
+            let mut service_set = BTreeSet::new();
+            for m in from_service {
+                service_set.insert(m);
+            }
+            let from_service_deduped: Vec<String> = service_set.into_iter().collect();
+            Ok((merge_model_candidates(Vec::new(), from_service_deduped), errors))
+        }
     }
 }
 

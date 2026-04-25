@@ -14,6 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, hash::Hash, hash::Hasher};
 
 use graph_extractor::extract_entities;
+pub use graph_extractor::GraphData;
 use llm_generator::generate_answer as generate_llm_answer;
 pub use memori_parser::DocumentChunk;
 use memori_parser::{ParserStub, parse_and_chunk};
@@ -34,6 +35,14 @@ pub const DEFAULT_MODEL_ENDPOINT_OPENAI: &str = "https://api.openai.com";
 pub const DEFAULT_OLLAMA_EMBED_MODEL: &str = "nomic-embed-text:latest";
 pub const DEFAULT_CHAT_MODEL: &str = "qwen2.5:7b";
 pub const DEFAULT_GRAPH_MODEL: &str = "qwen2.5:7b";
+
+/// Memori-Vault 本地常驻三模型默认端点 (llama-server HIP)
+pub const DEFAULT_CHAT_ENDPOINT: &str = "http://localhost:18001";
+pub const DEFAULT_GRAPH_ENDPOINT: &str = "http://localhost:18002";
+pub const DEFAULT_EMBED_ENDPOINT: &str = "http://localhost:18003";
+pub const DEFAULT_CHAT_MODEL_QWEN3: &str = "qwen3-14b";
+pub const DEFAULT_GRAPH_MODEL_QWEN3: &str = "qwen3-8b";
+pub const DEFAULT_EMBED_MODEL_QWEN3: &str = "Qwen3-Embedding-4B";
 const DEFAULT_DB_FILE_NAME: &str = ".memori.db";
 pub const MEMORI_DB_PATH_ENV: &str = "MEMORI_DB_PATH";
 pub const MEMORI_MODEL_PROVIDER_ENV: &str = "MEMORI_MODEL_PROVIDER";
@@ -55,7 +64,12 @@ const RRF_K: f64 = 60.0;
 fn is_supported_index_file(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|s| s.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("txt"))
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "md" | "txt" | "docx" | "pdf"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -302,6 +316,7 @@ struct MergedEvidence {
     document_rank: usize,
     document_raw_score: Option<f64>,
     document_has_exact_signal: bool,
+    #[allow(dead_code)]
     document_has_docs_phrase_signal: bool,
     document_docs_phrase_quality: Option<PhraseQuality>,
     document_has_filename_signal: bool,
@@ -510,35 +525,32 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
         .map(|v| ModelProvider::from_value(&v))
         .unwrap_or(ModelProvider::OllamaLocal);
 
-    let endpoint_default = match provider {
+    let _endpoint_default: &'static str = match provider {
         ModelProvider::OllamaLocal => DEFAULT_MODEL_ENDPOINT_OLLAMA,
         ModelProvider::OpenAiCompatible => DEFAULT_MODEL_ENDPOINT_OPENAI,
     };
-    let fallback_endpoint =
-        std::env::var(MEMORI_MODEL_ENDPOINT_ENV).unwrap_or_else(|_| endpoint_default.to_string());
-
-    let chat_endpoint =
-        std::env::var(MEMORI_CHAT_ENDPOINT_ENV).unwrap_or_else(|_| fallback_endpoint.clone());
-    let graph_endpoint =
-        std::env::var(MEMORI_GRAPH_ENDPOINT_ENV).unwrap_or_else(|_| fallback_endpoint.clone());
-    let embed_endpoint =
-        std::env::var(MEMORI_EMBED_ENDPOINT_ENV).unwrap_or_else(|_| fallback_endpoint);
+    let _ = _endpoint_default;
+    // 优先使用独立端点环境变量，其次使用常驻默认。
+    // 不再回退 MEMORI_MODEL_ENDPOINT_ENV：前端设置只有一个 endpoint 输入框，
+    // 回退到 legacy 变量会把三个独立端点全部覆盖为同一个值。
+    let chat_endpoint = std::env::var(MEMORI_CHAT_ENDPOINT_ENV)
+        .unwrap_or_else(|_| DEFAULT_CHAT_ENDPOINT.to_string());
+    let graph_endpoint = std::env::var(MEMORI_GRAPH_ENDPOINT_ENV)
+        .unwrap_or_else(|_| DEFAULT_GRAPH_ENDPOINT.to_string());
+    let embed_endpoint = std::env::var(MEMORI_EMBED_ENDPOINT_ENV)
+        .unwrap_or_else(|_| DEFAULT_EMBED_ENDPOINT.to_string());
 
     let api_key = std::env::var(MEMORI_MODEL_API_KEY_ENV).ok().and_then(|v| {
         let trimmed = v.trim().to_string();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        }
+        if trimmed.is_empty() { None } else { Some(trimmed) }
     });
 
-    let chat_model =
-        std::env::var(MEMORI_CHAT_MODEL_ENV).unwrap_or_else(|_| DEFAULT_CHAT_MODEL.to_string());
-    let graph_model =
-        std::env::var(MEMORI_GRAPH_MODEL_ENV).unwrap_or_else(|_| DEFAULT_GRAPH_MODEL.to_string());
+    let chat_model = std::env::var(MEMORI_CHAT_MODEL_ENV)
+        .unwrap_or_else(|_| DEFAULT_CHAT_MODEL_QWEN3.to_string());
+    let graph_model = std::env::var(MEMORI_GRAPH_MODEL_ENV)
+        .unwrap_or_else(|_| DEFAULT_GRAPH_MODEL_QWEN3.to_string());
     let embed_model = std::env::var(MEMORI_EMBED_MODEL_ENV)
-        .unwrap_or_else(|_| DEFAULT_OLLAMA_EMBED_MODEL.to_string());
+        .unwrap_or_else(|_| DEFAULT_EMBED_MODEL_QWEN3.to_string());
 
     RuntimeModelConfig {
         provider,
@@ -684,7 +696,10 @@ impl Default for OllamaEmbeddingClient {
     fn default() -> Self {
         let runtime = resolve_runtime_model_config_from_env();
         Self {
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: runtime.embed_endpoint,
             api_key: runtime.api_key,
             model: runtime.embed_model,
@@ -695,7 +710,10 @@ impl Default for OllamaEmbeddingClient {
 impl OllamaEmbeddingClient {
     pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: base_url.into(),
             api_key: None,
             model: model.into(),
@@ -847,6 +865,20 @@ pub struct MemoriEngine {
     graph_notify_tx: Option<mpsc::Sender<()>>,
 }
 
+impl Clone for MemoriEngine {
+    fn clone(&self) -> Self {
+        Self {
+            state: Arc::clone(&self.state),
+            event_rx: None,
+            daemon_task: None,
+            graph_worker_task: None,
+            memori_vault_handle: None,
+            watch_root: self.watch_root.clone(),
+            graph_notify_tx: self.graph_notify_tx.clone(),
+        }
+    }
+}
+
 pub(crate) use indexing::*;
 pub(crate) use query::*;
 pub use retrieval::build_query_terms_for_offline_embedding;
@@ -858,8 +890,8 @@ pub(crate) use runtime::*;
 mod tests {
     use super::{
         AppState, AskStatus, EgressMode, EngineError, EnterpriseModelPolicy, MemoriEngine,
-        MergedEvidence, ModelProvider, QueryFamily, QueryIntent, RuntimeModelConfig, WatchEvent,
-        WatchEventKind, analyze_query, apply_gating_metrics, build_citations,
+        MergedEvidence, ModelProvider, QueryFamily, QueryIntent, RetrievalMetrics,
+        RuntimeModelConfig, WatchEvent, WatchEventKind, analyze_query, apply_gating_metrics, build_citations,
         document_signal_query, has_strong_document_signal, is_implementation_lookup,
         merge_document_candidates, process_file_event, should_refuse_for_insufficient_evidence,
         validate_runtime_model_settings,
@@ -1714,6 +1746,48 @@ mod tests {
         assert_eq!(metrics.gating_decision_reason, "coverage_release");
         assert!(metrics.top_doc_distinct_term_hits >= 2);
         assert!(metrics.top_doc_term_coverage >= 0.5);
+    }
+
+    #[test]
+    fn lookup_like_high_coverage_lexical_evidence_is_not_rejected() {
+        let analysis = analyze_query(
+            "物聯網 Internet of Things IoT UUID 通過網路傳輸數據的能力是什麼",
+        );
+        assert!(analysis.flags.is_lookup_like);
+
+        let evidence = vec![super::MergedEvidence {
+            chunk: DocumentChunk {
+                file_path: PathBuf::from("docs/iot.md"),
+                content: "物聯網（英語：Internet of Things，簡稱 IoT）是一種計算設備、機械、數位機器相互關聯的系統，具備通用唯一辨識碼 UUID，並具有通過網路傳輸數據的能力。".to_string(),
+                chunk_index: 0,
+                heading_path: vec!["物联网".to_string()],
+                block_kind: memori_parser::ChunkBlockKind::Paragraph,
+            },
+            relative_path: "docs/iot.md".to_string(),
+            document_reason: "lexical_broad".to_string(),
+            document_rank: 1,
+            document_raw_score: Some(1.0),
+            document_has_exact_signal: false,
+            document_has_docs_phrase_signal: false,
+            document_docs_phrase_quality: None,
+            document_has_filename_signal: false,
+            document_has_strict_lexical: false,
+            lexical_strict_rank: None,
+            lexical_broad_rank: Some(1),
+            lexical_raw_score: Some(1.0),
+            dense_rank: Some(1),
+            dense_raw_score: Some(0.9),
+            final_score: 1.0,
+        }];
+
+        let mut metrics = RetrievalMetrics::default();
+        let refused = apply_gating_metrics(&mut metrics, &analysis, &evidence);
+        assert!(!refused);
+        assert_eq!(
+            metrics.gating_decision_reason,
+            "high_coverage_lexical_release"
+        );
+        assert!(metrics.top_doc_term_coverage >= 0.65);
     }
 
     #[test]

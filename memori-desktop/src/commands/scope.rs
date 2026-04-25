@@ -126,3 +126,39 @@ pub(crate) async fn open_source_location(path: String) -> Result<(), String> {
     #[allow(unreachable_code)]
     Err("当前系统暂不支持打开文件位置".to_string())
 }
+
+#[tauri::command]
+pub(crate) async fn read_file_content(path: String) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("文件路径为空".to_string());
+    }
+
+    let target = PathBuf::from(trimmed);
+    if !target.exists() {
+        return Err(format!("文件不存在: {}", target.display()));
+    }
+    if !target.is_file() {
+        return Err(format!("路径不是文件: {}", target.display()));
+    }
+
+    // Only allow reading text files for safety
+    let ext = target
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let allowed_exts = ["md", "txt", "rs", "py", "js", "ts", "jsx", "tsx", "json", "yaml", "yml", "toml", "html", "css", "c", "cpp", "h", "hpp", "go", "java", "kt", "swift", "rb", "php", "sh", "bat", "ps1", "log"];
+    if !allowed_exts.contains(&ext.as_str()) {
+        return Err(format!("不支持的文件类型: .{ext}"));
+    }
+
+    // Read with size limit (5MB)
+    let metadata = std::fs::metadata(&target).map_err(|e| format!("读取文件元数据失败: {e}"))?;
+    if metadata.len() > 5 * 1024 * 1024 {
+        return Err("文件过大（超过 5MB）".to_string());
+    }
+
+    let content = std::fs::read_to_string(&target).map_err(|e| format!("读取文件失败: {e}"))?;
+    Ok(content)
+}

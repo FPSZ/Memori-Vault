@@ -88,6 +88,8 @@ impl SqliteStore {
                 .map_err(map_sqlite_error)?;
             tx.execute("DELETE FROM documents_fts", [])
                 .map_err(map_sqlite_error)?;
+            tx.execute("DELETE FROM chunks", [])
+                .map_err(map_sqlite_error)?;
             tx.execute("DELETE FROM file_index_state", [])
                 .map_err(map_sqlite_error)?;
             tx.execute("DELETE FROM documents", [])

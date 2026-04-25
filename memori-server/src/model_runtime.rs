@@ -79,7 +79,9 @@ pub(crate) async fn replace_engine(
 
 pub(crate) struct ActiveRuntimeModelSettings {
     pub(crate) provider: ModelProvider,
-    pub(crate) endpoint: String,
+    pub(crate) chat_endpoint: String,
+    pub(crate) graph_endpoint: String,
+    pub(crate) embed_endpoint: String,
     pub(crate) api_key: Option<String>,
     pub(crate) models_root: Option<String>,
     pub(crate) chat_model: String,
@@ -90,11 +92,13 @@ pub(crate) struct ActiveRuntimeModelSettings {
 pub(crate) fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> RuntimeModelConfig {
     RuntimeModelConfig {
         provider: settings.provider,
-        endpoint: settings.endpoint.clone(),
-        api_key: settings.api_key.clone(),
+        chat_endpoint: settings.chat_endpoint.clone(),
         chat_model: settings.chat_model.clone(),
+        graph_endpoint: settings.graph_endpoint.clone(),
         graph_model: settings.graph_model.clone(),
+        embed_endpoint: settings.embed_endpoint.clone(),
         embed_model: settings.embed_model.clone(),
+        api_key: settings.api_key.clone(),
     }
 }
 
@@ -451,40 +455,56 @@ pub(crate) fn resolve_active_runtime_settings(
     settings: &ModelSettingsDto,
 ) -> ActiveRuntimeModelSettings {
     let active_provider = ModelProvider::from_value(&settings.active_provider);
-    if active_provider == ModelProvider::OpenAiCompatible {
-        return ActiveRuntimeModelSettings {
-            provider: ModelProvider::OpenAiCompatible,
-            endpoint: normalize_endpoint(
-                ModelProvider::OpenAiCompatible,
-                &settings.remote_profile.endpoint,
-            ),
-            api_key: normalize_optional_text(settings.remote_profile.api_key.clone()),
-            models_root: None,
-            chat_model: settings.remote_profile.chat_model.trim().to_string(),
-            graph_model: settings.remote_profile.graph_model.trim().to_string(),
-            embed_model: settings.remote_profile.embed_model.trim().to_string(),
-        };
-    }
+    let single_endpoint = if active_provider == ModelProvider::OpenAiCompatible {
+        normalize_endpoint(ModelProvider::OpenAiCompatible, &settings.remote_profile.endpoint)
+    } else {
+        normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.endpoint)
+    };
 
     ActiveRuntimeModelSettings {
-        provider: ModelProvider::OllamaLocal,
-        endpoint: normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.endpoint),
-        api_key: None,
-        models_root: normalize_optional_text(settings.local_profile.models_root.clone()),
-        chat_model: settings.local_profile.chat_model.trim().to_string(),
-        graph_model: settings.local_profile.graph_model.trim().to_string(),
-        embed_model: settings.local_profile.embed_model.trim().to_string(),
+        provider: active_provider,
+        chat_endpoint: single_endpoint.clone(),
+        graph_endpoint: single_endpoint.clone(),
+        embed_endpoint: single_endpoint,
+        api_key: if active_provider == ModelProvider::OpenAiCompatible {
+            normalize_optional_text(settings.remote_profile.api_key.clone())
+        } else {
+            None
+        },
+        models_root: if active_provider == ModelProvider::OllamaLocal {
+            normalize_optional_text(settings.local_profile.models_root.clone())
+        } else {
+            None
+        },
+        chat_model: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.chat_model.trim().to_string()
+        } else {
+            settings.local_profile.chat_model.trim().to_string()
+        },
+        graph_model: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.graph_model.trim().to_string()
+        } else {
+            settings.local_profile.graph_model.trim().to_string()
+        },
+        embed_model: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.embed_model.trim().to_string()
+        } else {
+            settings.local_profile.embed_model.trim().to_string()
+        },
     }
 }
 
 pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) {
     // SAFETY: process-global config source for memori-core runtime.
+    // 注意：前端设置只有一个 endpoint 输入框，不应覆盖三个独立端点。
+    // 独立端点（CHAT/GRAPH/EMBED）由 resolve_runtime_model_config_from_env() 的默认值管理。
     unsafe {
         std::env::set_var(
             MEMORI_MODEL_PROVIDER_ENV,
             provider_to_string(settings.provider),
         );
-        std::env::set_var(MEMORI_MODEL_ENDPOINT_ENV, &settings.endpoint);
+        // legacy endpoint: 用于向后兼容，优先使用 chat 端点
+        std::env::set_var(MEMORI_MODEL_ENDPOINT_ENV, &settings.chat_endpoint);
         std::env::set_var(MEMORI_CHAT_MODEL_ENV, &settings.chat_model);
         std::env::set_var(MEMORI_GRAPH_MODEL_ENV, &settings.graph_model);
         std::env::set_var(MEMORI_EMBED_MODEL_ENV, &settings.embed_model);

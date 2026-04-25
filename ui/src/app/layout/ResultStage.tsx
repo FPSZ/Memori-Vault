@@ -69,10 +69,10 @@ export function ResultStage({
           exit={{ opacity: 0, y: 12 }}
           transition={{ duration: 0.24, ease: "easeOut" }}
           style={{
-            paddingTop: isSearchBarCollapsed ? 74 : isSearchBarCompact ? 102 : 146,
+            paddingTop: isSearchBarCollapsed ? 8 : isSearchBarCompact ? 12 : 16,
             transition: "padding-top 0.24s ease-out"
           }}
-          className="no-scrollbar mx-auto h-full w-full max-w-4xl overflow-y-auto"
+          className="no-scrollbar mx-auto h-full w-full max-w-3xl overflow-y-auto"
           onScroll={onResultScroll}
           onWheel={onResultWheel}
         >

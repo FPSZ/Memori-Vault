@@ -67,12 +67,18 @@ pub(crate) async fn set_model_settings(
     )
     .map_err(|violation| violation.message)?;
     settings.active_provider = Some(normalized.active_provider.clone());
-    settings.local_endpoint = Some(normalized.local_profile.endpoint.clone());
+    settings.local_chat_endpoint = Some(normalized.local_profile.chat_endpoint.clone());
+    settings.local_graph_endpoint = Some(normalized.local_profile.graph_endpoint.clone());
+    settings.local_embed_endpoint = Some(normalized.local_profile.embed_endpoint.clone());
+    settings.local_endpoint = Some(normalized.local_profile.chat_endpoint.clone());
     settings.local_models_root = normalized.local_profile.models_root.clone();
     settings.local_chat_model = Some(normalized.local_profile.chat_model.clone());
     settings.local_graph_model = Some(normalized.local_profile.graph_model.clone());
     settings.local_embed_model = Some(normalized.local_profile.embed_model.clone());
-    settings.remote_endpoint = Some(normalized.remote_profile.endpoint.clone());
+    settings.remote_chat_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
+    settings.remote_graph_endpoint = Some(normalized.remote_profile.graph_endpoint.clone());
+    settings.remote_embed_endpoint = Some(normalized.remote_profile.embed_endpoint.clone());
+    settings.remote_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
     settings.remote_api_key = normalized.remote_profile.api_key.clone();
     settings.remote_chat_model = Some(normalized.remote_profile.chat_model.clone());
     settings.remote_graph_model = Some(normalized.remote_profile.graph_model.clone());
@@ -92,88 +98,117 @@ pub(crate) async fn set_model_settings(
 }
 
 #[tauri::command]
+#[allow(non_snake_case)]
 pub(crate) async fn list_provider_models(
     provider: String,
-    endpoint: String,
-    api_key: Option<String>,
-    models_root: Option<String>,
+    chatEndpoint: String,
+    graphEndpoint: String,
+    embedEndpoint: String,
+    apiKey: Option<String>,
+    modelsRoot: Option<String>,
 ) -> Result<ProviderModelsDto, String> {
     let settings = load_app_settings()?;
     let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&provider);
-    let endpoint = normalize_endpoint(provider, &endpoint);
-    let api_key = normalize_optional_text(api_key);
-    let models_root = normalize_optional_text(models_root);
-    validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[])
-        .map_err(|violation| violation.message)?;
-    if provider == ModelProvider::OllamaLocal {
-        let from_folder = models_root
-            .as_deref()
-            .map(PathBuf::from)
-            .map(|root| scan_local_model_files_from_root(&root))
-            .transpose()
-            .map_err(|err| format!("models_root_invalid: {err}"))?
-            .unwrap_or_default();
-        let from_service = list_ollama_models(&endpoint).await.unwrap_or_default();
-        return Ok(merge_model_candidates(from_folder, from_service));
+    let chat_endpoint = normalize_endpoint(provider, &chatEndpoint);
+    let graph_endpoint = normalize_endpoint(provider, &graphEndpoint);
+    let embed_endpoint = normalize_endpoint(provider, &embedEndpoint);
+    let api_key = normalize_optional_text(apiKey);
+    let models_root = normalize_optional_text(modelsRoot);
+    for endpoint in [&chat_endpoint, &graph_endpoint, &embed_endpoint] {
+        validate_provider_request(&to_model_policy(&policy), provider, endpoint, &[])
+            .map_err(|violation| violation.message)?;
     }
-    fetch_provider_models(
+    let (dto, _errors) = fetch_models_all_endpoints(
         provider,
-        &endpoint,
+        &chat_endpoint,
+        &graph_endpoint,
+        &embed_endpoint,
         api_key.as_deref(),
         models_root.as_deref(),
     )
     .await
-    .map_err(|err| format!("{}: {}", err.code, err.message))
+    .map_err(|err| format!("{}: {}", err.code, err.message))?;
+    Ok(dto)
 }
 
 #[tauri::command]
+#[allow(non_snake_case)]
 pub(crate) async fn probe_model_provider(
     provider: String,
-    endpoint: String,
-    api_key: Option<String>,
-    models_root: Option<String>,
+    chatEndpoint: String,
+    graphEndpoint: String,
+    embedEndpoint: String,
+    apiKey: Option<String>,
+    modelsRoot: Option<String>,
 ) -> Result<ModelAvailabilityDto, String> {
     let settings = load_app_settings()?;
     let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&provider);
-    let endpoint = normalize_endpoint(provider, &endpoint);
-    let api_key = normalize_optional_text(api_key);
-    let models_root = normalize_optional_text(models_root);
-    validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[])
-        .map_err(|violation| violation.message)?;
-    let result = fetch_provider_models(
+    let chat_endpoint = normalize_endpoint(provider, &chatEndpoint);
+    let graph_endpoint = normalize_endpoint(provider, &graphEndpoint);
+    let embed_endpoint = normalize_endpoint(provider, &embedEndpoint);
+    let api_key = normalize_optional_text(apiKey);
+    let models_root = normalize_optional_text(modelsRoot);
+    for endpoint in [&chat_endpoint, &graph_endpoint, &embed_endpoint] {
+        validate_provider_request(&to_model_policy(&policy), provider, endpoint, &[])
+            .map_err(|violation| violation.message)?;
+    }
+    let (models, errors) = fetch_models_all_endpoints(
         provider,
-        &endpoint,
+        &chat_endpoint,
+        &graph_endpoint,
+        &embed_endpoint,
         api_key.as_deref(),
         models_root.as_deref(),
     )
-    .await;
-    match result {
-        Ok(models) => Ok(ModelAvailabilityDto {
-            configured: true,
-            reachable: true,
-            models: models.merged,
-            missing_roles: Vec::new(),
-            errors: Vec::new(),
-            checked_provider: Some(provider_to_string(provider)),
-            status_code: None,
-            status_message: None,
-        }),
-        Err(err) => Ok(ModelAvailabilityDto {
-            configured: true,
-            reachable: false,
-            models: Vec::new(),
-            missing_roles: Vec::new(),
-            errors: vec![ModelErrorItem {
+    .await
+    .map_err(|err| format!("{}: {}", err.code, err.message))?;
+
+    let merged = models.merged;
+    let mut missing_roles = Vec::new();
+
+    let (chat_model, graph_model, embed_model) = match provider {
+        ModelProvider::OllamaLocal => (
+            settings.local_chat_model.as_deref().unwrap_or(""),
+            settings.local_graph_model.as_deref().unwrap_or(""),
+            settings.local_embed_model.as_deref().unwrap_or(""),
+        ),
+        ModelProvider::OpenAiCompatible => (
+            settings.remote_chat_model.as_deref().unwrap_or(""),
+            settings.remote_graph_model.as_deref().unwrap_or(""),
+            settings.remote_embed_model.as_deref().unwrap_or(""),
+        ),
+    };
+
+    if !chat_model.is_empty() && !model_exists(&merged, chat_model) {
+        missing_roles.push("chat".to_string());
+    }
+    if !graph_model.is_empty() && !model_exists(&merged, graph_model) {
+        missing_roles.push("graph".to_string());
+    }
+    if !embed_model.is_empty() && !model_exists(&merged, embed_model) {
+        missing_roles.push("embed".to_string());
+    }
+
+    let reachable = errors.is_empty();
+
+    Ok(ModelAvailabilityDto {
+        configured: true,
+        reachable,
+        models: merged,
+        missing_roles,
+        errors: errors
+            .into_iter()
+            .map(|err| ModelErrorItem {
                 code: err.code,
                 message: err.message,
-            }],
-            checked_provider: Some(provider_to_string(provider)),
-            status_code: None,
-            status_message: None,
-        }),
-    }
+            })
+            .collect(),
+        checked_provider: Some(provider_to_string(provider)),
+        status_code: None,
+        status_message: None,
+    })
 }
 
 #[tauri::command]
@@ -199,69 +234,62 @@ pub(crate) async fn validate_model_setup() -> Result<ModelAvailabilityDto, Strin
     validate_runtime_model_settings(&to_model_policy(&policy), &to_runtime_model_config(&active))
         .map_err(|violation| violation.message)?;
     let provider = active.provider;
-    let models = fetch_provider_models(
+    let (models, endpoint_errors) = fetch_models_all_endpoints(
         provider,
-        &active.endpoint,
+        &active.chat_endpoint,
+        &active.graph_endpoint,
+        &active.embed_endpoint,
         active.api_key.as_deref(),
         active.models_root.as_deref(),
     )
-    .await;
+    .await
+    .map_err(|err| format!("{}: {}", err.code, err.message))?;
 
-    match models {
-        Ok(models) => {
-            let merged = models.merged;
-            let mut missing_roles = Vec::new();
-            let mut errors = Vec::new();
-            if !model_exists(&merged, &active.chat_model) {
-                missing_roles.push("chat".to_string());
-            }
-            if !model_exists(&merged, &active.graph_model) {
-                missing_roles.push("graph".to_string());
-            }
-            if !model_exists(&merged, &active.embed_model) {
-                missing_roles.push("embed".to_string());
-            }
-            if provider == ModelProvider::OpenAiCompatible
-                && !missing_roles.iter().any(|role| role == "embed")
-                && let Err(err) = probe_openai_compatible_embedding(
-                    &active.endpoint,
-                    active.api_key.as_deref(),
-                    &active.embed_model,
-                )
-                .await
-            {
-                missing_roles.push("embed".to_string());
-                errors.push(ModelErrorItem {
-                    code: err.code,
-                    message: err.message,
-                });
-            }
+    let merged = models.merged;
+    let mut missing_roles = Vec::new();
+    let mut errors: Vec<ModelErrorItem> = endpoint_errors
+        .into_iter()
+        .map(|err| ModelErrorItem {
+            code: err.code,
+            message: err.message,
+        })
+        .collect();
 
-            Ok(ModelAvailabilityDto {
-                configured: true,
-                reachable: errors.is_empty(),
-                models: merged,
-                missing_roles,
-                errors,
-                checked_provider: Some(provider_to_string(provider)),
-                status_code: None,
-                status_message: None,
-            })
-        }
-        Err(err) => Ok(ModelAvailabilityDto {
-            configured: true,
-            reachable: false,
-            models: Vec::new(),
-            missing_roles: vec!["chat".to_string(), "graph".to_string(), "embed".to_string()],
-            errors: vec![ModelErrorItem {
-                code: err.code,
-                message: err.message,
-            }],
-            checked_provider: Some(provider_to_string(provider)),
-            status_code: None,
-            status_message: None,
-        }),
+    if !model_exists(&merged, &active.chat_model) {
+        missing_roles.push("chat".to_string());
     }
+    if !model_exists(&merged, &active.graph_model) {
+        missing_roles.push("graph".to_string());
+    }
+    if !model_exists(&merged, &active.embed_model) {
+        missing_roles.push("embed".to_string());
+    }
+    if provider == ModelProvider::OpenAiCompatible
+        && !missing_roles.iter().any(|role| role == "embed")
+        && let Err(err) = probe_openai_compatible_embedding(
+            &active.embed_endpoint,
+            active.api_key.as_deref(),
+            &active.embed_model,
+        )
+        .await
+    {
+        missing_roles.push("embed".to_string());
+        errors.push(ModelErrorItem {
+            code: err.code,
+            message: err.message,
+        });
+    }
+
+    Ok(ModelAvailabilityDto {
+        configured: true,
+        reachable: errors.is_empty(),
+        models: merged,
+        missing_roles,
+        errors,
+        checked_provider: Some(provider_to_string(provider)),
+        status_code: None,
+        status_message: None,
+    })
 }
 
 #[tauri::command]

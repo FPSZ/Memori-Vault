@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Cpu, Database, LoaderCircle, Palette, Search, Settings } from "lucide-react";
+import { ArrowRight, Cpu, Database, LoaderCircle, Network, Palette, Search, Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Language } from "../i18n";
 import { useI18n } from "../i18n";
@@ -10,7 +10,7 @@ import {
   staggerContainerVariants
 } from "./MotionKit";
 import { rankSettingsQuery } from "../app/api/desktop";
-import { AdvancedTab, BasicTab, ModelsTab, PersonalizationTab } from "./settings/tabs";
+import { AdvancedTab, BasicTab, McpTab, ModelsTab, PersonalizationTab } from "./settings/tabs";
 import type {
   LocalModelProfileDto,
   RemoteModelProfileDto,
@@ -26,7 +26,7 @@ import type {
 import type { IndexingActionKey } from "./settings/tabs/AdvancedTab";
 import type { ModelActionKey } from "./settings/tabs/ModelsTab";
 
-type TabKey = "basic" | "models" | "advanced" | "personalization";
+type TabKey = "basic" | "models" | "mcp" | "advanced" | "personalization";
 
 export function SettingsModal({
   open,
@@ -74,7 +74,14 @@ export function SettingsModal({
   onSaveIndexingConfig,
   onTriggerReindex,
   onPauseIndexing,
-  onResumeIndexing
+  onResumeIndexing,
+  mcpSettings,
+  mcpStatus,
+  mcpBusy,
+  mcpMessage,
+  onMcpSettingsChange,
+  onSaveMcpSettings,
+  onCopyMcpClientConfig
 }: SettingsModalProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabKey>("basic");
@@ -115,7 +122,7 @@ export function SettingsModal({
     activeProvider === "ollama_local" ? modelSettings.local_profile : modelSettings.remote_profile;
   const normalizePolicyEndpoint = (value: string) =>
     value.trim().replace(/\/+$/, "").toLowerCase();
-  const normalizedRemoteEndpoint = normalizePolicyEndpoint(modelSettings.remote_profile.endpoint);
+  const normalizedRemoteEndpoint = normalizePolicyEndpoint(modelSettings.remote_profile.chat_endpoint);
   const normalizedAllowedEndpoints = enterprisePolicy.allowed_model_endpoints
     .map(normalizePolicyEndpoint)
     .filter(Boolean);
@@ -169,6 +176,12 @@ export function SettingsModal({
         label: t("models"),
         icon: Settings,
         keywords: [t("modelProvider"), t("chatModel"), t("graphModel"), t("embedModel")]
+      },
+      {
+        key: "mcp" as const,
+        label: t("mcp"),
+        icon: Network,
+        keywords: [t("mcpTransport"), t("mcpEndpoint"), t("mcpClientConfig"), "MCP"]
       },
       {
         key: "advanced" as const,
@@ -610,6 +623,19 @@ export function SettingsModal({
                 onTriggerReindex={onTriggerReindex}
                 onPauseIndexing={onPauseIndexing}
                 onResumeIndexing={onResumeIndexing}
+              />
+            ) : null}
+
+                        {activeTab === "mcp" ? (
+              <McpTab
+                t={t}
+                mcpSettings={mcpSettings}
+                mcpStatus={mcpStatus}
+                mcpBusy={mcpBusy}
+                mcpMessage={mcpMessage}
+                onMcpSettingsChange={onMcpSettingsChange}
+                onSaveMcpSettings={onSaveMcpSettings}
+                onCopyMcpClientConfig={onCopyMcpClientConfig}
               />
             ) : null}
 

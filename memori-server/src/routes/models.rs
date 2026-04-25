@@ -22,7 +22,7 @@ pub(crate) async fn set_model_settings_handler(
             "anonymous".to_string(),
             "set_model_settings",
             Some(active_runtime.provider),
-            Some(&active_runtime.endpoint),
+            Some(&active_runtime.chat_endpoint),
             &[
                 active_runtime.chat_model.clone(),
                 active_runtime.graph_model.clone(),
@@ -76,7 +76,7 @@ pub(crate) async fn validate_model_setup_handler(
             "anonymous".to_string(),
             "validate_model_setup",
             Some(active.provider),
-            Some(&active.endpoint),
+            Some(&active.chat_endpoint),
             &[
                 active.chat_model.clone(),
                 active.graph_model.clone(),
@@ -90,7 +90,7 @@ pub(crate) async fn validate_model_setup_handler(
     let provider = active.provider;
     let models = fetch_provider_models(
         provider,
-        &active.endpoint,
+        &active.chat_endpoint,
         active.api_key.as_deref(),
         active.models_root.as_deref(),
     )

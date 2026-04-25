@@ -595,3 +595,73 @@ mod tests {
         assert!(long_chunks[1].content.chars().count() >= OVERLAP_SIZE / 2);
     }
 }
+
+// ============================================================================
+// Binary Document Text Extraction (docx / pdf)
+// ============================================================================
+
+/// Extract plain text from a file based on its extension.
+/// Returns `None` if the file is not a supported binary format or extraction fails.
+pub fn extract_document_text(file_path: impl AsRef<Path>) -> Option<String> {
+    let path = file_path.as_ref();
+    let ext = path.extension().and_then(|s| s.to_str())?;
+    match ext.to_ascii_lowercase().as_str() {
+        "docx" => extract_docx_text(path),
+        "pdf" => extract_pdf_text(path),
+        _ => None,
+    }
+}
+
+/// Extract text from a .docx file (Open XML Word document).
+/// Docx is a ZIP archive containing word/document.xml with <w:t> text runs.
+fn extract_docx_text(path: &Path) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+    let mut xml_reader = archive.by_name("word/document.xml").ok()?;
+    let mut buf = Vec::new();
+    std::io::Read::read_to_end(&mut xml_reader, &mut buf).ok()?;
+
+    let mut reader = quick_xml::Reader::from_reader(&buf[..]);
+    reader.config_mut().trim_text(true);
+    let mut texts = Vec::new();
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(quick_xml::events::Event::Text(e)) => {
+                if let Ok(t) = e.unescape() {
+                    texts.push(t.into_owned());
+                }
+            }
+            Ok(quick_xml::events::Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    let raw = texts.join("");
+    // Replace soft-hyphens and normalize whitespace
+    let cleaned = raw.replace("\u{00AD}", "")
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    Some(cleaned)
+}
+
+/// Extract text from a PDF file using lopdf.
+fn extract_pdf_text(path: &Path) -> Option<String> {
+    let doc = lopdf::Document::load(path).ok()?;
+    let pages = doc.get_pages();
+    let mut texts = Vec::with_capacity(pages.len());
+    for (page_num, _) in pages {
+        match doc.extract_text(&[page_num]) {
+            Ok(page_text) => {
+                texts.push(page_text);
+            }
+            Err(_) => continue,
+        }
+    }
+    let raw = texts.join("\n");
+    let cleaned = raw.replace("\r\n", "\n").replace('\r', "\n");
+    Some(cleaned)
+}
