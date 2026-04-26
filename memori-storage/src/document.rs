@@ -521,7 +521,7 @@ impl SqliteStore {
                 .map_err(map_sqlite_error)?;
 
             let mut inserted = Vec::with_capacity(chunk_count);
-            for (chunk, embedding) in chunks.into_iter().zip(embeddings.into_iter()) {
+            for (chunk, embedding) in chunks.into_iter().zip(embeddings) {
                 let chunk_index = i64::try_from(chunk.chunk_index).map_err(|_| {
                     StorageError::ChunkIndexOverflow {
                         chunk_index: chunk.chunk_index,

@@ -219,11 +219,9 @@ pub(crate) fn evenly_sample_indices(total: usize, count: usize) -> Vec<usize> {
     let denominator = count - 1;
     let mut indices = Vec::with_capacity(count);
     for position in 0..count {
-        let index = if denominator == 0 {
-            0
-        } else {
-            (position * max_index + denominator / 2) / denominator
-        };
+        let index = (position * max_index + denominator / 2)
+            .checked_div(denominator)
+            .unwrap_or(0);
         if indices.last().copied() != Some(index) {
             indices.push(index);
         }

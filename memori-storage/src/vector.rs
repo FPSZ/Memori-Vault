@@ -35,7 +35,7 @@ impl VectorStore for InMemoryStore {
         }
 
         let mut guard = self.records.write().await;
-        for (chunk, embedding) in chunks.into_iter().zip(embeddings.into_iter()) {
+        for (chunk, embedding) in chunks.into_iter().zip(embeddings) {
             guard.push(StoredVectorRecord { chunk, embedding });
         }
 
