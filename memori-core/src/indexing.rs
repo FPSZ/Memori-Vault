@@ -561,7 +561,7 @@ pub(crate) async fn run_graph_worker(
 
         // 顺序落盘（SQLite 单写更安全）
         let mut had_error = false;
-        for (task, result) in tasks.into_iter().zip(results.into_iter()) {
+        for (task, result) in tasks.into_iter().zip(results) {
             let graph_data = match result {
                 Some(Ok(data)) => data,
                 Some(Err(err)) => {

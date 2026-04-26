@@ -564,7 +564,7 @@ impl MemoriEngine {
         let file_only_scope = !scope_paths.is_empty() && file_scopes.len() == scope_paths.len();
         if file_only_scope && !by_path.is_empty() {
             let mut docs = by_path.into_values().collect::<Vec<_>>();
-            docs.sort_by(|a, b| a.document_rank.cmp(&b.document_rank));
+            docs.sort_by_key(|a| a.document_rank);
             return Ok(docs);
         }
 
