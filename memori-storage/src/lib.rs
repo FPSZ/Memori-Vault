@@ -185,6 +185,286 @@ pub struct GraphNeighbors {
     pub source_chunks: Vec<ChunkRecord>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryScope {
+    User,
+    #[default]
+    Project,
+    Session,
+    Agent,
+    Document,
+}
+
+impl MemoryScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Project => "project",
+            Self::Session => "session",
+            Self::Agent => "agent",
+            Self::Document => "document",
+        }
+    }
+}
+
+impl std::str::FromStr for MemoryScope {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "user" => Ok(Self::User),
+            "session" => Ok(Self::Session),
+            "agent" => Ok(Self::Agent),
+            "document" => Ok(Self::Document),
+            "project" | "" => Ok(Self::Project),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryLayer {
+    Stm,
+    #[default]
+    Mtm,
+    Ltm,
+    Graph,
+    Policy,
+}
+
+impl MemoryLayer {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Stm => "stm",
+            Self::Mtm => "mtm",
+            Self::Ltm => "ltm",
+            Self::Graph => "graph",
+            Self::Policy => "policy",
+        }
+    }
+}
+
+impl std::str::FromStr for MemoryLayer {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "stm" => Ok(Self::Stm),
+            "ltm" => Ok(Self::Ltm),
+            "graph" => Ok(Self::Graph),
+            "policy" => Ok(Self::Policy),
+            "mtm" | "" => Ok(Self::Mtm),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemorySourceType {
+    DocumentChunk,
+    #[default]
+    ConversationTurn,
+    ToolEvent,
+    SystemEvent,
+    MarkdownNote,
+    GraphEdge,
+}
+
+impl MemorySourceType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::DocumentChunk => "document_chunk",
+            Self::ConversationTurn => "conversation_turn",
+            Self::ToolEvent => "tool_event",
+            Self::SystemEvent => "system_event",
+            Self::MarkdownNote => "markdown_note",
+            Self::GraphEdge => "graph_edge",
+        }
+    }
+}
+
+impl std::str::FromStr for MemorySourceType {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "document_chunk" => Ok(Self::DocumentChunk),
+            "tool_event" => Ok(Self::ToolEvent),
+            "system_event" => Ok(Self::SystemEvent),
+            "markdown_note" => Ok(Self::MarkdownNote),
+            "graph_edge" => Ok(Self::GraphEdge),
+            "conversation_turn" | "" => Ok(Self::ConversationTurn),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryStatus {
+    #[default]
+    Active,
+    Pending,
+    Superseded,
+    Deleted,
+}
+
+impl MemoryStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Pending => "pending",
+            Self::Superseded => "superseded",
+            Self::Deleted => "deleted",
+        }
+    }
+}
+
+impl std::str::FromStr for MemoryStatus {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "pending" => Ok(Self::Pending),
+            "superseded" => Ok(Self::Superseded),
+            "deleted" => Ok(Self::Deleted),
+            "active" | "" => Ok(Self::Active),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleAction {
+    #[default]
+    Add,
+    Update,
+    Supersede,
+    Delete,
+    Noop,
+}
+
+impl LifecycleAction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Update => "update",
+            Self::Supersede => "supersede",
+            Self::Delete => "delete",
+            Self::Noop => "noop",
+        }
+    }
+}
+
+impl std::str::FromStr for LifecycleAction {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "update" => Ok(Self::Update),
+            "supersede" => Ok(Self::Supersede),
+            "delete" => Ok(Self::Delete),
+            "noop" => Ok(Self::Noop),
+            "add" | "" => Ok(Self::Add),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemoryRecord {
+    pub id: i64,
+    pub layer: MemoryLayer,
+    pub scope: MemoryScope,
+    pub scope_id: String,
+    pub memory_type: String,
+    pub title: String,
+    pub content: String,
+    pub source_type: MemorySourceType,
+    pub source_ref: String,
+    pub confidence: f64,
+    pub status: MemoryStatus,
+    pub tags: Vec<String>,
+    pub links: Vec<String>,
+    pub supersedes: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemoryEventRecord {
+    pub id: i64,
+    pub scope: MemoryScope,
+    pub scope_id: String,
+    pub event_type: String,
+    pub content: String,
+    pub source_ref: String,
+    pub content_hash: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemoryLifecycleLogRecord {
+    pub id: i64,
+    pub action: LifecycleAction,
+    pub target_type: String,
+    pub target_id: Option<i64>,
+    pub reason: String,
+    pub model: Option<String>,
+    pub source_ref: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MemorySearchOptions {
+    pub query: String,
+    pub scope: Option<MemoryScope>,
+    pub layer: Option<MemoryLayer>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewMemoryRecord {
+    pub layer: MemoryLayer,
+    pub scope: MemoryScope,
+    pub scope_id: String,
+    pub memory_type: String,
+    pub title: String,
+    pub content: String,
+    pub source_type: MemorySourceType,
+    pub source_ref: String,
+    pub confidence: f64,
+    pub status: MemoryStatus,
+    pub tags: Vec<String>,
+    pub links: Vec<String>,
+    pub supersedes: Option<i64>,
+    pub reason: String,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UpdateMemoryRecord {
+    pub content: Option<String>,
+    pub title: Option<String>,
+    pub status: Option<MemoryStatus>,
+    pub supersedes: Option<i64>,
+    pub reason: String,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NewMemoryEvent {
+    pub scope: MemoryScope,
+    pub scope_id: String,
+    pub event_type: String,
+    pub content: String,
+    pub source_ref: String,
+}
+
 #[derive(Debug, Clone)]
 struct CachedVector {
     chunk_id: i64,
@@ -224,6 +504,7 @@ pub struct InMemoryStore {
 }
 
 mod document;
+mod memory;
 mod schema;
 mod search;
 mod store;
@@ -1051,6 +1332,93 @@ mod tests {
                 .is_none()
         );
         assert_eq!(store.load_from_db().await.expect("load from db"), 0);
+
+        drop(store);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
+    async fn memory_domain_add_search_update_and_log_round_trip() {
+        let db_path = unique_db_path("memori_vault_memory_domain");
+        if db_path.exists() {
+            let _ = std::fs::remove_file(&db_path);
+        }
+
+        let store = SqliteStore::new(&db_path).expect("create sqlite store");
+        let event = store
+            .insert_memory_event(super::NewMemoryEvent {
+                scope: super::MemoryScope::Project,
+                scope_id: "default".to_string(),
+                event_type: "user_message".to_string(),
+                content: "User prefers Chinese answers for Memori-Vault.".to_string(),
+                source_ref: "conversation_turn:test".to_string(),
+            })
+            .await
+            .expect("insert memory event");
+
+        let memory = store
+            .add_memory(super::NewMemoryRecord {
+                layer: super::MemoryLayer::Ltm,
+                scope: super::MemoryScope::Project,
+                scope_id: "default".to_string(),
+                memory_type: "preference".to_string(),
+                title: "Answer language".to_string(),
+                content: "Prefer Chinese answers for this project.".to_string(),
+                source_type: super::MemorySourceType::ConversationTurn,
+                source_ref: format!("memory_event:{}", event.id),
+                confidence: 0.9,
+                status: super::MemoryStatus::Active,
+                tags: vec!["language".to_string()],
+                links: Vec::new(),
+                supersedes: None,
+                reason: "test add".to_string(),
+                model: Some("test".to_string()),
+            })
+            .await
+            .expect("add memory");
+
+        let hits = store
+            .search_memories(super::MemorySearchOptions {
+                query: "Chinese".to_string(),
+                scope: Some(super::MemoryScope::Project),
+                layer: Some(super::MemoryLayer::Ltm),
+                limit: 10,
+            })
+            .await
+            .expect("search memories");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, memory.id);
+
+        let updated = store
+            .update_memory(
+                memory.id,
+                super::UpdateMemoryRecord {
+                    content: Some("Prefer concise Chinese answers for this project.".to_string()),
+                    title: None,
+                    status: Some(super::MemoryStatus::Superseded),
+                    supersedes: None,
+                    reason: "test supersede".to_string(),
+                    model: Some("test".to_string()),
+                },
+            )
+            .await
+            .expect("update memory")
+            .expect("memory exists");
+        assert_eq!(updated.status, super::MemoryStatus::Superseded);
+
+        let logs = store
+            .list_memory_lifecycle_logs(Some(memory.id), 10)
+            .await
+            .expect("list logs");
+        assert_eq!(logs.len(), 2);
+        assert!(
+            logs.iter()
+                .any(|item| item.action == super::LifecycleAction::Add)
+        );
+        assert!(
+            logs.iter()
+                .any(|item| item.action == super::LifecycleAction::Supersede)
+        );
 
         drop(store);
         let _ = std::fs::remove_file(&db_path);

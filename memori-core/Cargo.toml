@@ -10,6 +10,8 @@ description = "Memori-Vault 核心调度引擎"
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "macros", "signal", "fs"] }
 thiserror.workspace = true
 tracing.workspace = true
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
@@ -21,4 +23,3 @@ rusqlite = { version = "0.37.0", features = ["bundled"] }
 bincode = "1.3.3"
 
 [dev-dependencies]
-tracing-subscriber = "0.3.20"

@@ -40,6 +40,13 @@ pub(crate) struct AppSettings {
     pub(crate) mcp_http_port: Option<u16>,
     pub(crate) mcp_access_mode: Option<String>,
     pub(crate) mcp_audit_enabled: Option<bool>,
+    pub(crate) conversation_memory_enabled: Option<bool>,
+    pub(crate) auto_memory_write: Option<String>,
+    pub(crate) memory_write_requires_source: Option<bool>,
+    pub(crate) memory_markdown_export_enabled: Option<bool>,
+    pub(crate) default_context_budget: Option<String>,
+    pub(crate) complex_context_budget: Option<String>,
+    pub(crate) graph_ranking_enabled: Option<bool>,
     // legacy fields for backwards compatibility
     pub(crate) provider: Option<String>,
     pub(crate) endpoint: Option<String>,
@@ -57,6 +64,56 @@ pub(crate) struct AppSettingsDto {
     pub(crate) resource_budget: String,
     pub(crate) schedule_start: Option<String>,
     pub(crate) schedule_end: Option<String>,
+    pub(crate) conversation_memory_enabled: bool,
+    pub(crate) auto_memory_write: String,
+    pub(crate) memory_write_requires_source: bool,
+    pub(crate) memory_markdown_export_enabled: bool,
+    pub(crate) default_context_budget: String,
+    pub(crate) complex_context_budget: String,
+    pub(crate) graph_ranking_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct MemorySettingsDto {
+    pub(crate) conversation_memory_enabled: bool,
+    pub(crate) auto_memory_write: String,
+    pub(crate) memory_write_requires_source: bool,
+    pub(crate) memory_markdown_export_enabled: bool,
+    pub(crate) default_context_budget: String,
+    pub(crate) complex_context_budget: String,
+    pub(crate) graph_ranking_enabled: bool,
+}
+
+impl AppSettingsDto {
+    pub(crate) fn from_settings(
+        settings: AppSettings,
+        watch_root: String,
+        indexing: memori_core::IndexingConfig,
+    ) -> Self {
+        Self {
+            watch_root,
+            language: settings.language,
+            indexing_mode: indexing.mode.as_str().to_string(),
+            resource_budget: indexing.resource_budget.as_str().to_string(),
+            schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
+            schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
+            conversation_memory_enabled: settings.conversation_memory_enabled.unwrap_or(true),
+            auto_memory_write: settings
+                .auto_memory_write
+                .unwrap_or_else(|| "suggest".to_string()),
+            memory_write_requires_source: settings.memory_write_requires_source.unwrap_or(true),
+            memory_markdown_export_enabled: settings
+                .memory_markdown_export_enabled
+                .unwrap_or(false),
+            default_context_budget: settings
+                .default_context_budget
+                .unwrap_or_else(|| "16k".to_string()),
+            complex_context_budget: settings
+                .complex_context_budget
+                .unwrap_or_else(|| "32k".to_string()),
+            graph_ranking_enabled: settings.graph_ranking_enabled.unwrap_or(false),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

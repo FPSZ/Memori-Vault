@@ -1,4 +1,4 @@
-﻿use crate::*;
+use crate::*;
 
 pub mod prompts;
 pub mod protocol;
@@ -38,7 +38,9 @@ pub(crate) async fn handle_json_rpc_request(
             tools::call_tool(state, request.params).await,
         )),
         "resources/list" => json_response(request.id, resources::list_resources()),
-        "resources/templates/list" => json_response(request.id, resources::list_resource_templates()),
+        "resources/templates/list" => {
+            json_response(request.id, resources::list_resource_templates())
+        }
         "resources/read" => Some(to_response(
             request.id,
             resources::read_resource(state, request.params).await,
@@ -61,7 +63,10 @@ pub(crate) async fn handle_json_rpc_request(
     }
 }
 
-fn handle_initialize(id: Option<serde_json::Value>, params: Option<serde_json::Value>) -> JsonRpcResponse {
+fn handle_initialize(
+    id: Option<serde_json::Value>,
+    params: Option<serde_json::Value>,
+) -> JsonRpcResponse {
     let requested_version = params
         .as_ref()
         .and_then(|value| serde_json::from_value::<InitializeParams>(value.clone()).ok())
@@ -76,25 +81,38 @@ fn handle_initialize(id: Option<serde_json::Value>, params: Option<serde_json::V
     let result = InitializeResult {
         protocol_version: protocol_version.to_string(),
         capabilities: ServerCapabilities {
-            tools: Some(ToolsCapability { list_changed: false }),
+            tools: Some(ToolsCapability {
+                list_changed: false,
+            }),
             resources: Some(ResourcesCapability {
                 subscribe: false,
                 list_changed: false,
             }),
-            prompts: Some(PromptsCapability { list_changed: false }),
+            prompts: Some(PromptsCapability {
+                list_changed: false,
+            }),
         },
         server_info: Implementation {
             name: "memori-vault".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
         },
     };
-    JsonRpcResponse::success(id, serde_json::to_value(result).unwrap_or_else(|_| serde_json::json!({})))
+    JsonRpcResponse::success(
+        id,
+        serde_json::to_value(result).unwrap_or_else(|_| serde_json::json!({})),
+    )
 }
 
-fn json_response<T: serde::Serialize>(id: Option<serde_json::Value>, result: T) -> Option<JsonRpcResponse> {
-    Some(to_response(id, serde_json::to_value(result).map_err(|err| {
-        JsonRpcError::internal_error(format!("serialize MCP result failed: {err}"))
-    })))
+fn json_response<T: serde::Serialize>(
+    id: Option<serde_json::Value>,
+    result: T,
+) -> Option<JsonRpcResponse> {
+    Some(to_response(
+        id,
+        serde_json::to_value(result).map_err(|err| {
+            JsonRpcError::internal_error(format!("serialize MCP result failed: {err}"))
+        }),
+    ))
 }
 
 fn to_response(
@@ -104,6 +122,74 @@ fn to_response(
     match result {
         Ok(value) => JsonRpcResponse::success(id, value),
         Err(error) => JsonRpcResponse::failure(id, error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_tools_exposes_memory_interface() {
+        let names = tools::list_tools()
+            .tools
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect::<Vec<_>>();
+
+        for expected in [
+            "memory_search",
+            "memory_add",
+            "memory_update",
+            "memory_list_recent",
+            "memory_get_source",
+        ] {
+            assert!(
+                names.iter().any(|name| name == expected),
+                "missing MCP tool {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn list_resources_exposes_memory_templates() {
+        let templates = resources::list_resource_templates()
+            .resource_templates
+            .into_iter()
+            .map(|template| template.uri_template)
+            .collect::<Vec<_>>();
+
+        for expected in [
+            "memori://memory/{memory_id}",
+            "memori://memory/recent/{scope}",
+            "memori://memory/source/{source_ref}",
+            "memori://graph/entity/{entity_id}/timeline",
+        ] {
+            assert!(
+                templates.iter().any(|template| template == expected),
+                "missing MCP resource template {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn initialize_advertises_supported_server_capabilities() {
+        let response = handle_initialize(
+            Some(serde_json::json!(1)),
+            Some(serde_json::json!({
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": { "name": "test", "version": "0" }
+            })),
+        );
+        assert!(response.error.is_none());
+        let result = response.result.expect("initialize result");
+        let parsed: InitializeResult =
+            serde_json::from_value(result).expect("valid initialize result");
+        assert_eq!(parsed.protocol_version, MCP_PROTOCOL_VERSION);
+        assert!(parsed.capabilities.tools.is_some());
+        assert!(parsed.capabilities.resources.is_some());
+        assert!(parsed.capabilities.prompts.is_some());
     }
 }
 

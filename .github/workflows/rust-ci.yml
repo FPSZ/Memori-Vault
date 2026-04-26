@@ -5,6 +5,10 @@ on:
     branches: ["main"]
   pull_request:
 
+concurrency:
+  group: rust-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -90,6 +94,25 @@ jobs:
             echo "Version mismatch detected among Cargo workspace, ui/package.json, and memori-desktop/tauri.conf.json"
             exit 1
           fi
+
+          RELEASE_NOTES_PATH="docs/RELEASE_NOTES_v${WORKSPACE_VERSION}.md"
+          if [ ! -f "$RELEASE_NOTES_PATH" ]; then
+            echo "Missing release notes file for current version: $RELEASE_NOTES_PATH"
+            exit 1
+          fi
+
+      - name: Check release documentation links
+        shell: bash
+        run: |
+          test -f docs/MEMORY_OS_LITE.md
+          grep -q "MEMORY_OS_LITE.md" README.md
+          grep -q "MEMORY_OS_LITE.md" README.en.md
+          grep -q "Memory OS Lite" docs/RELEASE_NOTES_v$(python - <<'PY'
+          import pathlib, re
+          text = pathlib.Path('Cargo.toml').read_text(encoding='utf-8')
+          print(re.search(r'(?ms)^\[workspace\.package\]\s+.*?^version\s*=\s*"([^"]+)"', text).group(1))
+          PY
+          ).md
 
       - name: Check formatting
         run: cargo fmt --all -- --check

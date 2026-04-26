@@ -1,5 +1,25 @@
 # Memori-Vault Structure Map (Internal Handoff)
 
+## 0. Current Architecture Update: Memory OS Lite
+
+The architecture direction is now **Local-first Verifiable Memory OS Lite**. The canonical design document is [MEMORY_OS_LITE.md](./MEMORY_OS_LITE.md).
+
+New boundaries to preserve:
+
+- `memori-storage` owns both document storage and Memory Domain persistence: `memory_events`, `memories`, and `memory_lifecycle_log`.
+- `memori-core` owns retrieval, ask-time memory routing, context budgeting, Evidence Firewall behavior, and answer-source classification.
+- `memori-server/src/mcp/*` is the official agent interface for query, source inspection, indexing/model control, graph exploration, and audited memory tools.
+- `ui/src/app/panels/TrustPanel.tsx` owns trust rendering for `answer_source_mix`, `failure_class`, `source_groups`, `memory_context`, and `context_budget_report`.
+- `ui/src/components/settings/tabs/MemoryTab.tsx` owns Memory OS Lite user controls such as memory write policy and context budgets.
+
+The main ask chain should be understood as:
+
+```text
+analyze query -> document routing -> memory context search -> chunk retrieval/RRF -> gating -> context composer -> answer -> Trust Panel
+```
+
+Document citations must remain document-only. Conversation/project memory is surfaced as `memory_context`, not as citation.
+
 Last Updated: 2026-03-12 UTC  
 Audience: Internal AI/developer handoff
 

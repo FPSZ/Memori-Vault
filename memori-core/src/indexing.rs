@@ -284,9 +284,8 @@ pub(crate) async fn process_file_event(
                 return;
             }
             Err(_) => {
-                let err = format!(
-                    "embedding chunk timed out after {EMBEDDING_CHUNK_TIMEOUT_SECS}s"
-                );
+                let err =
+                    format!("embedding chunk timed out after {EMBEDDING_CHUNK_TIMEOUT_SECS}s");
                 error!(
                     path = %event.path.display(),
                     chunk_index = chunk.chunk_index,
@@ -297,13 +296,7 @@ pub(crate) async fn process_file_event(
                 );
                 let _ = state
                     .vector_store
-                    .mark_file_index_failed(
-                        &event.path,
-                        file_size,
-                        mtime_secs,
-                        &file_hash,
-                        &err,
-                    )
+                    .mark_file_index_failed(&event.path, file_size, mtime_secs, &file_hash, &err)
                     .await;
                 let mut runtime = state.indexing_runtime.write().await;
                 runtime.last_error = Some(err);
@@ -448,14 +441,20 @@ pub(crate) async fn run_graph_worker(
     info!("memori-core graph worker started");
     match state.vector_store.reset_running_graph_tasks().await {
         Ok(count) if count > 0 => {
-            info!(count = count, "reset interrupted running graph tasks to pending");
+            info!(
+                count = count,
+                "reset interrupted running graph tasks to pending"
+            );
         }
         Ok(_) => {}
         Err(err) => warn!(error = %err, "failed to reset interrupted graph tasks"),
     }
     match state.vector_store.mark_orphan_graph_tasks_done().await {
         Ok(count) if count > 0 => {
-            warn!(count = count, "discarded orphan graph tasks before graph extraction");
+            warn!(
+                count = count,
+                "discarded orphan graph tasks before graph extraction"
+            );
         }
         Ok(_) => {}
         Err(err) => warn!(error = %err, "failed to discard orphan graph tasks"),
@@ -517,7 +516,10 @@ pub(crate) async fn run_graph_worker(
                         chunk_id = task.chunk_id,
                         "graph task points to a deleted chunk; marking it done before LLM extraction"
                     );
-                    state.vector_store.mark_graph_task_done(task.task_id).await?;
+                    state
+                        .vector_store
+                        .mark_graph_task_done(task.task_id)
+                        .await?;
                 }
                 Err(err) => {
                     warn!(
@@ -585,7 +587,9 @@ pub(crate) async fn run_graph_worker(
                 .await
             {
                 // ChunkNotFound 意味着对应 chunk 已被重新索引删除，重试无意义，直接丢弃任务。
-                if err.to_string().contains("chunk_id 不存在") || err.to_string().contains("ChunkNotFound") {
+                if err.to_string().contains("chunk_id 不存在")
+                    || err.to_string().contains("ChunkNotFound")
+                {
                     warn!(
                         chunk_id = task.chunk_id,
                         "对应 chunk 已被删除，丢弃过期图谱任务"
@@ -743,9 +747,7 @@ pub(crate) async fn run_full_rebuild(
 
     match rebuild_result {
         Ok(()) => {
-            if !previous_paused
-                && let Some(tx) = graph_notify_tx
-            {
+            if !previous_paused && let Some(tx) = graph_notify_tx {
                 let _ = tx.try_send(());
             }
             set_runtime_idle(state, None).await;
@@ -850,16 +852,17 @@ async fn read_document_text(path: &std::path::Path) -> Result<String, std::io::E
     if ext == "docx" || ext == "pdf" {
         // Binary formats: run extraction on blocking thread pool
         let path_buf = path.to_path_buf();
-        match tokio::task::spawn_blocking(move || memori_parser::extract_document_text(&path_buf)).await {
+        match tokio::task::spawn_blocking(move || memori_parser::extract_document_text(&path_buf))
+            .await
+        {
             Ok(Some(text)) => Ok(text),
             Ok(None) => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Failed to extract text from {}", path.display()),
             )),
-            Err(join_err) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Extraction task panicked: {join_err}"),
-            )),
+            Err(join_err) => Err(std::io::Error::other(format!(
+                "Extraction task panicked: {join_err}"
+            ))),
         }
     } else {
         tokio::fs::read_to_string(path).await

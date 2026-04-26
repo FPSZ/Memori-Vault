@@ -42,3 +42,4 @@ Logo/
 # Test data
 Memory_Test/
 Memory_Stress_Test
+.playwright-mcp

@@ -1045,6 +1045,60 @@ pub(crate) fn build_citations(evidence: &[MergedEvidence]) -> Vec<CitationItem> 
     citations
 }
 
+pub(crate) fn build_source_groups(
+    citations: &[CitationItem],
+    evidence: &[EvidenceItem],
+) -> Vec<SourceGroup> {
+    let mut groups = HashMap::<String, SourceGroup>::new();
+    for citation in citations {
+        let group_id = source_group_id(&citation.relative_path, &citation.file_path);
+        let group = groups
+            .entry(group_id.clone())
+            .or_insert_with(|| SourceGroup {
+                canonical_title: canonical_source_title(
+                    &citation.relative_path,
+                    &citation.file_path,
+                ),
+                group_id,
+                file_paths: Vec::new(),
+                relative_paths: Vec::new(),
+                citation_indices: Vec::new(),
+                evidence_count: 0,
+            });
+        push_unique(&mut group.file_paths, citation.file_path.clone());
+        push_unique(&mut group.relative_paths, citation.relative_path.clone());
+        group.citation_indices.push(citation.index);
+    }
+
+    for item in evidence {
+        let group_id = source_group_id(&item.relative_path, &item.file_path);
+        let group = groups
+            .entry(group_id.clone())
+            .or_insert_with(|| SourceGroup {
+                canonical_title: canonical_source_title(&item.relative_path, &item.file_path),
+                group_id,
+                file_paths: Vec::new(),
+                relative_paths: Vec::new(),
+                citation_indices: Vec::new(),
+                evidence_count: 0,
+            });
+        push_unique(&mut group.file_paths, item.file_path.clone());
+        push_unique(&mut group.relative_paths, item.relative_path.clone());
+        group.evidence_count += 1;
+    }
+
+    let mut values = groups.into_values().collect::<Vec<_>>();
+    values.sort_by(|a, b| {
+        a.citation_indices
+            .first()
+            .copied()
+            .unwrap_or(usize::MAX)
+            .cmp(&b.citation_indices.first().copied().unwrap_or(usize::MAX))
+            .then_with(|| a.canonical_title.cmp(&b.canonical_title))
+    });
+    values
+}
+
 pub(crate) fn build_evidence_items(evidence: &[MergedEvidence]) -> Vec<EvidenceItem> {
     evidence
         .iter()
@@ -1159,9 +1213,22 @@ pub fn build_query_terms_for_offline_embedding(query: &str) -> Vec<String> {
     terms
 }
 
-pub(crate) fn build_text_context_from_evidence(evidence: &[MergedEvidence]) -> String {
+pub(crate) fn build_text_context_from_evidence_with_budget(
+    evidence: &[MergedEvidence],
+    max_chars: usize,
+) -> (String, usize) {
     let mut parts = Vec::with_capacity(evidence.len());
+    let mut used_chars = 0usize;
     for (index, item) in evidence.iter().enumerate() {
+        if used_chars >= max_chars {
+            break;
+        }
+        let remaining = max_chars.saturating_sub(used_chars);
+        let mut content = item.chunk.content.clone();
+        if content.chars().count() > remaining.saturating_sub(512) {
+            content = take_chars(&content, remaining.saturating_sub(512).max(400));
+            content.push_str("\n...[truncated by context budget]");
+        }
         let heading = if item.chunk.heading_path.is_empty() {
             String::new()
         } else {
@@ -1179,10 +1246,71 @@ pub(crate) fn build_text_context_from_evidence(evidence: &[MergedEvidence]) -> S
             score = item.final_score,
             reason = evidence_reason(item),
             heading = heading,
-            content = item.chunk.content,
+            content = content,
         ));
+        used_chars = parts.iter().map(|part| part.chars().count()).sum();
     }
-    parts.join("\n\n")
+    let context = parts.join("\n\n");
+    let used = estimate_tokens(&context);
+    (context, used)
+}
+
+pub(crate) fn estimate_tokens(text: &str) -> usize {
+    text.chars().count().div_ceil(4)
+}
+
+fn take_chars(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
+}
+
+fn push_unique(items: &mut Vec<String>, item: String) {
+    if !items.iter().any(|existing| existing == &item) {
+        items.push(item);
+    }
+}
+
+fn source_group_id(relative_path: &str, file_path: &str) -> String {
+    let source = if relative_path.trim().is_empty() {
+        file_path
+    } else {
+        relative_path
+    };
+    let normalized = source.replace('\\', "/").to_ascii_lowercase();
+    let parent = normalized
+        .rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .unwrap_or("");
+    let file_name = normalized.rsplit('/').next().unwrap_or(&normalized);
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    let canonical_stem = stem
+        .trim_start_matches(|ch: char| ch.is_ascii_digit() || ch == '_' || ch == '-')
+        .to_string();
+    if parent.is_empty() {
+        canonical_stem
+    } else {
+        format!("{parent}/{canonical_stem}")
+    }
+}
+
+fn canonical_source_title(relative_path: &str, file_path: &str) -> String {
+    let source = if relative_path.trim().is_empty() {
+        file_path
+    } else {
+        relative_path
+    };
+    let file_name = source
+        .replace('\\', "/")
+        .rsplit('/')
+        .next()
+        .unwrap_or(source)
+        .to_string();
+    file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem.to_string())
+        .unwrap_or(file_name)
 }
 
 pub(crate) fn build_reference_excerpt(file_path: &Path, chunk_content: &str) -> String {

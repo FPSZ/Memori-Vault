@@ -7,14 +7,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use memori_core::{
     AskResponseStructured, AskStatus, DEFAULT_CHAT_ENDPOINT, DEFAULT_CHAT_MODEL,
-    DEFAULT_EMBED_ENDPOINT, DEFAULT_GRAPH_ENDPOINT, DEFAULT_GRAPH_MODEL,
-    DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER, EgressMode,
-    EngineError, EnterpriseModelPolicy, IndexingConfig, IndexingMode, IndexingStatus,
-    MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_ENDPOINT_ENV,
-    MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV, MEMORI_GRAPH_MODEL_ENV,
-    MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,
-    ModelProvider, ResourceBudget, RuntimeModelConfig, ScheduleWindow, VaultStats,
-    normalize_policy_endpoint, validate_provider_request, validate_runtime_model_settings,
+    DEFAULT_EMBED_ENDPOINT, DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_GRAPH_ENDPOINT, DEFAULT_GRAPH_MODEL,
+    DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER, EgressMode, EngineError,
+    EnterpriseModelPolicy, IndexingConfig, IndexingMode, IndexingStatus, MEMORI_CHAT_ENDPOINT_ENV,
+    MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_ENDPOINT_ENV, MEMORI_EMBED_MODEL_ENV,
+    MEMORI_GRAPH_ENDPOINT_ENV, MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV,
+    MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine, ModelProvider,
+    ResourceBudget, RuntimeModelConfig, ScheduleWindow, VaultStats, normalize_policy_endpoint,
+    validate_provider_request, validate_runtime_model_settings,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State, WindowEvent};
@@ -51,11 +51,11 @@ pub(crate) use settings_io::*;
 pub(crate) use window_state::*;
 
 pub fn run() {
-    let _ = tracing_subscriber::fmt()
-        .with_target(false)
-        .with_thread_ids(true)
-        .with_level(true)
-        .try_init();
+    let log_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Memori-Vault")
+        .join("logs");
+    let _log_guard = memori_core::logging::init_logging(log_dir);
 
     let settings = match load_app_settings() {
         Ok(settings) => settings,
@@ -144,6 +144,7 @@ pub fn run() {
             pause_indexing,
             resume_indexing,
             get_app_settings,
+            set_memory_settings,
             get_model_settings,
             get_enterprise_policy,
             set_enterprise_policy,
@@ -162,7 +163,9 @@ pub fn run() {
             list_search_scopes,
             open_source_location,
             read_file_content,
-            rank_settings_query
+            rank_settings_query,
+            get_logs,
+            get_log_dir
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|err| {

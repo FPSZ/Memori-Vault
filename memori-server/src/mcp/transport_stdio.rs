@@ -1,4 +1,4 @@
-﻿use std::io::{BufRead, Write};
+use std::io::{BufRead, Write};
 
 use super::handle_json_rpc_request;
 use super::protocol::{JsonRpcRequest, JsonRpcResponse};
@@ -22,8 +22,11 @@ pub(crate) async fn run_stdio_server(state: ServerState) -> Result<(), String> {
         if let Some(response) = response {
             let encoded = serde_json::to_string(&response)
                 .map_err(|err| format!("serialize MCP stdio failed: {err}"))?;
-            writeln!(stdout, "{encoded}").map_err(|err| format!("write MCP stdio failed: {err}"))?;
-            stdout.flush().map_err(|err| format!("flush MCP stdio failed: {err}"))?;
+            writeln!(stdout, "{encoded}")
+                .map_err(|err| format!("write MCP stdio failed: {err}"))?;
+            stdout
+                .flush()
+                .map_err(|err| format!("flush MCP stdio failed: {err}"))?;
         }
     }
     Ok(())

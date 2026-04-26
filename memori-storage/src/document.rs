@@ -222,7 +222,10 @@ impl SqliteStore {
         Ok(records)
     }
 
-    pub async fn get_chunk_by_id(&self, chunk_id: i64) -> Result<Option<ChunkRecord>, StorageError> {
+    pub async fn get_chunk_by_id(
+        &self,
+        chunk_id: i64,
+    ) -> Result<Option<ChunkRecord>, StorageError> {
         let conn_guard = self.lock_conn()?;
         conn_guard
             .query_row(

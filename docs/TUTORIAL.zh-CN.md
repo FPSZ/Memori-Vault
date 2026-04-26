@@ -76,7 +76,7 @@ ollama list
 - `cargo test --workspace`
 - `pnpm --dir ui run build`
 - 版本一致性：workspace / tauri / ui package
-- 发布说明：`docs/RELEASE_NOTES_v0.3.0.md`
+- 发布说明：`docs/RELEASE_NOTES_v0.4.0.md`
 
 ## 8. 可选烟测脚本
 
@@ -98,3 +98,14 @@ ollama list
 补充：
 - 这些脚本只是本地验证入口，不是产品协议的一部分。
 - `smoke-start.ps1` 现在支持跳过本地模型检查，便于单独验证 UI / server 流程。
+# Memory OS Lite 使用提示
+
+Memori-Vault 当前架构定位是 **Local-first Verifiable Memory OS Lite**，详细设计见 [MEMORY_OS_LITE.md](./MEMORY_OS_LITE.md)。
+
+使用时请重点关注：
+
+- 答案区不只看正文，还要看 citation、evidence、Trust Panel 和 retrieval metrics。
+- Trust Panel 会展示 `answer_source_mix`、`failure_class`、`source_groups`、`memory_context` 和 `context_budget_report`。
+- 对话/项目记忆可以帮助回答，但只能作为 `memory_context`，不能冒充文档 citation。
+- 设置页的 Memory 选项用于控制 conversation memory、auto memory write、source requirement、Markdown export 和 context budget。
+- MCP endpoint 默认为 `http://127.0.0.1:3757/mcp`，agent 可通过 `ask/search/get_source/open_source` 和 `memory_search/memory_add/memory_update` 等工具调用本地知识库。

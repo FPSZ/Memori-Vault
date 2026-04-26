@@ -85,6 +85,45 @@ pub(crate) fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
              UNIQUE(chunk_id, content_hash),
              FOREIGN KEY(chunk_id) REFERENCES chunks(id) ON DELETE CASCADE
          );
+         CREATE TABLE IF NOT EXISTS memory_events (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             scope TEXT NOT NULL,
+             scope_id TEXT NOT NULL DEFAULT '',
+             event_type TEXT NOT NULL,
+             content TEXT NOT NULL,
+             source_ref TEXT NOT NULL DEFAULT '',
+             content_hash TEXT NOT NULL DEFAULT '',
+             created_at INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS memories (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             layer TEXT NOT NULL,
+             scope TEXT NOT NULL,
+             scope_id TEXT NOT NULL DEFAULT '',
+             memory_type TEXT NOT NULL,
+             title TEXT NOT NULL DEFAULT '',
+             content TEXT NOT NULL,
+             source_type TEXT NOT NULL,
+             source_ref TEXT NOT NULL,
+             confidence REAL NOT NULL DEFAULT 0.0,
+             status TEXT NOT NULL DEFAULT 'active',
+             tags_json TEXT NOT NULL DEFAULT '[]',
+             links_json TEXT NOT NULL DEFAULT '[]',
+             supersedes INTEGER,
+             created_at INTEGER NOT NULL,
+             updated_at INTEGER NOT NULL,
+             FOREIGN KEY(supersedes) REFERENCES memories(id) ON DELETE SET NULL
+         );
+         CREATE TABLE IF NOT EXISTS memory_lifecycle_log (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             action TEXT NOT NULL,
+             target_type TEXT NOT NULL,
+             target_id INTEGER,
+             reason TEXT NOT NULL DEFAULT '',
+             model TEXT,
+             source_ref TEXT NOT NULL DEFAULT '',
+             created_at INTEGER NOT NULL
+         );
          CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
              content,
              heading_text,
@@ -112,7 +151,12 @@ pub(crate) fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
          CREATE INDEX IF NOT EXISTS idx_chunk_nodes_chunk_id ON chunk_nodes(chunk_id);
          CREATE INDEX IF NOT EXISTS idx_chunk_nodes_node_id ON chunk_nodes(node_id);
          CREATE INDEX IF NOT EXISTS idx_graph_task_queue_status ON graph_task_queue(status, updated_at);
-         CREATE INDEX IF NOT EXISTS idx_file_index_state_indexed_at ON file_index_state(indexed_at);",
+         CREATE INDEX IF NOT EXISTS idx_file_index_state_indexed_at ON file_index_state(indexed_at);
+         CREATE INDEX IF NOT EXISTS idx_memory_events_scope ON memory_events(scope, scope_id, created_at);
+         CREATE INDEX IF NOT EXISTS idx_memories_scope_layer ON memories(scope, scope_id, layer, status);
+         CREATE INDEX IF NOT EXISTS idx_memories_updated_at ON memories(updated_at);
+         CREATE INDEX IF NOT EXISTS idx_memories_source_ref ON memories(source_ref);
+         CREATE INDEX IF NOT EXISTS idx_memory_lifecycle_target ON memory_lifecycle_log(target_type, target_id);",
     )
     .map_err(map_sqlite_error)?;
     ensure_graph_task_queue_schema(conn)?;
@@ -120,6 +164,7 @@ pub(crate) fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
     ensure_chunks_schema(conn)?;
     ensure_file_index_state_schema(conn)?;
     ensure_file_catalog_schema(conn)?;
+    ensure_memory_schema(conn)?;
     migrate_legacy_fts_tables(conn)?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_documents_relative_path ON documents(relative_path)",
@@ -143,6 +188,106 @@ pub(crate) fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
     .map_err(map_sqlite_error)?;
     ensure_schema_version(conn)?;
     ensure_system_metadata(conn)?;
+    Ok(())
+}
+
+pub(crate) fn ensure_memory_schema(conn: &Connection) -> Result<(), StorageError> {
+    ensure_table_column(
+        conn,
+        "memory_events",
+        "scope",
+        "TEXT NOT NULL DEFAULT 'project'",
+    )?;
+    ensure_table_column(
+        conn,
+        "memory_events",
+        "scope_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_table_column(
+        conn,
+        "memory_events",
+        "event_type",
+        "TEXT NOT NULL DEFAULT 'system_event'",
+    )?;
+    ensure_table_column(conn, "memory_events", "content", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_table_column(
+        conn,
+        "memory_events",
+        "source_ref",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_table_column(
+        conn,
+        "memory_events",
+        "content_hash",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_table_column(
+        conn,
+        "memory_events",
+        "created_at",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+
+    ensure_table_column(conn, "memories", "layer", "TEXT NOT NULL DEFAULT 'mtm'")?;
+    ensure_table_column(conn, "memories", "scope", "TEXT NOT NULL DEFAULT 'project'")?;
+    ensure_table_column(conn, "memories", "scope_id", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_table_column(
+        conn,
+        "memories",
+        "memory_type",
+        "TEXT NOT NULL DEFAULT 'note'",
+    )?;
+    ensure_table_column(conn, "memories", "title", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_table_column(conn, "memories", "content", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_table_column(
+        conn,
+        "memories",
+        "source_type",
+        "TEXT NOT NULL DEFAULT 'conversation_turn'",
+    )?;
+    ensure_table_column(conn, "memories", "source_ref", "TEXT NOT NULL DEFAULT ''")?;
+    ensure_table_column(conn, "memories", "confidence", "REAL NOT NULL DEFAULT 0.0")?;
+    ensure_table_column(conn, "memories", "status", "TEXT NOT NULL DEFAULT 'active'")?;
+    ensure_table_column(conn, "memories", "tags_json", "TEXT NOT NULL DEFAULT '[]'")?;
+    ensure_table_column(conn, "memories", "links_json", "TEXT NOT NULL DEFAULT '[]'")?;
+    ensure_table_column(conn, "memories", "supersedes", "INTEGER")?;
+    ensure_table_column(conn, "memories", "created_at", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_table_column(conn, "memories", "updated_at", "INTEGER NOT NULL DEFAULT 0")?;
+
+    ensure_table_column(
+        conn,
+        "memory_lifecycle_log",
+        "action",
+        "TEXT NOT NULL DEFAULT 'add'",
+    )?;
+    ensure_table_column(
+        conn,
+        "memory_lifecycle_log",
+        "target_type",
+        "TEXT NOT NULL DEFAULT 'memory'",
+    )?;
+    ensure_table_column(conn, "memory_lifecycle_log", "target_id", "INTEGER")?;
+    ensure_table_column(
+        conn,
+        "memory_lifecycle_log",
+        "reason",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_table_column(conn, "memory_lifecycle_log", "model", "TEXT")?;
+    ensure_table_column(
+        conn,
+        "memory_lifecycle_log",
+        "source_ref",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_table_column(
+        conn,
+        "memory_lifecycle_log",
+        "created_at",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     Ok(())
 }
 

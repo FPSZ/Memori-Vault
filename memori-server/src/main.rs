@@ -1,4 +1,4 @@
-﻿use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::SocketAddr;
@@ -16,8 +16,8 @@ use memori_core::{
     AskResponseStructured, AskStatus, DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL,
     DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER, DEFAULT_OLLAMA_EMBED_MODEL, EgressMode,
     EngineError, EnterpriseModelPolicy, IndexingConfig, IndexingMode, IndexingStatus,
-    MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV,
-    MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,
+    MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_MODEL_ENV,
+    MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,
     ModelProvider, ResourceBudget, RuntimeModelConfig, ScheduleWindow, VaultStats,
     normalize_policy_endpoint, resolve_runtime_model_config_from_env, validate_provider_request,
     validate_runtime_model_settings,
@@ -69,11 +69,11 @@ fn map_engine_api_error(err: EngineError) -> ApiError {
 
 #[tokio::main]
 async fn main() {
-    let _ = tracing_subscriber::fmt()
-        .with_target(false)
-        .with_thread_ids(true)
-        .with_level(true)
-        .try_init();
+    let log_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Memori-Vault")
+        .join("logs");
+    let _log_guard = memori_core::logging::init_logging(log_dir);
 
     let settings = match load_app_settings() {
         Ok(settings) => settings,

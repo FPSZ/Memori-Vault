@@ -4,6 +4,7 @@ use super::*;
 pub(crate) async fn get_indexing_status(
     state: State<'_, DesktopState>,
 ) -> Result<IndexingStatus, String> {
+    info!("[用户操作] 获取索引状态");
     let engine_guard = state.engine.lock().await;
     let init_error_guard = state.init_error.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
@@ -28,6 +29,7 @@ pub(crate) async fn set_indexing_mode(
     payload: SetIndexingModePayload,
     state: State<'_, DesktopState>,
 ) -> Result<AppSettingsDto, String> {
+    info!(mode = %payload.indexing_mode, budget = %payload.resource_budget, "[用户操作] 修改索引配置");
     let mut settings = load_app_settings()?;
     let mode = IndexingMode::from_value(&payload.indexing_mode);
     let budget = ResourceBudget::from_value(&payload.resource_budget);
@@ -71,18 +73,16 @@ pub(crate) async fn set_indexing_mode(
 
     let watch_root = resolve_watch_root_from_settings(&settings)?;
     let indexing = resolve_indexing_config(&settings);
-    Ok(AppSettingsDto {
-        watch_root: watch_root.to_string_lossy().to_string(),
-        language: settings.language,
-        indexing_mode: indexing.mode.as_str().to_string(),
-        resource_budget: indexing.resource_budget.as_str().to_string(),
-        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
-        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
-    })
+    Ok(AppSettingsDto::from_settings(
+        settings,
+        watch_root.to_string_lossy().to_string(),
+        indexing,
+    ))
 }
 
 #[tauri::command]
 pub(crate) async fn trigger_reindex(state: State<'_, DesktopState>) -> Result<String, String> {
+    info!("[用户操作] 触发重建索引");
     let task_id = format!("reindex-{}", chrono_like_now_token());
     let engine_guard = state.engine.lock().await;
     let init_error_guard = state.init_error.lock().await;
@@ -101,6 +101,7 @@ pub(crate) async fn trigger_reindex(state: State<'_, DesktopState>) -> Result<St
 
 #[tauri::command]
 pub(crate) async fn pause_indexing(state: State<'_, DesktopState>) -> Result<(), String> {
+    info!("[用户操作] 暂停索引");
     let engine_guard = state.engine.lock().await;
     let init_error_guard = state.init_error.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
@@ -115,6 +116,7 @@ pub(crate) async fn pause_indexing(state: State<'_, DesktopState>) -> Result<(),
 
 #[tauri::command]
 pub(crate) async fn resume_indexing(state: State<'_, DesktopState>) -> Result<(), String> {
+    info!("[用户操作] 恢复索引");
     let engine_guard = state.engine.lock().await;
     let init_error_guard = state.init_error.lock().await;
     let Some(engine) = engine_guard.as_ref() else {

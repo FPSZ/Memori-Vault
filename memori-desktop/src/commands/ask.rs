@@ -9,6 +9,7 @@ pub(crate) async fn ask_vault_structured(
     state: State<'_, DesktopState>,
 ) -> Result<AskResponseStructured, String> {
     let query = query.trim().to_string();
+    info!(query = %query, lang = ?lang, top_k = ?top_k, scope_count = ?scope_paths.as_ref().map(|v| v.len()), "[用户操作] 发起搜索");
     if query.is_empty() {
         return Ok(AskResponseStructured {
             status: AskStatus::InsufficientEvidence,
@@ -18,6 +19,11 @@ pub(crate) async fn ask_vault_structured(
             citations: Vec::new(),
             evidence: Vec::new(),
             metrics: Default::default(),
+            answer_source_mix: memori_core::AnswerSourceMix::Insufficient,
+            memory_context: Vec::new(),
+            source_groups: Vec::new(),
+            failure_class: memori_core::FailureClass::RecallMiss,
+            context_budget_report: memori_core::ContextBudgetReport::default(),
         });
     }
 
@@ -43,10 +49,17 @@ pub(crate) async fn ask_vault_structured(
         Some(normalized_scope_paths.as_slice())
     };
 
-    engine
+    let result = engine
         .ask_structured(&query, lang.as_deref(), scope_refs, top_k)
         .await
-        .map_err(describe_engine_error)
+        .map_err(describe_engine_error);
+    match &result {
+        Ok(resp) => {
+            info!(status = ?resp.status, evidence_count = resp.evidence.len(), "[用户操作] 搜索完成")
+        }
+        Err(e) => error!(error = %e, "[用户操作] 搜索失败"),
+    }
+    result
 }
 
 #[tauri::command]
@@ -63,6 +76,7 @@ pub(crate) async fn ask_vault(
 
 #[tauri::command]
 pub(crate) async fn get_vault_stats(state: State<'_, DesktopState>) -> Result<VaultStats, String> {
+    info!("[用户操作] 获取 Vault 统计");
     let engine_guard = state.engine.lock().await;
     let init_error_guard = state.init_error.lock().await;
     let Some(engine) = engine_guard.as_ref() else {

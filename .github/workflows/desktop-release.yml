@@ -2,9 +2,22 @@ name: Desktop Release
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish release instead of keeping it as draft"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   push:
     tags:
       - "v*"
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -76,6 +89,40 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm --dir ui install --frozen-lockfile
+
+      - name: Validate version metadata
+        shell: bash
+        run: |
+          WORKSPACE_VERSION=$(python - <<'PY'
+          import pathlib, re
+          text = pathlib.Path('Cargo.toml').read_text(encoding='utf-8')
+          match = re.search(r'(?ms)^\[workspace\.package\]\s+.*?^version\s*=\s*"([^"]+)"', text)
+          if not match:
+              raise SystemExit('Failed to read workspace version from Cargo.toml')
+          print(match.group(1))
+          PY
+          )
+          UI_VERSION=$(python - <<'PY'
+          import json, pathlib
+          print(json.loads(pathlib.Path('ui/package.json').read_text(encoding='utf-8'))['version'])
+          PY
+          )
+          TAURI_VERSION=$(python - <<'PY'
+          import json, pathlib
+          print(json.loads(pathlib.Path('memori-desktop/tauri.conf.json').read_text(encoding='utf-8'))['version'])
+          PY
+          )
+          RELEASE_NOTES_PATH="docs/RELEASE_NOTES_v${WORKSPACE_VERSION}.md"
+
+          if [ "$WORKSPACE_VERSION" != "$UI_VERSION" ] || [ "$WORKSPACE_VERSION" != "$TAURI_VERSION" ]; then
+            echo "Version mismatch detected among Cargo workspace, ui/package.json, and memori-desktop/tauri.conf.json"
+            exit 1
+          fi
+
+          if [ ! -f "$RELEASE_NOTES_PATH" ]; then
+            echo "Missing release notes file: $RELEASE_NOTES_PATH"
+            exit 1
+          fi
 
       - name: Build frontend
         run: pnpm --dir ui run build
@@ -162,6 +209,8 @@ jobs:
             exit 1
           fi
 
+          grep -q "Memory OS Lite" "$RELEASE_NOTES_PATH"
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -173,7 +222,7 @@ jobs:
         with:
           tag_name: ${{ steps.release_meta.outputs.tag }}
           name: Memori-Vault ${{ steps.release_meta.outputs.version }}
-          draft: true
+          draft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish != 'true' }}
           target_commitish: ${{ github.sha }}
           body_path: docs/RELEASE_NOTES_v${{ steps.release_meta.outputs.version }}.md
           files: |

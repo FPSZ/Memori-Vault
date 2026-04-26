@@ -11,6 +11,7 @@ import type {
   IndexingStatusDto,
   McpSettingsDto,
   McpStatusDto,
+  MemorySettingsDto,
   ModelAvailabilityDto,
   ModelProvider,
   ModelSettingsDto,
@@ -141,6 +142,10 @@ export function setMcpSettings(payload: McpSettingsDto) {
   return invoke<McpSettingsDto>("set_mcp_settings", { payload });
 }
 
+export function setMemorySettings(payload: MemorySettingsDto) {
+  return invoke<AppSettingsDto>("set_memory_settings", { payload });
+}
+
 export function getMcpStatus() {
   return invoke<McpStatusDto>("get_mcp_status");
 }
@@ -151,4 +156,22 @@ export function copyMcpClientConfig(client: string) {
 
 export function setWatchRoot(path: string) {
   return invoke<AppSettingsDto>("set_watch_root", { path });
+}
+
+export type LogEntry = {
+  timestamp: string;
+  level: string;
+  target: string;
+  message: string;
+  file: string | null;
+  line: number | null;
+  thread_id: string | null;
+};
+
+export function getLogs(payload: { limit?: number; level_filter?: string | null }) {
+  return invoke<LogEntry[]>("get_logs", payload);
+}
+
+export function getLogDir() {
+  return invoke<string>("get_log_dir");
 }

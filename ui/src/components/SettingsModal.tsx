@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Cpu, Database, LoaderCircle, Network, Palette, Search, Settings } from "lucide-react";
+import { ArrowRight, Brain, Cpu, Database, LoaderCircle, Network, Palette, ScrollText, Search, Settings } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Language } from "../i18n";
 import { useI18n } from "../i18n";
@@ -10,7 +10,7 @@ import {
   staggerContainerVariants
 } from "./MotionKit";
 import { rankSettingsQuery } from "../app/api/desktop";
-import { AdvancedTab, BasicTab, McpTab, ModelsTab, PersonalizationTab } from "./settings/tabs";
+import { AdvancedTab, BasicTab, LogsTab, McpTab, MemoryTab, ModelsTab, PersonalizationTab } from "./settings/tabs";
 import type {
   LocalModelProfileDto,
   RemoteModelProfileDto,
@@ -26,7 +26,7 @@ import type {
 import type { IndexingActionKey } from "./settings/tabs/AdvancedTab";
 import type { ModelActionKey } from "./settings/tabs/ModelsTab";
 
-type TabKey = "basic" | "models" | "mcp" | "advanced" | "personalization";
+type TabKey = "basic" | "models" | "memory" | "mcp" | "advanced" | "personalization" | "logs";
 
 export function SettingsModal({
   open,
@@ -81,7 +81,12 @@ export function SettingsModal({
   mcpMessage,
   onMcpSettingsChange,
   onSaveMcpSettings,
-  onCopyMcpClientConfig
+  onCopyMcpClientConfig,
+  memorySettings,
+  memoryBusy,
+  memoryMessage,
+  onMemorySettingsChange,
+  onSaveMemorySettings
 }: SettingsModalProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabKey>("basic");
@@ -178,10 +183,24 @@ export function SettingsModal({
         keywords: [t("modelProvider"), t("chatModel"), t("graphModel"), t("embedModel")]
       },
       {
+        key: "memory" as const,
+        label: t("memory"),
+        icon: Brain,
+        keywords: [
+          t("conversationMemory"),
+          t("autoMemoryWrite"),
+          t("contextBudget"),
+          t("memoryWriteSource"),
+          "STM",
+          "MTM",
+          "LTM"
+        ]
+      },
+      {
         key: "mcp" as const,
         label: t("mcp"),
         icon: Network,
-        keywords: [t("mcpTransport"), t("mcpEndpoint"), t("mcpClientConfig"), "MCP"]
+        keywords: [t("mcpTransport"), t("mcpEndpoint"), t("mcpClientConfig"), "MCP", t("memory")]
       },
       {
         key: "advanced" as const,
@@ -200,6 +219,12 @@ export function SettingsModal({
         label: t("personalization"),
         icon: Palette,
         keywords: [t("fontPreset"), t("fontSize"), t("themeToggle")]
+      },
+      {
+        key: "logs" as const,
+        label: "日志",
+        icon: ScrollText,
+        keywords: ["日志", "log", "debug", "错误"]
       }
     ],
     [t]
@@ -639,6 +664,17 @@ export function SettingsModal({
               />
             ) : null}
 
+                        {activeTab === "memory" ? (
+              <MemoryTab
+                t={t}
+                memorySettings={memorySettings}
+                memoryBusy={memoryBusy}
+                memoryMessage={memoryMessage}
+                onMemorySettingsChange={onMemorySettingsChange}
+                onSaveMemorySettings={onSaveMemorySettings}
+              />
+            ) : null}
+
                         {activeTab === "personalization" ? (
               <PersonalizationTab
                 t={t}
@@ -652,12 +688,11 @@ export function SettingsModal({
                 fontScaleOptions={fontScaleOptions}
               />
             ) : null}
+
+            {activeTab === "logs" ? <LogsTab /> : null}
           </AnimatePresence>
         </section>
       </div>
     </motion.aside>
   );
 }
-
-
-

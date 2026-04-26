@@ -440,3 +440,14 @@ let analysis = analyze_query("北极星生物计算PolarisBioCompute成立于");
         let phrase_terms = extract_phrase_signal_terms("新增的岗位是什么");
         assert!(phrase_terms.iter().any(|term| term == "新增岗位"));
         assert!(!phrase_terms.iter().any(|term| term == "新增的岗位是什么"));
+## Architecture Overlay: Memory OS Lite
+
+Retrieval remains the P0 reliability gate, but the product architecture has been expanded to **Local-first Verifiable Memory OS Lite**. Canonical design: [MEMORY_OS_LITE.md](./MEMORY_OS_LITE.md).
+
+Implications for this plan:
+
+- The main retrieval chain still owns document evidence: `document routing -> chunk retrieval -> RRF/gating -> evidence/citation`.
+- Conversation/project memory can improve context, but it must be tracked as `memory_context`, not citation.
+- Future regression reports must include `answer_source_mix`, `source_groups`, `failure_class`, and `context_budget_report`.
+- Graph remains an explanation layer and must not affect P0 ranking metrics.
+- The next external gate remains concrete: 50 questions, at least 45 answered, at least 40 correct, at least 45 citation/source-group hits.

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use thiserror::Error;
+use tracing::{debug, info, warn};
 
 /// 单个文本块的数据结构。
 #[derive(Debug, Clone)]
@@ -75,6 +76,7 @@ pub fn parse_and_chunk(
     file_path: impl AsRef<Path>,
     raw_text: &str,
 ) -> Result<Vec<DocumentChunk>, ParserError> {
+    let file_path = file_path.as_ref();
     if MAX_CHUNK_SIZE <= OVERLAP_SIZE {
         return Err(ParserError::InvalidChunkConfig {
             max: MAX_CHUNK_SIZE,
@@ -85,17 +87,19 @@ pub fn parse_and_chunk(
     let normalized = raw_text.replace("\r\n", "\n").replace('\r', "\n");
     let units = collect_semantic_units(&normalized);
     if units.is_empty() {
+        debug!(path = %file_path.display(), "解析结果为空，无语义单元");
         return Ok(Vec::new());
     }
 
     let chunks = assemble_chunks(&units);
-    let file_path = file_path.as_ref().to_path_buf();
+    info!(path = %file_path.display(), units = units.len(), chunks = chunks.len(), "[解析器] 文档解析完成");
 
+    let path_buf = file_path.to_path_buf();
     Ok(chunks
         .into_iter()
         .enumerate()
         .map(|(chunk_index, unit)| DocumentChunk {
-            file_path: file_path.clone(),
+            file_path: path_buf.clone(),
             content: unit.content,
             chunk_index,
             heading_path: unit.heading_path,
@@ -605,16 +609,22 @@ mod tests {
 pub fn extract_document_text(file_path: impl AsRef<Path>) -> Option<String> {
     let path = file_path.as_ref();
     let ext = path.extension().and_then(|s| s.to_str())?;
-    match ext.to_ascii_lowercase().as_str() {
+    info!(path = %path.display(), ext = %ext, "[解析器] 提取二进制文档文本");
+    let result = match ext.to_ascii_lowercase().as_str() {
         "docx" => extract_docx_text(path),
         "pdf" => extract_pdf_text(path),
         _ => None,
+    };
+    if result.is_none() {
+        warn!(path = %path.display(), "[解析器] 文档文本提取失败");
     }
+    result
 }
 
 /// Extract text from a .docx file (Open XML Word document).
 /// Docx is a ZIP archive containing word/document.xml with <w:t> text runs.
 fn extract_docx_text(path: &Path) -> Option<String> {
+    debug!(path = %path.display(), "[解析器] 提取 DOCX 文本");
     let file = std::fs::File::open(path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
     let mut xml_reader = archive.by_name("word/document.xml").ok()?;
@@ -642,7 +652,8 @@ fn extract_docx_text(path: &Path) -> Option<String> {
 
     let raw = texts.join("");
     // Replace soft-hyphens and normalize whitespace
-    let cleaned = raw.replace("\u{00AD}", "")
+    let cleaned = raw
+        .replace("\u{00AD}", "")
         .replace("\r\n", "\n")
         .replace('\r', "\n");
     Some(cleaned)
@@ -650,6 +661,7 @@ fn extract_docx_text(path: &Path) -> Option<String> {
 
 /// Extract text from a PDF file using lopdf.
 fn extract_pdf_text(path: &Path) -> Option<String> {
+    debug!(path = %path.display(), "[解析器] 提取 PDF 文本");
     let doc = lopdf::Document::load(path).ok()?;
     let pages = doc.get_pages();
     let mut texts = Vec::with_capacity(pages.len());

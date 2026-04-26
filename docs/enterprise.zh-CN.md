@@ -14,7 +14,7 @@
 预览说明：
 
 - 当前认证/会话实现主要面向受控内部环境。
-- 本文档用于描述 `v0.3.0` 的企业能力基线，不代表已经完成全部 GA 级企业身份安全加固。
+- 本文档用于描述 `v0.4.0` 的企业能力基线，不代表已经完成全部 GA 级企业身份安全加固。
 - 本文档只覆盖运行时与安全策略口径，不代表 mixed corpus 检索质量已经达到生产级验证。
 
 ## 认证与会话
@@ -195,3 +195,14 @@ Desktop 现在与 server 保持同级策略边界。
 - systemd 单元模板
 - 环境变量模板
 - 备份/恢复脚本
+# Memory OS Lite 企业价值
+
+Memori-Vault 的企业路线是 **local-first verifiable memory**，不是云优先 RAG 服务。详细架构见 [MEMORY_OS_LITE.md](./MEMORY_OS_LITE.md)。
+
+企业侧应重点强调：
+
+- SQLite 继续作为默认存储内核，文档索引、记忆、生命周期日志、图谱元数据和审计信息默认留在本地。
+- Evidence Firewall 把文档 citation 与 conversation/project/preference memory 分开，避免长期记忆污染文档证据链。
+- MCP full-control 可以暴露查询、来源、索引、模型、设置、图谱和记忆工具，但 memory write 必须有来源、审计和可撤销路径。
+- `answer_source_mix`、`memory_context`、`source_groups`、`failure_class`、`context_budget_report` 可以帮助审计答案来源和失败原因。
+- 模型 egress policy 是治理边界，本地部署不应静默回退到远程 provider。

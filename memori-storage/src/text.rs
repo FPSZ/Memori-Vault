@@ -16,6 +16,21 @@ const CJK_QUESTION_SUFFIXES: &[&str] = &[
 ];
 const CJK_FILLER_CHARS: &[char] = &['的', '了', '吗', '呢', '啊', '吧', '呀', '嘛', '么', '是'];
 
+const CJK_QUESTION_SUFFIX_FALLBACKS: &[&str] = &[
+    "\u{662f}\u{4ec0}\u{4e48}",
+    "\u{662f}\u{5565}",
+    "\u{4ec0}\u{4e48}",
+    "\u{600e}\u{4e48}",
+    "\u{5982}\u{4f55}",
+    "\u{4e3a}\u{4ec0}\u{4e48}",
+    "\u{591a}\u{5c11}",
+    "\u{54ea}\u{4e00}\u{4e2a}",
+    "\u{54ea}\u{4e2a}",
+    "\u{54ea}\u{91cc}",
+    "\u{5728}\u{54ea}",
+    "\u{8c01}",
+];
+
 pub(crate) fn normalize_scope_path_text(path: &Path) -> String {
     #[cfg(target_os = "windows")]
     {
@@ -523,7 +538,7 @@ pub(crate) fn extract_signal_terms(query: &str) -> Vec<String> {
 pub(crate) fn extract_phrase_signal_terms(query: &str) -> Vec<String> {
     let filtered_tokens = extract_query_tokens(query)
         .into_iter()
-        .map(|token| normalize_phrase_signal_token(&token))
+        .flat_map(|token| expand_phrase_signal_token(&token))
         .filter(|token| is_viable_search_term(token) && !is_english_stopword(token))
         .collect::<Vec<_>>();
 
@@ -537,11 +552,23 @@ pub(crate) fn extract_phrase_signal_terms(query: &str) -> Vec<String> {
             phrases.push(token);
         }
     }
+    for token in &filtered_tokens {
+        if !ends_with_cjk_question_suffix(token)
+            && is_specific_phrase_signal_term(token)
+            && is_viable_phrase_signal_term(token)
+            && seen.insert(token.clone())
+        {
+            phrases.push(token.clone());
+        }
+    }
 
     for window in (2..=max_window).rev() {
         for slice in filtered_tokens.windows(window) {
             let phrase = slice.join(" ");
-            if is_viable_phrase_signal_term(&phrase) && seen.insert(phrase.clone()) {
+            if !ends_with_cjk_question_suffix(&phrase)
+                && is_viable_phrase_signal_term(&phrase)
+                && seen.insert(phrase.clone())
+            {
                 phrases.push(phrase);
             }
         }
@@ -549,12 +576,39 @@ pub(crate) fn extract_phrase_signal_terms(query: &str) -> Vec<String> {
 
     if filtered_tokens.len() <= 6 {
         let full_phrase = filtered_tokens.join(" ");
-        if is_viable_phrase_signal_term(&full_phrase) && seen.insert(full_phrase.clone()) {
+        if !ends_with_cjk_question_suffix(&full_phrase)
+            && is_viable_phrase_signal_term(&full_phrase)
+            && seen.insert(full_phrase.clone())
+        {
             phrases.push(full_phrase);
         }
     }
 
     phrases
+}
+
+pub(crate) fn expand_phrase_signal_token(token: &str) -> Vec<String> {
+    let normalized = normalize_phrase_signal_token(token);
+    let mut terms = Vec::new();
+    let mut seen = HashSet::new();
+
+    if !normalized.is_empty() && seen.insert(normalized.clone()) {
+        terms.push(normalized);
+    }
+
+    if token.chars().any(is_cjk_char) {
+        let cjk_with_digits = token
+            .chars()
+            .filter(|ch| is_cjk_char(*ch) || ch.is_ascii_digit())
+            .collect::<String>();
+        for phrase in extract_cjk_phrases(&cjk_with_digits) {
+            if seen.insert(phrase.clone()) {
+                terms.push(phrase);
+            }
+        }
+    }
+
+    terms
 }
 
 pub(crate) fn normalize_phrase_signal_token(token: &str) -> String {
@@ -703,7 +757,7 @@ pub(crate) fn extract_cjk_phrases(token: &str) -> Vec<String> {
 }
 
 pub(crate) fn is_cjk_question_phrase(token: &str) -> bool {
-    CJK_QUESTION_SUFFIXES.contains(&token)
+    CJK_QUESTION_SUFFIXES.contains(&token) || CJK_QUESTION_SUFFIX_FALLBACKS.contains(&token)
 }
 
 pub(crate) fn extract_mixed_script_segments(token: &str) -> Vec<String> {
@@ -798,6 +852,16 @@ pub(crate) fn cjk_phrase_variants(token: &str) -> Vec<String> {
             variants.push(segment);
         }
     }
+    let stripped_segments = split_cjk_phrase_on_fillers(&strip_cjk_question_tail(trimmed));
+    if stripped_segments.len() >= 2 {
+        let joined = stripped_segments.join("");
+        if is_viable_search_term(&joined)
+            && !is_cjk_question_phrase(&joined)
+            && seen.insert(joined.clone())
+        {
+            variants.push(joined);
+        }
+    }
 
     variants
 }
@@ -835,13 +899,26 @@ pub(crate) fn strip_cjk_question_suffix_once(token: &str) -> Option<String> {
             return Some(token.trim_end_matches(suffix).trim().to_string());
         }
     }
+    for suffix in CJK_QUESTION_SUFFIX_FALLBACKS {
+        if token.ends_with(suffix) {
+            return Some(token.trim_end_matches(suffix).trim().to_string());
+        }
+    }
     None
+}
+
+pub(crate) fn ends_with_cjk_question_suffix(token: &str) -> bool {
+    let trimmed = token.trim();
+    CJK_QUESTION_SUFFIXES
+        .iter()
+        .chain(CJK_QUESTION_SUFFIX_FALLBACKS.iter())
+        .any(|suffix| trimmed.ends_with(suffix))
 }
 
 pub(crate) fn trim_cjk_filler_edges(token: &str) -> String {
     token
         .trim()
-        .trim_matches(|ch| is_cjk_filler_char(ch))
+        .trim_matches(is_cjk_filler_char)
         .trim()
         .to_string()
 }

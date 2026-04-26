@@ -4,14 +4,62 @@ pub(crate) async fn get_app_settings_handler() -> Result<Json<AppSettingsDto>, A
     let settings = load_app_settings().map_err(ApiError::internal)?;
     let watch_root = resolve_watch_root_from_settings(&settings).map_err(ApiError::internal)?;
     let indexing = resolve_indexing_config(&settings);
-    Ok(Json(AppSettingsDto {
-        watch_root: watch_root.to_string_lossy().to_string(),
-        language: settings.language,
-        indexing_mode: indexing.mode.as_str().to_string(),
-        resource_budget: indexing.resource_budget.as_str().to_string(),
-        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
-        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
-    }))
+    Ok(Json(AppSettingsDto::from_settings(
+        settings,
+        watch_root.to_string_lossy().to_string(),
+        indexing,
+    )))
+}
+
+pub(crate) async fn set_memory_settings_handler(
+    Json(payload): Json<MemorySettingsDto>,
+) -> Result<Json<AppSettingsDto>, ApiError> {
+    let mut settings = load_app_settings().map_err(ApiError::internal)?;
+    apply_memory_settings(&mut settings, payload);
+    save_app_settings(&settings).map_err(ApiError::internal)?;
+    let watch_root = resolve_watch_root_from_settings(&settings).map_err(ApiError::internal)?;
+    let indexing = resolve_indexing_config(&settings);
+    Ok(Json(AppSettingsDto::from_settings(
+        settings,
+        watch_root.to_string_lossy().to_string(),
+        indexing,
+    )))
+}
+
+fn apply_memory_settings(settings: &mut AppSettings, payload: MemorySettingsDto) {
+    settings.conversation_memory_enabled = Some(payload.conversation_memory_enabled);
+    settings.auto_memory_write = Some(normalize_auto_memory_write(&payload.auto_memory_write));
+    settings.memory_write_requires_source = Some(payload.memory_write_requires_source);
+    settings.memory_markdown_export_enabled = Some(payload.memory_markdown_export_enabled);
+    settings.default_context_budget = Some(normalize_context_budget(
+        &payload.default_context_budget,
+        "16k",
+    ));
+    settings.complex_context_budget = Some(normalize_context_budget(
+        &payload.complex_context_budget,
+        "32k",
+    ));
+    settings.graph_ranking_enabled = Some(payload.graph_ranking_enabled);
+}
+
+fn normalize_auto_memory_write(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "off" => "off",
+        "auto_low_risk" => "auto_low_risk",
+        _ => "suggest",
+    }
+    .to_string()
+}
+
+fn normalize_context_budget(value: &str, fallback: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "8k" => "8k",
+        "16k" => "16k",
+        "32k" => "32k",
+        "64k" => "64k",
+        _ => fallback,
+    }
+    .to_string()
 }
 
 pub(crate) async fn set_watch_root_handler(
@@ -55,14 +103,11 @@ pub(crate) async fn set_watch_root_handler(
     .map_err(ApiError::internal)?;
 
     let indexing = resolve_indexing_config(&settings);
-    Ok(Json(AppSettingsDto {
-        watch_root: canonical.to_string_lossy().to_string(),
-        language: settings.language,
-        indexing_mode: indexing.mode.as_str().to_string(),
-        resource_budget: indexing.resource_budget.as_str().to_string(),
-        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
-        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
-    }))
+    Ok(Json(AppSettingsDto::from_settings(
+        settings,
+        canonical.to_string_lossy().to_string(),
+        indexing,
+    )))
 }
 
 pub(crate) async fn rank_settings_query_handler(

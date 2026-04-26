@@ -439,9 +439,18 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             embed_model: local_embed_model,
         },
         remote_profile: RemoteModelProfileDto {
-            chat_endpoint: normalize_endpoint(ModelProvider::OpenAiCompatible, &remote_chat_endpoint),
-            graph_endpoint: normalize_endpoint(ModelProvider::OpenAiCompatible, &remote_graph_endpoint),
-            embed_endpoint: normalize_endpoint(ModelProvider::OpenAiCompatible, &remote_embed_endpoint),
+            chat_endpoint: normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &remote_chat_endpoint,
+            ),
+            graph_endpoint: normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &remote_graph_endpoint,
+            ),
+            embed_endpoint: normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &remote_embed_endpoint,
+            ),
             api_key: remote_api_key,
             chat_model: remote_chat_model,
             graph_model: remote_graph_model,
@@ -454,12 +463,18 @@ pub(crate) fn normalize_model_settings_payload(
     payload: ModelSettingsDto,
 ) -> Result<ModelSettingsDto, String> {
     let active_provider = ModelProvider::from_value(&payload.active_provider);
-    let local_chat_endpoint =
-        normalize_endpoint(ModelProvider::OllamaLocal, &payload.local_profile.chat_endpoint);
-    let local_graph_endpoint =
-        normalize_endpoint(ModelProvider::OllamaLocal, &payload.local_profile.graph_endpoint);
-    let local_embed_endpoint =
-        normalize_endpoint(ModelProvider::OllamaLocal, &payload.local_profile.embed_endpoint);
+    let local_chat_endpoint = normalize_endpoint(
+        ModelProvider::OllamaLocal,
+        &payload.local_profile.chat_endpoint,
+    );
+    let local_graph_endpoint = normalize_endpoint(
+        ModelProvider::OllamaLocal,
+        &payload.local_profile.graph_endpoint,
+    );
+    let local_embed_endpoint = normalize_endpoint(
+        ModelProvider::OllamaLocal,
+        &payload.local_profile.embed_endpoint,
+    );
     let remote_chat_endpoint = normalize_endpoint(
         ModelProvider::OpenAiCompatible,
         &payload.remote_profile.chat_endpoint,
@@ -527,19 +542,37 @@ pub(crate) fn resolve_active_runtime_settings(
     ActiveRuntimeModelSettings {
         provider: active_provider,
         chat_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
-            normalize_endpoint(ModelProvider::OpenAiCompatible, &settings.remote_profile.chat_endpoint)
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &settings.remote_profile.chat_endpoint,
+            )
         } else {
-            normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.chat_endpoint)
+            normalize_endpoint(
+                ModelProvider::OllamaLocal,
+                &settings.local_profile.chat_endpoint,
+            )
         },
         graph_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
-            normalize_endpoint(ModelProvider::OpenAiCompatible, &settings.remote_profile.graph_endpoint)
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &settings.remote_profile.graph_endpoint,
+            )
         } else {
-            normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.graph_endpoint)
+            normalize_endpoint(
+                ModelProvider::OllamaLocal,
+                &settings.local_profile.graph_endpoint,
+            )
         },
         embed_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
-            normalize_endpoint(ModelProvider::OpenAiCompatible, &settings.remote_profile.embed_endpoint)
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &settings.remote_profile.embed_endpoint,
+            )
         } else {
-            normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.embed_endpoint)
+            normalize_endpoint(
+                ModelProvider::OllamaLocal,
+                &settings.local_profile.embed_endpoint,
+            )
         },
         api_key: if active_provider == ModelProvider::OpenAiCompatible {
             normalize_optional_text(settings.remote_profile.api_key.clone())

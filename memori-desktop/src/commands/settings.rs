@@ -2,17 +2,68 @@ use super::*;
 
 #[tauri::command]
 pub(crate) async fn get_app_settings() -> Result<AppSettingsDto, String> {
+    info!("[用户操作] 获取应用设置");
     let settings = load_app_settings()?;
     let watch_root = resolve_watch_root_from_settings(&settings)?;
     let indexing = resolve_indexing_config(&settings);
-    Ok(AppSettingsDto {
-        watch_root: watch_root.to_string_lossy().to_string(),
-        language: settings.language,
-        indexing_mode: indexing.mode.as_str().to_string(),
-        resource_budget: indexing.resource_budget.as_str().to_string(),
-        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
-        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
-    })
+    Ok(AppSettingsDto::from_settings(
+        settings,
+        watch_root.to_string_lossy().to_string(),
+        indexing,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn set_memory_settings(
+    payload: MemorySettingsDto,
+) -> Result<AppSettingsDto, String> {
+    info!("[用户操作] 修改分层记忆与上下文设置");
+    let mut settings = load_app_settings()?;
+    apply_memory_settings(&mut settings, payload);
+    save_app_settings(&settings)?;
+    let watch_root = resolve_watch_root_from_settings(&settings)?;
+    let indexing = resolve_indexing_config(&settings);
+    Ok(AppSettingsDto::from_settings(
+        settings,
+        watch_root.to_string_lossy().to_string(),
+        indexing,
+    ))
+}
+
+fn apply_memory_settings(settings: &mut AppSettings, payload: MemorySettingsDto) {
+    settings.conversation_memory_enabled = Some(payload.conversation_memory_enabled);
+    settings.auto_memory_write = Some(normalize_auto_memory_write(&payload.auto_memory_write));
+    settings.memory_write_requires_source = Some(payload.memory_write_requires_source);
+    settings.memory_markdown_export_enabled = Some(payload.memory_markdown_export_enabled);
+    settings.default_context_budget = Some(normalize_context_budget(
+        &payload.default_context_budget,
+        "16k",
+    ));
+    settings.complex_context_budget = Some(normalize_context_budget(
+        &payload.complex_context_budget,
+        "32k",
+    ));
+    settings.graph_ranking_enabled = Some(payload.graph_ranking_enabled);
+}
+
+fn normalize_auto_memory_write(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "off" => "off",
+        "auto_low_risk" => "auto_low_risk",
+        _ => "suggest",
+    }
+    .to_string()
+}
+
+fn normalize_context_budget(value: &str, fallback: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "8k" => "8k",
+        "16k" => "16k",
+        "32k" => "32k",
+        "64k" => "64k",
+        _ => fallback,
+    }
+    .to_string()
 }
 
 #[tauri::command]
@@ -22,6 +73,7 @@ pub(crate) async fn rank_settings_query(
     lang: Option<String>,
     state: State<'_, DesktopState>,
 ) -> Result<Vec<String>, String> {
+    info!(query = %query, "[用户操作] 设置搜索");
     let query = query.trim();
     if query.is_empty() || candidates.is_empty() {
         return Ok(Vec::new());

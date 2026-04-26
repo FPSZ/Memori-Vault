@@ -6,6 +6,8 @@ mod query;
 mod retrieval;
 mod runtime;
 
+pub mod logging;
+
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -13,11 +15,16 @@ use std::time::Instant;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, hash::Hash, hash::Hasher};
 
-use graph_extractor::extract_entities;
 pub use graph_extractor::GraphData;
+use graph_extractor::extract_entities;
 use llm_generator::generate_answer as generate_llm_answer;
 pub use memori_parser::DocumentChunk;
 use memori_parser::{ParserStub, parse_and_chunk};
+pub use memori_storage::{
+    LifecycleAction, MemoryEventRecord, MemoryLayer, MemoryLifecycleLogRecord, MemoryRecord,
+    MemoryScope, MemorySearchOptions, MemorySourceType, MemoryStatus, NewMemoryEvent,
+    NewMemoryRecord, UpdateMemoryRecord,
+};
 use memori_storage::{RebuildState, SqliteStore, StorageError};
 use memori_vault::{
     MemoriVaultConfig, MemoriVaultError, MemoriVaultHandle, WatchEvent, WatchEventKind,
@@ -223,6 +230,60 @@ pub struct EvidenceItem {
     pub content: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SourceGroup {
+    pub group_id: String,
+    pub canonical_title: String,
+    pub file_paths: Vec<String>,
+    pub relative_paths: Vec<String>,
+    pub citation_indices: Vec<usize>,
+    pub evidence_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnswerSourceMix {
+    DocumentOnly,
+    DocumentPlusMemory,
+    MemoryOnly,
+    #[default]
+    Insufficient,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureClass {
+    RecallMiss,
+    RankMiss,
+    GatingFalseNegative,
+    GenerationRefusal,
+    CitationMiss,
+    #[default]
+    None,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct ContextBudgetReport {
+    pub token_budget: usize,
+    pub used_by_documents: usize,
+    pub used_by_memory: usize,
+    pub used_by_graph: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MemoryEvidence {
+    pub id: i64,
+    pub layer: MemoryLayer,
+    pub scope: MemoryScope,
+    pub memory_type: String,
+    pub title: String,
+    pub content: String,
+    pub source_type: MemorySourceType,
+    pub source_ref: String,
+    pub confidence: f64,
+    pub status: MemoryStatus,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RetrievalMetrics {
     pub query_analysis_ms: u64,
@@ -255,6 +316,11 @@ pub struct AskResponseStructured {
     pub citations: Vec<CitationItem>,
     pub evidence: Vec<EvidenceItem>,
     pub metrics: RetrievalMetrics,
+    pub answer_source_mix: AnswerSourceMix,
+    pub memory_context: Vec<MemoryEvidence>,
+    pub source_groups: Vec<SourceGroup>,
+    pub failure_class: FailureClass,
+    pub context_budget_report: ContextBudgetReport,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -265,6 +331,11 @@ pub struct RetrievalInspection {
     pub citations: Vec<CitationItem>,
     pub evidence: Vec<EvidenceItem>,
     pub metrics: RetrievalMetrics,
+    pub answer_source_mix: AnswerSourceMix,
+    pub memory_context: Vec<MemoryEvidence>,
+    pub source_groups: Vec<SourceGroup>,
+    pub failure_class: FailureClass,
+    pub context_budget_report: ContextBudgetReport,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -542,7 +613,11 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
 
     let api_key = std::env::var(MEMORI_MODEL_API_KEY_ENV).ok().and_then(|v| {
         let trimmed = v.trim().to_string();
-        if trimmed.is_empty() { None } else { Some(trimmed) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
     });
 
     let chat_model = std::env::var(MEMORI_CHAT_MODEL_ENV)
@@ -879,6 +954,8 @@ impl Clone for MemoriEngine {
     }
 }
 
+#[cfg(test)]
+pub(crate) use engine::{build_memory_context_for_prompt, should_allow_memory_only_answer};
 pub(crate) use indexing::*;
 pub(crate) use query::*;
 pub use retrieval::build_query_terms_for_offline_embedding;
@@ -890,10 +967,12 @@ pub(crate) use runtime::*;
 mod tests {
     use super::{
         AppState, AskStatus, EgressMode, EngineError, EnterpriseModelPolicy, MemoriEngine,
-        MergedEvidence, ModelProvider, QueryFamily, QueryIntent, RetrievalMetrics,
-        RuntimeModelConfig, WatchEvent, WatchEventKind, analyze_query, apply_gating_metrics, build_citations,
-        document_signal_query, has_strong_document_signal, is_implementation_lookup,
-        merge_document_candidates, process_file_event, should_refuse_for_insufficient_evidence,
+        MemoryEvidence, MemoryLayer, MemoryScope, MemorySourceType, MemoryStatus, MergedEvidence,
+        ModelProvider, QueryFamily, QueryIntent, RetrievalMetrics, RuntimeModelConfig, WatchEvent,
+        WatchEventKind, analyze_query, apply_gating_metrics, build_citations,
+        build_memory_context_for_prompt, document_signal_query, has_strong_document_signal,
+        is_implementation_lookup, merge_document_candidates, process_file_event,
+        should_allow_memory_only_answer, should_refuse_for_insufficient_evidence,
         validate_runtime_model_settings,
     };
     use memori_parser::DocumentChunk;
@@ -1422,6 +1501,52 @@ mod tests {
     }
 
     #[test]
+    fn memory_intent_only_allows_explicit_memory_questions() {
+        let document_question = analyze_query("What does the onboarding document say?");
+        let memory_question = analyze_query("What did I say about my project preference earlier?");
+        let memory = MemoryEvidence {
+            id: 1,
+            layer: MemoryLayer::Ltm,
+            scope: MemoryScope::Project,
+            memory_type: "preference".to_string(),
+            title: "Language".to_string(),
+            content: "Prefer concise Chinese answers.".to_string(),
+            source_type: MemorySourceType::ConversationTurn,
+            source_ref: "conversation_turn:test".to_string(),
+            confidence: 0.9,
+            status: MemoryStatus::Active,
+        };
+
+        assert!(!should_allow_memory_only_answer(
+            &document_question,
+            std::slice::from_ref(&memory)
+        ));
+        assert!(should_allow_memory_only_answer(&memory_question, &[memory]));
+    }
+
+    #[test]
+    fn memory_prompt_context_reports_token_budget() {
+        let memory = MemoryEvidence {
+            id: 7,
+            layer: MemoryLayer::Mtm,
+            scope: MemoryScope::Project,
+            memory_type: "decision".to_string(),
+            title: "Architecture decision".to_string(),
+            content: "Graph stays evidence-only and does not affect main retrieval ranking."
+                .to_string(),
+            source_type: MemorySourceType::ToolEvent,
+            source_ref: "tool_event:test".to_string(),
+            confidence: 0.85,
+            status: MemoryStatus::Active,
+        };
+
+        let (context, tokens) = build_memory_context_for_prompt(&[memory], 1_000);
+        assert!(context.contains("Memory #7"));
+        assert!(context.contains("source_ref: tool_event:test"));
+        assert!(tokens > 0);
+    }
+
+    #[test]
     fn classify_query_family_distinguishes_docs_api_and_implementation_queries() {
         assert_eq!(
             analyze_query("POST /api/auth/oidc/login return?").query_family,
@@ -1750,9 +1875,8 @@ mod tests {
 
     #[test]
     fn lookup_like_high_coverage_lexical_evidence_is_not_rejected() {
-        let analysis = analyze_query(
-            "物聯網 Internet of Things IoT UUID 通過網路傳輸數據的能力是什麼",
-        );
+        let analysis =
+            analyze_query("物聯網 Internet of Things IoT UUID 通過網路傳輸數據的能力是什麼");
         assert!(analysis.flags.is_lookup_like);
 
         let evidence = vec![super::MergedEvidence {

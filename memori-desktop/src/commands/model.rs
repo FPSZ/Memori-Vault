@@ -17,6 +17,7 @@ pub(crate) async fn set_enterprise_policy(
     payload: EnterprisePolicyDto,
     state: State<'_, DesktopState>,
 ) -> Result<EnterprisePolicyDto, String> {
+    info!(egress_mode = ?payload.egress_mode, endpoints = ?payload.allowed_model_endpoints.len(), models = ?payload.allowed_models.len(), "[用户操作] 修改企业策略");
     let mut settings = load_app_settings()?;
     settings.enterprise_egress_mode = Some(
         match payload.egress_mode {
@@ -58,6 +59,7 @@ pub(crate) async fn set_model_settings(
     payload: ModelSettingsDto,
     state: State<'_, DesktopState>,
 ) -> Result<ModelSettingsDto, String> {
+    info!(provider = %payload.active_provider, "[用户操作] 修改模型设置");
     let mut settings = load_app_settings()?;
     let normalized = normalize_model_settings_payload(payload)?;
     let policy = resolve_enterprise_policy(&settings);
@@ -107,6 +109,7 @@ pub(crate) async fn list_provider_models(
     apiKey: Option<String>,
     modelsRoot: Option<String>,
 ) -> Result<ProviderModelsDto, String> {
+    info!(provider = %provider, "[用户操作] 刷新模型列表");
     let settings = load_app_settings()?;
     let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&provider);
@@ -142,6 +145,7 @@ pub(crate) async fn probe_model_provider(
     apiKey: Option<String>,
     modelsRoot: Option<String>,
 ) -> Result<ModelAvailabilityDto, String> {
+    info!(provider = %provider, "[用户操作] 探测模型服务");
     let settings = load_app_settings()?;
     let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&provider);
@@ -299,6 +303,7 @@ pub(crate) async fn pull_model(
     endpoint: String,
     api_key: Option<String>,
 ) -> Result<ModelAvailabilityDto, String> {
+    info!(model = %model, provider = %provider, "[用户操作] 拉取模型");
     let model = model.trim().to_string();
     if model.is_empty() {
         return Err("模型名不能为空".to_string());
@@ -319,6 +324,7 @@ pub(crate) async fn pull_model(
 
 #[tauri::command]
 pub(crate) async fn set_local_models_root(path: String) -> Result<ModelSettingsDto, String> {
+    info!(path = %path, "[用户操作] 设置本地模型目录");
     let mut settings = load_app_settings()?;
     let root = normalize_optional_text(Some(path));
     if let Some(root_path) = root.as_deref() {
@@ -344,6 +350,7 @@ pub(crate) async fn set_local_models_root(path: String) -> Result<ModelSettingsD
 
 #[tauri::command]
 pub(crate) async fn scan_local_model_files(root: Option<String>) -> Result<Vec<String>, String> {
+    info!(root = ?root, "[用户操作] 扫描本地模型文件");
     let root = normalize_optional_text(root);
     if let Some(root) = root {
         return scan_local_model_files_from_root(&PathBuf::from(root));

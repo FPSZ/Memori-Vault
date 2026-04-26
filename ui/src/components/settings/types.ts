@@ -95,6 +95,16 @@ export type McpStatusDto = {
   prompts_count: number;
 };
 
+export type MemorySettingsDto = {
+  conversation_memory_enabled: boolean;
+  auto_memory_write: "off" | "suggest" | "auto_low_risk" | string;
+  memory_write_requires_source: boolean;
+  memory_markdown_export_enabled: boolean;
+  default_context_budget: string;
+  complex_context_budget: string;
+  graph_ranking_enabled: boolean;
+};
+
 export type SettingsModalProps = {
   open: boolean;
   onBack: () => void;
@@ -149,4 +159,9 @@ export type SettingsModalProps = {
   onMcpSettingsChange: (next: McpSettingsDto) => void;
   onSaveMcpSettings: () => Promise<void>;
   onCopyMcpClientConfig: (client: string) => Promise<void>;
+  memorySettings: MemorySettingsDto;
+  memoryBusy: boolean;
+  memoryMessage: string | null;
+  onMemorySettingsChange: (next: MemorySettingsDto) => void;
+  onSaveMemorySettings: () => Promise<void>;
 };

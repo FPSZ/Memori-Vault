@@ -2,6 +2,20 @@
 
 Updated: 2026-03-11 UTC
 
+## Architecture Notes Since This Baseline
+
+The retrieval baseline should now be read together with [MEMORY_OS_LITE.md](./MEMORY_OS_LITE.md). The current architecture adds Memory OS Lite fields around the existing retrieval path without changing the core rule that document citations must come from document chunks.
+
+New structured result fields to track in future reports:
+
+- `answer_source_mix`: `document_only`, `document_plus_memory`, `memory_only`, or `insufficient`.
+- `memory_context`: conversation/project/preference memory used as context, not as citation.
+- `source_groups`: duplicate or sibling source aggregation, especially for `.txt/.md` paired documents.
+- `failure_class`: `recall_miss`, `rank_miss`, `gating_false_negative`, `generation_refusal`, `citation_miss`, or `none`.
+- `context_budget_report`: token budget split across document evidence, memory, graph context, and answer prompt.
+
+Future 50-case reports must count memory context separately from citation validity. A query answered from memory-only can be valid for project-memory intent, but it must not be counted as a document citation hit.
+
 This document records the current retrieval and enterprise-local-first baseline for the code that exists in this branch today.
 
 Canonical regression suite source:

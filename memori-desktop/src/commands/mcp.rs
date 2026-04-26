@@ -7,12 +7,14 @@ const MCP_PROMPT_COUNT: usize = 5;
 
 #[tauri::command]
 pub(crate) async fn get_mcp_settings() -> Result<McpSettingsDto, String> {
+    info!("[用户操作] 获取 MCP 设置");
     let settings = load_app_settings()?;
     Ok(resolve_mcp_settings(&settings))
 }
 
 #[tauri::command]
 pub(crate) async fn set_mcp_settings(payload: McpSettingsDto) -> Result<McpSettingsDto, String> {
+    info!(enabled = payload.enabled, transports = ?payload.transports, "[用户操作] 修改 MCP 设置");
     let normalized = normalize_mcp_settings(payload);
     let mut settings = load_app_settings()?;
     settings.mcp_enabled = Some(normalized.enabled);
@@ -27,12 +29,14 @@ pub(crate) async fn set_mcp_settings(payload: McpSettingsDto) -> Result<McpSetti
 
 #[tauri::command]
 pub(crate) async fn get_mcp_status() -> Result<McpStatusDto, String> {
+    info!("[用户操作] 获取 MCP 状态");
     let settings = resolve_mcp_settings(&load_app_settings()?);
     Ok(build_mcp_status(&settings))
 }
 
 #[tauri::command]
 pub(crate) async fn copy_mcp_client_config(client: String) -> Result<String, String> {
+    info!(client = %client, "[用户操作] 复制 MCP 客户端配置");
     let settings = resolve_mcp_settings(&load_app_settings()?);
     let status = build_mcp_status(&settings);
     let client = client.trim().to_ascii_lowercase();

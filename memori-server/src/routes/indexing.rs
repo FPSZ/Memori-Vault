@@ -140,14 +140,11 @@ pub(crate) async fn set_indexing_mode_handler(
 
     let watch_root = resolve_watch_root_from_settings(&settings).map_err(ApiError::internal)?;
     let indexing = resolve_indexing_config(&settings);
-    Ok(Json(AppSettingsDto {
-        watch_root: watch_root.to_string_lossy().to_string(),
-        language: settings.language,
-        indexing_mode: indexing.mode.as_str().to_string(),
-        resource_budget: indexing.resource_budget.as_str().to_string(),
-        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
-        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
-    }))
+    Ok(Json(AppSettingsDto::from_settings(
+        settings,
+        watch_root.to_string_lossy().to_string(),
+        indexing,
+    )))
 }
 
 pub(crate) async fn trigger_reindex_handler(

@@ -14,6 +14,11 @@
   - `memori-server/src/main.rs` split into state/dto/auth/audit/routes modules.
 - Internal code organization improved for handoff and parallel development.
 - Documentation updated with structure map and current project status alignment.
+- Architecture documentation now points to **Local-first Verifiable Memory OS Lite** as the forward product architecture: SQLite local-first storage, verifiable evidence, Evidence Firewall, MCP memory tools, Trust Panel, and layered memory.
+
+### Forward Architecture Note
+
+`0.3.0` should not be described as a completed Memory OS release. The current branch has partial implementation of Memory Domain v1, MCP memory tools, source grouping, evidence compression, and Trust Panel, while the 50-case accuracy gate, temporal graph, Markdown source-of-truth, heat score, and lifecycle classifier remain active work.
 
 ### Compatibility
 

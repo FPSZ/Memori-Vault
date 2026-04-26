@@ -24,6 +24,11 @@ pub(crate) async fn ask_handler(
             citations: Vec::new(),
             evidence: Vec::new(),
             metrics: Default::default(),
+            answer_source_mix: memori_core::AnswerSourceMix::Insufficient,
+            memory_context: Vec::new(),
+            source_groups: Vec::new(),
+            failure_class: memori_core::FailureClass::RecallMiss,
+            context_budget_report: memori_core::ContextBudgetReport::default(),
         }));
     }
 

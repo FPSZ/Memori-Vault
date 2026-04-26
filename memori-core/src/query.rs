@@ -257,6 +257,7 @@ pub(crate) fn extract_query_support_terms(
         }
     }
 
+    let mut cjk_candidates = Vec::<String>::new();
     for token in raw_tokens {
         if !token.chars().any(is_cjk) {
             continue;
@@ -276,13 +277,21 @@ pub(crate) fn extract_query_support_terms(
             if normalized.chars().any(is_cjk) && normalized.chars().any(is_cjk_filler_char) {
                 continue;
             }
-            if CJK_DOC_NOISE_TERMS.contains(&normalized.as_str()) {
-                continue;
-            }
             if is_direct_lexical_support_like_term(&normalized) {
-                insert_unique_term(&mut seen, &mut support_terms, &normalized);
+                cjk_candidates.push(normalized);
             }
         }
+    }
+
+    let has_specific_cjk_candidate = cjk_candidates
+        .iter()
+        .any(|term| term.chars().any(is_cjk) && !CJK_DOC_NOISE_TERMS.contains(&term.as_str()));
+    for term in cjk_candidates {
+        let is_noise = CJK_DOC_NOISE_TERMS.contains(&term.as_str());
+        if is_noise && !has_specific_cjk_candidate {
+            continue;
+        }
+        insert_unique_term(&mut seen, &mut support_terms, &term);
     }
 
     support_terms
@@ -352,7 +361,7 @@ pub(crate) fn strip_cjk_question_suffix_once(token: &str) -> Option<String> {
 pub(crate) fn trim_cjk_filler_edges(token: &str) -> String {
     token
         .trim()
-        .trim_matches(|ch| is_cjk_filler_char(ch))
+        .trim_matches(is_cjk_filler_char)
         .trim()
         .to_string()
 }

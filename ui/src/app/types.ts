@@ -27,6 +27,35 @@ export type CitationItem = {
   excerpt: string;
 };
 
+export type SourceGroup = {
+  group_id: string;
+  canonical_title: string;
+  file_paths: string[];
+  relative_paths: string[];
+  citation_indices: number[];
+  evidence_count: number;
+};
+
+export type MemoryEvidence = {
+  id: number;
+  layer: "stm" | "mtm" | "ltm" | "graph" | "policy";
+  scope: "user" | "project" | "session" | "agent" | "document";
+  memory_type: string;
+  title: string;
+  content: string;
+  source_type: "document_chunk" | "conversation_turn" | "tool_event" | "system_event" | "markdown_note" | "graph_edge";
+  source_ref: string;
+  confidence: number;
+  status: "active" | "pending" | "superseded" | "deleted";
+};
+
+export type ContextBudgetReport = {
+  token_budget: number;
+  used_by_documents: number;
+  used_by_memory: number;
+  used_by_graph: number;
+};
+
 export type VisibleCitation = CitationItem & {
   citation_key: string;
   duplicate_count: number;
@@ -98,6 +127,11 @@ export type AskResponseStructured = {
   citations: CitationItem[];
   evidence: EvidenceItem[];
   metrics: RetrievalMetrics;
+  answer_source_mix?: "document_only" | "document_plus_memory" | "memory_only" | "insufficient";
+  memory_context?: MemoryEvidence[];
+  source_groups?: SourceGroup[];
+  failure_class?: "recall_miss" | "rank_miss" | "gating_false_negative" | "generation_refusal" | "citation_miss" | "none";
+  context_budget_report?: ContextBudgetReport;
 };
 
 export type AppSettingsDto = {
@@ -107,6 +141,13 @@ export type AppSettingsDto = {
   resource_budget?: string | null;
   schedule_start?: string | null;
   schedule_end?: string | null;
+  conversation_memory_enabled?: boolean;
+  auto_memory_write?: "off" | "suggest" | "auto_low_risk" | string;
+  memory_write_requires_source?: boolean;
+  memory_markdown_export_enabled?: boolean;
+  default_context_budget?: string;
+  complex_context_budget?: string;
+  graph_ranking_enabled?: boolean;
 };
 
 export type SearchScopeItem = {

@@ -9,18 +9,13 @@ pub struct McpServerSettings {
     pub transport: McpTransport,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum McpTransport {
     Stdio,
     Sse,
+    #[default]
     Disabled,
-}
-
-impl Default for McpTransport {
-    fn default() -> Self {
-        McpTransport::Disabled
-    }
 }
 
 /// Request DTO from the React UI

@@ -1,5 +1,16 @@
 # Memori-Vault Release Checklist
 
+## Memory OS Lite Release Gate
+
+- [ ] README uses product positioning, not change-log wording: problem, why not other RAG tools, core advantages, quick start, architecture, current boundaries.
+- [ ] [MEMORY_OS_LITE.md](./MEMORY_OS_LITE.md) reflects current implementation and pending work.
+- [ ] Trust Panel displays `answer_source_mix`, `failure_class`, `source_groups`, `memory_context`, and `context_budget_report`.
+- [ ] Evidence Firewall is verified: document citations only come from document chunks.
+- [ ] MCP `tools/list` includes query/source tools and memory tools.
+- [ ] `memory_add` / `memory_update` writes are source-bound or policy-rejected and produce lifecycle/audit entries.
+- [ ] 50-case acceptance report is attached or explicitly marked pending.
+- [ ] Release notes do not claim temporal graph, Markdown source-of-truth, heat score, or 50k-document validation as complete unless verified.
+
 这份清单用于桌面版发布前的最终确认，目标是把“能构建”提升为“可对外发布”。
 
 ## 1. 版本与文档

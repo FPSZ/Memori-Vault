@@ -4,6 +4,7 @@ import { AnswerPanel } from "../panels/AnswerPanel";
 import { CitationPanel } from "../panels/CitationPanel";
 import { EvidencePanel } from "../panels/EvidencePanel";
 import { MetricsPanel } from "../panels/MetricsPanel";
+import { TrustPanel } from "../panels/TrustPanel";
 import type { AskResponseStructured, MetricRow, VisibleCitation, VisibleEvidenceGroup } from "../types";
 import { useI18n } from "../../i18n";
 
@@ -101,6 +102,7 @@ export function ResultStage({
                 markdownRehypePlugins={markdownRehypePlugins}
                 t={t}
               />
+              <TrustPanel answerResponse={answerResponse} t={t} />
               <CitationPanel
                 visibleCitations={visibleCitations}
                 expandedCitationKeys={expandedCitationKeys}

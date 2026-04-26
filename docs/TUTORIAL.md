@@ -1,8 +1,10 @@
 # Memori-Vault Tutorial (Primary)
 
-This is the primary quick-start and usage tutorial for `v0.3.0`.
+This is the primary quick-start and usage tutorial for `v0.4.0`.
 
 Chinese companion: [TUTORIAL.zh-CN.md](./TUTORIAL.zh-CN.md)
+
+Architecture reference: [Memory OS Lite](./MEMORY_OS_LITE.md)
 
 ## 1. What You Need
 
@@ -57,7 +59,7 @@ ollama pull nomic-embed-text:latest
 
 1. Ask a question in the search box.
 2. Wait for first answer.
-3. Review **Answer**, **Citations**, **Evidence**, and **Retrieval Metrics** together.
+3. Review **Answer**, **Citations**, **Evidence**, **Trust Panel**, and **Retrieval Metrics** together.
 4. Use scope selector (left side in search bar) to narrow to selected files/folders.
 
 Notes:
@@ -65,9 +67,23 @@ Notes:
 - Retrieval scope affects precision and speed.
 - Citations are collapsed by default and can be expanded when you need raw supporting text.
 - Evidence cards are grouped by document and deduplicated before display.
+- Trust Panel explains `answer_source_mix`, `failure_class`, `source_groups`, `memory_context`, and token budget.
+- Conversation/project memory is shown as memory context. It is not treated as document citation.
 - Retrieval metrics show instrumented stage timings plus total/measured/untracked time separation.
 
-## 5. Indexing Modes (Advanced)
+## 5. Memory Settings
+
+Memori-Vault uses Memory OS Lite rather than a single undifferentiated vector store. In **Settings > Memory**, configure:
+
+- Conversation memory: whether recent turns and summaries are saved locally.
+- Auto memory write policy: off, suggest, or low-risk automatic writes.
+- Source requirement: memory writes should keep a source reference.
+- Markdown export flag: prepares memory notes/facts for future source-of-truth export.
+- Context budgets: ordinary QA should use compressed evidence instead of pushing every retrieved chunk into the answer model.
+
+The Evidence Firewall rule is important: document answers should cite document chunks. Memory may help context, but it must appear as `memory_context`.
+
+## 6. Indexing Modes (Advanced)
 
 You can configure:
 - `continuous`: background indexing keeps running (default).
@@ -79,7 +95,7 @@ Resource budget:
 - `balanced`: normal.
 - `fast`: highest throughput.
 
-## 6. Server Mode (Browser Access)
+## 7. Server Mode (Browser Access)
 
 Start backend:
 ```bash
@@ -95,7 +111,15 @@ For enterprise/private deployment details:
 - [enterprise.md](./enterprise.md)
 - [enterprise.zh-CN.md](./enterprise.zh-CN.md)
 
-## 7. Troubleshooting
+MCP clients can connect through the server endpoint at:
+
+```text
+http://127.0.0.1:3757/mcp
+```
+
+The official MCP surface includes query tools, source tools, indexing/model/settings tools, graph tools, and memory tools such as `memory_search`, `memory_add`, and `memory_update`.
+
+## 8. Troubleshooting
 
 ### Connection fails but models look configured
 - Check endpoint format (`http://localhost:11434` for local).
@@ -122,7 +146,7 @@ For enterprise/private deployment details:
 - Keep related table sections in the same note block when possible.
 - Prefer narrower scope to reduce mixed fragment context.
 
-## 8. Release Readiness Checklist
+## 9. Release Readiness Checklist
 
 Before publishing:
 - `cargo fmt --all -- --check`
@@ -130,9 +154,9 @@ Before publishing:
 - `cargo test --workspace`
 - `pnpm --dir ui run build`
 - Verify version consistency (`workspace`, `tauri.conf.json`, `ui/package.json`).
-- Prepare release notes in `docs/RELEASE_NOTES_v0.3.0.md`.
+- Prepare release notes in `docs/RELEASE_NOTES_v0.4.0.md`.
 
-## 9. Optional Smoke Scripts
+## 10. Optional Smoke Scripts
 
 For local/manual validation:
 

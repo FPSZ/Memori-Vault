@@ -1,7 +1,6 @@
 use super::*;
 
 impl MemoriEngine {
-    /// 用现成 receiver 构造引擎（便于测试和外部注入）。
     pub fn new(state: Arc<AppState>, event_rx: mpsc::Receiver<WatchEvent>) -> Self {
         Self {
             state,
@@ -14,13 +13,11 @@ impl MemoriEngine {
         }
     }
 
-    /// 快速引导：创建事件通道 + 启动 memori-vault 监听端 + 初始化 SQLite 存储。
     pub fn bootstrap(root: impl Into<PathBuf>) -> Result<Self, EngineError> {
         let config = MemoriVaultConfig::new(root);
         Self::bootstrap_with_config(config)
     }
 
-    /// 通过配置引导引擎。
     pub fn bootstrap_with_config(config: MemoriVaultConfig) -> Result<Self, EngineError> {
         let watch_root = config.root.clone();
         let (event_tx, event_rx) = create_event_channel();
@@ -34,14 +31,10 @@ impl MemoriEngine {
         Ok(engine)
     }
 
-    /// 读取共享状态句柄（供外部组件访问）。
     pub fn state(&self) -> Arc<AppState> {
         Arc::clone(&self.state)
     }
 
-    /// 语义检索 API：
-    /// 1) 先将 query 向量化；
-    /// 2) 在向量存储中检索 top-k 相似块。
     pub async fn search(
         &self,
         query: &str,
@@ -77,20 +70,36 @@ impl MemoriEngine {
             .retrieve_structured(query, scope_paths, Some(final_answer_k))
             .await?;
         if inspection.status != AskStatus::Answered {
+            let source_groups = build_source_groups(&inspection.citations, &inspection.evidence);
             return Ok(AskResponseStructured {
                 status: inspection.status,
                 answer: String::new(),
                 question: inspection.question,
                 scope_paths: inspection.scope_paths,
-                citations: inspection.citations,
-                evidence: inspection.evidence,
+                citations: inspection.citations.clone(),
+                evidence: inspection.evidence.clone(),
                 metrics: inspection.metrics,
+                answer_source_mix: inspection.answer_source_mix,
+                memory_context: inspection.memory_context,
+                source_groups,
+                failure_class: inspection.failure_class,
+                context_budget_report: inspection.context_budget_report,
             });
         }
 
         let final_evidence = build_merged_evidence_from_items(&inspection.evidence);
         let answer_question = build_answer_question(&inspection.question, lang);
-        let text_context = build_text_context_from_evidence(&final_evidence);
+        let (text_context, document_tokens) =
+            build_text_context_from_evidence_with_budget(&final_evidence, 18_000);
+        let (memory_context_text, memory_tokens) =
+            build_memory_context_for_prompt(&inspection.memory_context, 3_000);
+        let answer_question = if memory_context_text.is_empty() {
+            answer_question
+        } else {
+            format!(
+                "{answer_question}\n\nMEMORY CONTEXT (not document citation; use only as project/user context):\n{memory_context_text}"
+            )
+        };
         let graph_seed = final_evidence
             .iter()
             .map(|item| (item.chunk.clone(), item.final_score as f32))
@@ -98,9 +107,16 @@ impl MemoriEngine {
         let graph_context = match self.get_graph_context_for_results(&graph_seed).await {
             Ok(context) => context,
             Err(err) => {
-                warn!(error = %err, "图谱上下文构建失败，降级为纯文本上下文回答");
+                warn!(error = %err, "graph context build failed; falling back to text context");
                 String::new()
             }
+        };
+        inspection.metrics.final_evidence_count = final_evidence.len();
+        inspection.context_budget_report = ContextBudgetReport {
+            token_budget: 16_000,
+            used_by_documents: document_tokens,
+            used_by_memory: memory_tokens,
+            used_by_graph: estimate_tokens(&graph_context),
         };
 
         let answer_started_at = Instant::now();
@@ -113,16 +129,21 @@ impl MemoriEngine {
                 answer
             }
             Err(err) => {
-                warn!(error = %err, "答案生成失败，保留证据链返回");
+                warn!(error = %err, "answer generation failed; returning evidence");
                 inspection.metrics.answer_ms = elapsed_ms_u64(answer_started_at);
                 return Ok(AskResponseStructured {
                     status: AskStatus::ModelFailedWithEvidence,
                     answer: String::new(),
                     question: inspection.question,
                     scope_paths: inspection.scope_paths,
-                    citations: inspection.citations,
-                    evidence: inspection.evidence,
+                    citations: inspection.citations.clone(),
+                    evidence: inspection.evidence.clone(),
                     metrics: inspection.metrics,
+                    answer_source_mix: inspection.answer_source_mix,
+                    memory_context: inspection.memory_context,
+                    source_groups: build_source_groups(&inspection.citations, &inspection.evidence),
+                    failure_class: FailureClass::GenerationRefusal,
+                    context_budget_report: inspection.context_budget_report,
                 });
             }
         };
@@ -133,9 +154,14 @@ impl MemoriEngine {
                 answer: String::new(),
                 question: inspection.question,
                 scope_paths: inspection.scope_paths,
-                citations: inspection.citations,
-                evidence: inspection.evidence,
+                citations: inspection.citations.clone(),
+                evidence: inspection.evidence.clone(),
                 metrics: inspection.metrics,
+                answer_source_mix: AnswerSourceMix::Insufficient,
+                memory_context: inspection.memory_context,
+                source_groups: build_source_groups(&inspection.citations, &inspection.evidence),
+                failure_class: FailureClass::GenerationRefusal,
+                context_budget_report: inspection.context_budget_report,
             });
         }
 
@@ -144,9 +170,14 @@ impl MemoriEngine {
             answer,
             question: inspection.question,
             scope_paths: inspection.scope_paths,
-            citations: inspection.citations,
-            evidence: inspection.evidence,
+            citations: inspection.citations.clone(),
+            evidence: inspection.evidence.clone(),
             metrics: inspection.metrics,
+            answer_source_mix: inspection.answer_source_mix,
+            memory_context: inspection.memory_context,
+            source_groups: build_source_groups(&inspection.citations, &inspection.evidence),
+            failure_class: FailureClass::None,
+            context_budget_report: inspection.context_budget_report,
         })
     }
 
@@ -156,6 +187,7 @@ impl MemoriEngine {
         scope_paths: Option<&[PathBuf]>,
         final_answer_k: Option<usize>,
     ) -> Result<RetrievalInspection, EngineError> {
+        info!(query = %query, scope_count = ?scope_paths.map(|s| s.len()), "retrieval pipeline started");
         if query.trim().is_empty() {
             return self
                 .retrieve_structured_with_embedding(query, Vec::new(), scope_paths, final_answer_k)
@@ -196,6 +228,11 @@ impl MemoriEngine {
                 citations: Vec::new(),
                 evidence: Vec::new(),
                 metrics: RetrievalMetrics::default(),
+                answer_source_mix: AnswerSourceMix::Insufficient,
+                memory_context: Vec::new(),
+                source_groups: Vec::new(),
+                failure_class: FailureClass::RecallMiss,
+                context_budget_report: ContextBudgetReport::default(),
             });
         }
 
@@ -204,6 +241,8 @@ impl MemoriEngine {
             mut analysis,
             mut metrics,
         } = prepare_query_for_retrieval(&question);
+        info!(intent = %analysis.query_intent.as_str(), family = %analysis.query_family.as_str(), flags = ?metrics.query_flags, "query analysis completed");
+        let memory_context = self.retrieve_memory_context(&analysis, 6).await?;
 
         let doc_started_at = Instant::now();
         let candidate_docs = self
@@ -211,8 +250,14 @@ impl MemoriEngine {
             .await?;
         metrics.doc_recall_ms = elapsed_ms_u64(doc_started_at);
         metrics.doc_candidate_count = candidate_docs.len();
+        info!(
+            doc_count = candidate_docs.len(),
+            doc_recall_ms = metrics.doc_recall_ms,
+            "document recall completed"
+        );
 
         if candidate_docs.is_empty() {
+            info!("no candidate documents; returning insufficient evidence");
             if should_mark_missing_file_lookup_intent(&analysis) {
                 analysis.query_intent = QueryIntent::MissingFileLookup;
                 metrics
@@ -222,13 +267,31 @@ impl MemoriEngine {
                     .query_flags
                     .push(format!("intent:{}", analysis.query_intent.as_str()));
             }
+            let allow_memory_only = should_allow_memory_only_answer(&analysis, &memory_context);
             return Ok(RetrievalInspection {
-                status: AskStatus::InsufficientEvidence,
+                status: if allow_memory_only {
+                    AskStatus::Answered
+                } else {
+                    AskStatus::InsufficientEvidence
+                },
                 question,
                 scope_paths: serialized_scope_paths,
                 citations: Vec::new(),
                 evidence: Vec::new(),
                 metrics,
+                answer_source_mix: if allow_memory_only {
+                    AnswerSourceMix::MemoryOnly
+                } else {
+                    AnswerSourceMix::Insufficient
+                },
+                memory_context,
+                source_groups: Vec::new(),
+                failure_class: if allow_memory_only {
+                    FailureClass::None
+                } else {
+                    FailureClass::RecallMiss
+                },
+                context_budget_report: ContextBudgetReport::default(),
             });
         }
 
@@ -247,6 +310,11 @@ impl MemoriEngine {
             )
             .await?;
         metrics.chunk_strict_lexical_ms = elapsed_ms_u64(strict_lexical_started_at);
+        info!(
+            count = strict_lexical_matches.len(),
+            ms = metrics.chunk_strict_lexical_ms,
+            "strict lexical chunk search completed"
+        );
 
         let lexical_started_at = Instant::now();
         let lexical_matches = self
@@ -259,6 +327,11 @@ impl MemoriEngine {
             )
             .await?;
         metrics.chunk_lexical_ms = elapsed_ms_u64(lexical_started_at);
+        info!(
+            count = lexical_matches.len(),
+            ms = metrics.chunk_lexical_ms,
+            "broad lexical chunk search completed"
+        );
 
         let dense_started_at = Instant::now();
         let dense_matches = self
@@ -271,6 +344,11 @@ impl MemoriEngine {
             )
             .await?;
         metrics.chunk_dense_ms = elapsed_ms_u64(dense_started_at);
+        info!(
+            count = dense_matches.len(),
+            ms = metrics.chunk_dense_ms,
+            "dense chunk search completed"
+        );
 
         let merge_started_at = Instant::now();
         let merged = merge_chunk_evidence(
@@ -282,33 +360,83 @@ impl MemoriEngine {
         );
         metrics.merge_ms = elapsed_ms_u64(merge_started_at);
         metrics.chunk_candidate_count = merged.len();
+        info!(
+            merged_count = merged.len(),
+            ms = metrics.merge_ms,
+            "evidence merge completed"
+        );
 
         if apply_gating_metrics(&mut metrics, &analysis, &merged) {
+            info!(reason = %metrics.gating_decision_reason, "gating blocked answer as insufficient evidence");
+            let citations = build_citations(&merged);
+            let evidence_items = build_evidence_items(&merged);
+            let source_groups = build_source_groups(&citations, &evidence_items);
+            let allow_memory_only = should_allow_memory_only_answer(&analysis, &memory_context);
             return Ok(RetrievalInspection {
-                status: AskStatus::InsufficientEvidence,
+                status: if allow_memory_only {
+                    AskStatus::Answered
+                } else {
+                    AskStatus::InsufficientEvidence
+                },
                 question,
                 scope_paths: serialized_scope_paths,
-                citations: build_citations(&merged),
-                evidence: build_evidence_items(&merged),
+                citations,
+                evidence: evidence_items,
                 metrics,
+                answer_source_mix: if allow_memory_only {
+                    AnswerSourceMix::MemoryOnly
+                } else {
+                    AnswerSourceMix::Insufficient
+                },
+                memory_context,
+                source_groups,
+                failure_class: if allow_memory_only {
+                    FailureClass::None
+                } else {
+                    FailureClass::GatingFalseNegative
+                },
+                context_budget_report: ContextBudgetReport::default(),
             });
         }
 
         let final_evidence = merged.into_iter().take(final_answer_k).collect::<Vec<_>>();
         metrics.final_evidence_count = final_evidence.len();
+        info!(
+            final_count = final_evidence.len(),
+            "retrieval completed; entering answer generation"
+        );
         let status = if final_evidence.is_empty() {
             AskStatus::InsufficientEvidence
         } else {
             AskStatus::Answered
         };
 
+        let citations = build_citations(&final_evidence);
+        let evidence_items = build_evidence_items(&final_evidence);
         Ok(RetrievalInspection {
             status,
             question,
             scope_paths: serialized_scope_paths,
-            citations: build_citations(&final_evidence),
-            evidence: build_evidence_items(&final_evidence),
+            source_groups: build_source_groups(&citations, &evidence_items),
+            citations,
+            evidence: evidence_items,
             metrics,
+            answer_source_mix: if status == AskStatus::Answered {
+                if memory_context.is_empty() {
+                    AnswerSourceMix::DocumentOnly
+                } else {
+                    AnswerSourceMix::DocumentPlusMemory
+                }
+            } else {
+                AnswerSourceMix::Insufficient
+            },
+            memory_context,
+            failure_class: if status == AskStatus::Answered {
+                FailureClass::None
+            } else {
+                FailureClass::RecallMiss
+            },
+            context_budget_report: ContextBudgetReport::default(),
         })
     }
 
@@ -349,6 +477,36 @@ impl MemoriEngine {
             },
         );
         Ok(embedding)
+    }
+
+    async fn retrieve_memory_context(
+        &self,
+        analysis: &QueryAnalysis,
+        limit: usize,
+    ) -> Result<Vec<MemoryEvidence>, EngineError> {
+        if should_skip_memory_context(analysis) {
+            return Ok(Vec::new());
+        }
+
+        let records = self
+            .state
+            .vector_store
+            .search_memories(MemorySearchOptions {
+                query: analysis.normalized_query.clone(),
+                scope: None,
+                layer: None,
+                limit,
+            })
+            .await?;
+
+        Ok(records
+            .into_iter()
+            .filter(|record| {
+                matches!(record.status, MemoryStatus::Active | MemoryStatus::Pending)
+                    && !matches!(record.source_type, MemorySourceType::DocumentChunk)
+            })
+            .map(memory_record_to_evidence)
+            .collect())
     }
 
     async fn resolve_candidate_documents(
@@ -477,7 +635,6 @@ impl MemoriEngine {
         Ok(docs)
     }
 
-    /// 根据检索结果对应的 chunk_id，拉取 1-hop 图谱上下文。
     pub async fn get_graph_context_for_results(
         &self,
         results: &[(DocumentChunk, f32)],
@@ -499,7 +656,7 @@ impl MemoriEngine {
                     warn!(
                         path = %chunk.file_path.display(),
                         chunk_index = chunk.chunk_index,
-                        "未能从检索结果反查 chunk_id，已跳过该条图谱上下文"
+                        "could not resolve chunk_id from retrieval result; skipping graph context item"
                     );
                 }
             }
@@ -517,7 +674,6 @@ impl MemoriEngine {
         Ok(graph_context)
     }
 
-    /// 生成最终答案：融合向量文本上下文与图谱上下文。
     pub async fn generate_answer(
         &self,
         question: &str,
@@ -527,7 +683,6 @@ impl MemoriEngine {
         generate_answer_with_context(question, text_context, graph_context).await
     }
 
-    /// 返回当前 Vault 的核心规模统计。
     pub async fn get_vault_stats(&self) -> Result<VaultStats, EngineError> {
         let document_count = self.state.vector_store.count_documents().await?;
         let chunk_count = self.state.vector_store.count_chunks().await?;
@@ -646,11 +801,11 @@ impl MemoriEngine {
             Ok(loaded) => {
                 info!(
                     loaded = loaded,
-                    "已从本地数据库加载检索回归所需的历史向量缓存"
+                    "loaded historical vectors from local database before regression"
                 );
             }
             Err(err) => {
-                warn!(error = %err, "回归前加载本地数据库缓存失败，将继续执行一次全量扫描");
+                warn!(error = %err, "failed to load local database cache before regression; continuing with full scan");
             }
         }
 
@@ -678,7 +833,6 @@ impl MemoriEngine {
         Ok(())
     }
 
-    /// 启动异步守护任务，持续消费文件事件并触发解析、向量化与图谱提取流程。
     pub fn start_daemon(&mut self) -> Result<(), EngineError> {
         if self.daemon_task.is_some() {
             return Err(EngineError::DaemonAlreadyStarted);
@@ -706,7 +860,7 @@ impl MemoriEngine {
             let metadata = match state.vector_store.read_index_metadata().await {
                 Ok(metadata) => metadata,
                 Err(err) => {
-                    error!(error = %err, "读取索引元数据失败，守护进程退出");
+                    error!(error = %err, "failed to read index metadata; daemon exiting");
                     return Err(EngineError::Storage(err));
                 }
             };
@@ -716,13 +870,13 @@ impl MemoriEngine {
                     Ok(loaded) => {
                         info!(
                             loaded = loaded,
-                            "已成功从本地数据库加载 [{}] 条历史向量记忆", loaded
+                            "loaded historical vectors from local database"
                         );
                     }
                     Err(err) => {
                         error!(
                             error = %err,
-                            "加载本地数据库历史记忆失败，将以空缓存继续运行"
+                            "failed to load historical vectors from local database; continuing with empty cache"
                         );
                     }
                 }
@@ -730,7 +884,7 @@ impl MemoriEngine {
                 info!(
                     rebuild_state = metadata.rebuild_state.as_str(),
                     rebuild_reason = metadata.rebuild_reason.as_deref().unwrap_or(""),
-                    "检测到索引版本不兼容，跳过旧缓存加载并准备全量重建"
+                    "index metadata requires rebuild; skipping old cache load"
                 );
             }
 
@@ -767,7 +921,7 @@ impl MemoriEngine {
                     info!(
                         root = %root.display(),
                         file_count = existing_files.len(),
-                        "启动时递归扫描完成，准备回灌子目录中的历史文档"
+                        "startup recursive scan completed"
                     );
 
                     for path in existing_files {
@@ -828,9 +982,6 @@ impl MemoriEngine {
         Ok(())
     }
 
-    /// 关闭引擎：
-    /// 1) 优先停止 memori-vault（关闭发送端）；
-    /// 2) 等待 daemon 消费完剩余事件后退出。
     pub async fn shutdown(mut self) -> Result<(), EngineError> {
         self.graph_notify_tx.take();
 
@@ -869,4 +1020,113 @@ pub(crate) fn answer_indicates_insufficient_evidence(answer: &str) -> bool {
     ]
     .iter()
     .any(|marker| trimmed.contains(marker) || lower.contains(marker))
+}
+
+fn memory_record_to_evidence(record: MemoryRecord) -> MemoryEvidence {
+    MemoryEvidence {
+        id: record.id,
+        layer: record.layer,
+        scope: record.scope,
+        memory_type: record.memory_type,
+        title: record.title,
+        content: record.content,
+        source_type: record.source_type,
+        source_ref: record.source_ref,
+        confidence: record.confidence,
+        status: record.status,
+    }
+}
+
+fn should_skip_memory_context(analysis: &QueryAnalysis) -> bool {
+    matches!(
+        analysis.query_intent,
+        QueryIntent::ExternalFact | QueryIntent::SecretRequest | QueryIntent::MissingFileLookup
+    )
+}
+
+pub(crate) fn should_allow_memory_only_answer(
+    analysis: &QueryAnalysis,
+    memory_context: &[MemoryEvidence],
+) -> bool {
+    !memory_context.is_empty()
+        && !should_skip_memory_context(analysis)
+        && is_memory_intent_query(&analysis.normalized_query)
+}
+
+fn is_memory_intent_query(query: &str) -> bool {
+    let lower = query.to_ascii_lowercase();
+    let ascii_markers = [
+        "memory",
+        "remember",
+        "preference",
+        "prefer",
+        "previous",
+        "earlier",
+        "project decision",
+        "what did i say",
+        "what have i said",
+        "my setting",
+        "my context",
+    ];
+    if ascii_markers.iter().any(|marker| lower.contains(marker)) {
+        return true;
+    }
+
+    let cjk_markers = [
+        "记忆",
+        "偏好",
+        "喜好",
+        "之前",
+        "刚才",
+        "上次",
+        "我说过",
+        "项目决策",
+        "项目上下文",
+        "会话摘要",
+    ];
+    cjk_markers.iter().any(|marker| query.contains(marker))
+}
+
+pub(crate) fn build_memory_context_for_prompt(
+    memory_context: &[MemoryEvidence],
+    max_chars: usize,
+) -> (String, usize) {
+    if memory_context.is_empty() || max_chars == 0 {
+        return (String::new(), 0);
+    }
+
+    let mut parts = Vec::new();
+    let mut used_chars = 0usize;
+    for memory in memory_context {
+        if used_chars >= max_chars {
+            break;
+        }
+        let remaining = max_chars.saturating_sub(used_chars);
+        let mut content = memory.content.clone();
+        if content.chars().count() > remaining.saturating_sub(256) {
+            content = content
+                .chars()
+                .take(remaining.saturating_sub(256).max(160))
+                .collect::<String>();
+            content.push_str("\n...[truncated by memory context budget]");
+        }
+        let part = format!(
+            "Memory #{id}\nlayer: {layer:?}\nscope: {scope:?}\ntype: {memory_type}\nsource_type: {source_type:?}\nsource_ref: {source_ref}\nconfidence: {confidence:.2}\ntitle: {title}\ncontent:\n{content}",
+            id = memory.id,
+            layer = memory.layer,
+            scope = memory.scope,
+            memory_type = memory.memory_type,
+            source_type = memory.source_type,
+            source_ref = memory.source_ref,
+            confidence = memory.confidence,
+            title = memory.title,
+            content = content,
+        );
+        used_chars += part.chars().count();
+        parts.push(part);
+    }
+
+    let context = parts.join("\n\n");
+    let tokens = estimate_tokens(&context);
+    (context, tokens)
 }

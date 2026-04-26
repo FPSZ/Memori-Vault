@@ -456,7 +456,10 @@ pub(crate) fn resolve_active_runtime_settings(
 ) -> ActiveRuntimeModelSettings {
     let active_provider = ModelProvider::from_value(&settings.active_provider);
     let single_endpoint = if active_provider == ModelProvider::OpenAiCompatible {
-        normalize_endpoint(ModelProvider::OpenAiCompatible, &settings.remote_profile.endpoint)
+        normalize_endpoint(
+            ModelProvider::OpenAiCompatible,
+            &settings.remote_profile.endpoint,
+        )
     } else {
         normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.endpoint)
     };

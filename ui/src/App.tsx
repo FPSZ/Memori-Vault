@@ -1,4 +1,4 @@
-import {
+﻿import {
   KeyboardEvent as ReactKeyboardEvent,
   UIEvent as ReactUIEvent,
   WheelEvent as ReactWheelEvent,
@@ -26,6 +26,7 @@ import type {
   IndexingStatusDto,
   McpSettingsDto,
   McpStatusDto,
+  MemorySettingsDto,
   ModelAvailabilityDto,
   ModelProvider,
   ModelSettingsDto,
@@ -53,6 +54,7 @@ import {
   setEnterprisePolicy as saveEnterprisePolicyRemote,
   setIndexingMode as saveIndexingModeRemote,
   setMcpSettings as saveMcpSettingsRemote,
+  setMemorySettings as saveMemorySettingsRemote,
   setModelSettings as saveModelSettingsRemote,
   setWatchRoot as saveWatchRootRemote,
   searchFiles,
@@ -90,7 +92,7 @@ import type {
   VisibleEvidenceGroup
 } from "./app/types";
 
-const TAURI_HOST_MISSING_MESSAGE = "未检测到 Tauri 宿主环境，请使用 cargo tauri dev 启动";
+const TAURI_HOST_MISSING_MESSAGE = "鏈娴嬪埌 Tauri 瀹夸富鐜锛岃浣跨敤 cargo tauri dev 鍚姩";
 const AI_LANG_STORAGE_KEY = "memori-ai-language";
 const THEME_STORAGE_KEY = "memori-theme";
 const LEGACY_THEME_MODE_STORAGE_KEY = "memori-theme-mode";
@@ -139,6 +141,16 @@ const DEFAULT_MCP_SETTINGS: McpSettingsDto = {
   http_port: 3757,
   access_mode: "full_control",
   audit_enabled: true
+};
+
+const DEFAULT_MEMORY_SETTINGS: MemorySettingsDto = {
+  conversation_memory_enabled: true,
+  auto_memory_write: "suggest",
+  memory_write_requires_source: true,
+  memory_markdown_export_enabled: false,
+  default_context_budget: "16k",
+  complex_context_budget: "32k",
+  graph_ranking_enabled: false
 };
 
 function detectDefaultLanguage(): Language {
@@ -239,6 +251,26 @@ function normalizeResourceBudget(value: string | null | undefined): ResourceBudg
   return "low";
 }
 
+function normalizeContextBudget(value: string | null | undefined, fallback: string): string {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (normalized === "8k" || normalized === "16k" || normalized === "32k" || normalized === "64k") {
+    return normalized;
+  }
+  return fallback;
+}
+
+function settingsToMemorySettings(settings: AppSettingsDto): MemorySettingsDto {
+  return {
+    conversation_memory_enabled: settings.conversation_memory_enabled ?? true,
+    auto_memory_write: settings.auto_memory_write || "suggest",
+    memory_write_requires_source: settings.memory_write_requires_source ?? true,
+    memory_markdown_export_enabled: settings.memory_markdown_export_enabled ?? false,
+    default_context_budget: normalizeContextBudget(settings.default_context_budget, "16k"),
+    complex_context_budget: normalizeContextBudget(settings.complex_context_budget, "32k"),
+    graph_ranking_enabled: settings.graph_ranking_enabled ?? false
+  };
+}
+
 function isTauriHostAvailable(): boolean {
   if (typeof window === "undefined") {
     return false;
@@ -268,7 +300,7 @@ function toUiErrorMessage(error: unknown): string {
     }
   }
 
-  return "调用后端命令失败，请检查桌面端日志。";
+  return "Backend command failed. Check desktop logs.";
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
@@ -324,6 +356,9 @@ export default function App() {
   const [mcpStatus, setMcpStatus] = useState<McpStatusDto | null>(null);
   const [mcpBusy, setMcpBusy] = useState(false);
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
+  const [memorySettings, setMemorySettings] = useState<MemorySettingsDto>(DEFAULT_MEMORY_SETTINGS);
+  const [memoryBusy, setMemoryBusy] = useState(false);
+  const [memoryMessage, setMemoryMessage] = useState<string | null>(null);
   const [modelAvailability, setModelAvailability] = useState<ModelAvailabilityDto | null>(null);
   const [providerModels, setProviderModels] = useState<ProviderModelsDto>({
     from_folder: [],
@@ -541,6 +576,7 @@ export default function App() {
           setResourceBudget(normalizeResourceBudget(settings.resource_budget));
           setScheduleStart(settings.schedule_start || "00:00");
           setScheduleEnd(settings.schedule_end || "06:00");
+          setMemorySettings(settingsToMemorySettings(settings));
           if (!window.localStorage.getItem(AI_LANG_STORAGE_KEY) && settings.language) {
             const normalized = settings.language.toLowerCase();
             if (normalized.startsWith("zh")) {
@@ -804,7 +840,7 @@ export default function App() {
     const status = await withTimeout(
       getIndexingStatus(),
       INDEXING_ACTION_TIMEOUT_MS,
-      uiLang === "zh-CN" ? "获取索引状态超时，请稍后重试。" : "Fetching indexing status timed out."
+      "Fetching indexing status timed out."
     );
     setIndexingStatus({
       ...status,
@@ -824,7 +860,7 @@ export default function App() {
           schedule_end: indexingMode === "scheduled" ? scheduleEnd : null
         }),
         INDEXING_ACTION_TIMEOUT_MS,
-        uiLang === "zh-CN" ? "保存索引配置超时，请重试。" : "Saving indexing config timed out."
+        "Saving indexing config timed out."
       );
       setIndexingMode(normalizeIndexingMode(saved.indexing_mode));
       setResourceBudget(normalizeResourceBudget(saved.resource_budget));
@@ -846,7 +882,7 @@ export default function App() {
       await withTimeout(
         triggerReindex(),
         INDEXING_ACTION_TIMEOUT_MS * 2,
-        uiLang === "zh-CN" ? "触发重建索引超时，请稍后重试。" : "Triggering reindex timed out."
+        "Triggering reindex timed out."
       );
       await refreshIndexingStatus();
     } catch (err) {
@@ -864,7 +900,7 @@ export default function App() {
       await withTimeout(
         pauseIndexing(),
         INDEXING_ACTION_TIMEOUT_MS,
-        uiLang === "zh-CN" ? "暂停索引超时，请稍后重试。" : "Pausing indexing timed out."
+        "Pausing indexing timed out."
       );
       await refreshIndexingStatus();
     } catch (err) {
@@ -882,7 +918,7 @@ export default function App() {
       await withTimeout(
         resumeIndexing(),
         INDEXING_ACTION_TIMEOUT_MS,
-        uiLang === "zh-CN" ? "恢复索引超时，请稍后重试。" : "Resuming indexing timed out."
+        "Resuming indexing timed out."
       );
       await refreshIndexingStatus();
     } catch (err) {
@@ -974,14 +1010,14 @@ export default function App() {
         }),
         MODEL_ACTION_TIMEOUT_MS,
         uiLang === "zh-CN"
-          ? "模型服务连接超时，请检查地址或网络。"
+          ? "Model provider request timed out. Please check endpoint/network."
           : "Model provider request timed out. Please check endpoint/network."
       );
       setModelAvailability(availability);
       if (!availability.reachable) {
         const first = availability.errors?.[0];
         throw new Error(
-          first ? `${first.code}: ${first.message}` : uiLang === "zh-CN" ? "连接失败" : "Connection failed"
+          first ? `${first.code}: ${first.message}` : uiLang === "zh-CN" ? "杩炴帴澶辫触" : "Connection failed"
         );
       }
     } catch (err) {
@@ -1012,7 +1048,7 @@ export default function App() {
               : null
         }),
         MODEL_ACTION_TIMEOUT_MS,
-        uiLang === "zh-CN" ? "刷新模型列表超时，请稍后重试。" : "Refreshing model list timed out."
+        "Refreshing model list timed out."
       );
       setProviderModels(models);
     } catch (err) {
@@ -1030,13 +1066,13 @@ export default function App() {
       const saved = await withTimeout(
         saveModelSettingsRemote(modelSettings),
         MODEL_ACTION_TIMEOUT_MS,
-        uiLang === "zh-CN" ? "保存模型设置超时，请重试。" : "Saving model settings timed out."
+        "Saving model settings timed out."
       );
       setModelSettings(saved);
       const availability = await withTimeout(
         validateModelSetup(),
         MODEL_ACTION_TIMEOUT_MS,
-        uiLang === "zh-CN" ? "模型校验超时，请重试。" : "Model validation timed out."
+        "Model validation timed out."
       );
       setModelAvailability(availability);
       if (availability.status_code === MODEL_NOT_CONFIGURED_CODE) {
@@ -1066,7 +1102,7 @@ export default function App() {
               saved.active_provider === "ollama_local" ? saved.local_profile.models_root || null : null
           }),
           MODEL_ACTION_TIMEOUT_MS,
-          uiLang === "zh-CN" ? "刷新模型列表超时，请稍后重试。" : "Refreshing model list timed out."
+          "Refreshing model list timed out."
         );
         setProviderModels(refreshedModels);
       }
@@ -1089,14 +1125,14 @@ export default function App() {
       const saved = await withTimeout(
         saveEnterprisePolicyRemote(enterprisePolicy),
         MODEL_ACTION_TIMEOUT_MS,
-        uiLang === "zh-CN" ? "保存企业策略超时，请重试。" : "Saving enterprise policy timed out."
+        "Saving enterprise policy timed out."
       );
       setEnterprisePolicy(saved);
       try {
         const availability = await withTimeout(
           validateModelSetup(),
           MODEL_ACTION_TIMEOUT_MS,
-          uiLang === "zh-CN" ? "模型校验超时，请重试。" : "Model validation timed out."
+          "Model validation timed out."
         );
         setModelAvailability(availability);
         if (availability.status_code === MODEL_NOT_CONFIGURED_CODE) {
@@ -1129,7 +1165,7 @@ export default function App() {
               : null
         }),
         MODEL_ACTION_TIMEOUT_MS * 3,
-        uiLang === "zh-CN" ? "拉取模型超时，请稍后重试。" : "Pull model timed out."
+        "Pull model timed out."
       );
       setModelAvailability(availability);
       const refreshedModels = await withTimeout(
@@ -1148,7 +1184,7 @@ export default function App() {
               : null
         }),
         MODEL_ACTION_TIMEOUT_MS,
-        uiLang === "zh-CN" ? "刷新模型列表超时，请稍后重试。" : "Refreshing model list timed out."
+        "Refreshing model list timed out."
       );
       setProviderModels(refreshedModels);
     } catch (err) {
@@ -1221,12 +1257,12 @@ export default function App() {
       const saved = await withTimeout(
         saveMcpSettingsRemote(mcpSettings),
         MODEL_ACTION_TIMEOUT_MS,
-        uiLang === "zh-CN" ? "保存 MCP 配置超时，请重试。" : "Saving MCP settings timed out."
+        "Saving MCP settings timed out."
       );
       setMcpSettings(saved);
       const status = await getMcpStatus();
       setMcpStatus(status);
-      setMcpMessage(uiLang === "zh-CN" ? "MCP 配置已保存。" : "MCP settings saved.");
+      setMcpMessage("MCP settings saved.");
     } catch (err) {
       const message = toUiErrorMessage(err);
       setError(message);
@@ -1241,11 +1277,32 @@ export default function App() {
     try {
       const config = await copyMcpClientConfig(client);
       await navigator.clipboard.writeText(config);
-      setMcpMessage(uiLang === "zh-CN" ? "客户端配置已复制。" : "Client config copied.");
+      setMcpMessage("Client config copied.");
     } catch (err) {
       const message = toUiErrorMessage(err);
       setError(message);
       setMcpMessage(message);
+    }
+  };
+
+  const onSaveMemorySettings = async () => {
+    setMemoryBusy(true);
+    setMemoryMessage(null);
+    try {
+      const saved = await withTimeout(
+        saveMemorySettingsRemote(memorySettings),
+        MODEL_ACTION_TIMEOUT_MS,
+        uiLang === "zh-CN" ? "保存记忆设置超时，请重试。" : "Saving memory settings timed out."
+      );
+      setMemorySettings(settingsToMemorySettings(saved));
+      setMemoryMessage(uiLang === "zh-CN" ? "记忆设置已保存。" : "Memory settings saved.");
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      setMemoryMessage(message);
+      throw err;
+    } finally {
+      setMemoryBusy(false);
     }
   };
 
@@ -1634,6 +1691,11 @@ export default function App() {
                 onMcpSettingsChange={setMcpSettings}
                 onSaveMcpSettings={onSaveMcpSettings}
                 onCopyMcpClientConfig={onCopyMcpClientConfig}
+                memorySettings={memorySettings}
+                memoryBusy={memoryBusy}
+                memoryMessage={memoryMessage}
+                onMemorySettingsChange={setMemorySettings}
+                onSaveMemorySettings={onSaveMemorySettings}
               />
             </motion.div>
           )}
@@ -1672,12 +1734,6 @@ export default function App() {
     </div>
   );
 }
-
-
-
-
-
-
 
 
 

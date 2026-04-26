@@ -5,6 +5,7 @@ pub(crate) async fn set_watch_root(
     path: String,
     state: State<'_, DesktopState>,
 ) -> Result<AppSettingsDto, String> {
+    info!(path = %path, "[用户操作] 设置监听目录");
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err("目录路径为空，无法保存。".to_string());
@@ -35,18 +36,16 @@ pub(crate) async fn set_watch_root(
     .await?;
 
     let indexing = resolve_indexing_config(&settings);
-    Ok(AppSettingsDto {
-        watch_root: canonical.to_string_lossy().to_string(),
-        language: settings.language,
-        indexing_mode: indexing.mode.as_str().to_string(),
-        resource_budget: indexing.resource_budget.as_str().to_string(),
-        schedule_start: indexing.schedule_window.as_ref().map(|w| w.start.clone()),
-        schedule_end: indexing.schedule_window.as_ref().map(|w| w.end.clone()),
-    })
+    Ok(AppSettingsDto::from_settings(
+        settings,
+        canonical.to_string_lossy().to_string(),
+        indexing,
+    ))
 }
 
 #[tauri::command]
 pub(crate) async fn list_search_scopes() -> Result<Vec<SearchScopeItem>, String> {
+    info!("[用户操作] 获取搜索范围列表");
     let settings = load_app_settings()?;
     let watch_root = resolve_watch_root_from_settings(&settings)?;
     collect_search_scopes(&watch_root)
@@ -54,6 +53,7 @@ pub(crate) async fn list_search_scopes() -> Result<Vec<SearchScopeItem>, String>
 
 #[tauri::command]
 pub(crate) async fn open_source_location(path: String) -> Result<(), String> {
+    info!(path = %path, "[用户操作] 打开文件位置");
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err("文件路径为空，无法打开。".to_string());
@@ -129,6 +129,7 @@ pub(crate) async fn open_source_location(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) async fn read_file_content(path: String) -> Result<String, String> {
+    info!(path = %path, "[用户操作] 预览文件");
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err("文件路径为空".to_string());
@@ -148,7 +149,11 @@ pub(crate) async fn read_file_content(path: String) -> Result<String, String> {
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let allowed_exts = ["md", "txt", "rs", "py", "js", "ts", "jsx", "tsx", "json", "yaml", "yml", "toml", "html", "css", "c", "cpp", "h", "hpp", "go", "java", "kt", "swift", "rb", "php", "sh", "bat", "ps1", "log"];
+    let allowed_exts = [
+        "md", "txt", "rs", "py", "js", "ts", "jsx", "tsx", "json", "yaml", "yml", "toml", "html",
+        "css", "c", "cpp", "h", "hpp", "go", "java", "kt", "swift", "rb", "php", "sh", "bat",
+        "ps1", "log",
+    ];
     if !allowed_exts.contains(&ext.as_str()) {
         return Err(format!("不支持的文件类型: .{ext}"));
     }

@@ -2,6 +2,18 @@
 
 This document describes the current preview-stage enterprise capabilities for single-tenant private deployment in mid/large engineering organizations.
 
+Architecture reference: [Memory OS Lite](./MEMORY_OS_LITE.md)
+
+## Enterprise Value Of Memory OS Lite
+
+Memori-Vault's enterprise posture is based on local-first verifiable memory rather than a cloud-first RAG service:
+
+- SQLite remains the default storage kernel for documents, indexes, memory, lifecycle logs, graph metadata, and audit trails.
+- Evidence Firewall keeps document citations separate from conversation/project/preference memory.
+- MCP full-control mode can expose query, source, index, model, settings, graph, and memory tools, but memory writes should be source-bound and audited.
+- `answer_source_mix`, `memory_context`, `source_groups`, `failure_class`, and `context_budget_report` give compliance and operator teams a structured way to inspect answer provenance.
+- Model egress policy remains a first-class control; local-only deployments should not silently fall back to remote providers.
+
 ## Scope (v1)
 
 - Single-tenant private deployment on Linux.
@@ -14,7 +26,7 @@ This document describes the current preview-stage enterprise capabilities for si
 Preview note:
 
 - The current auth/session implementation is intended for controlled internal environments.
-- Treat this document as the capability baseline for `v0.3.0`, not as a claim of fully hardened GA enterprise identity infrastructure.
+- Treat this document as the capability baseline for `v0.4.0`, not as a claim of fully hardened GA enterprise identity infrastructure.
 - This document covers runtime/security posture only; it does not imply that mixed-corpus retrieval quality is already production-validated.
 
 ## Auth and Session

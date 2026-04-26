@@ -37,3 +37,9 @@
 - 2026-03-12: 明确 mixed-script 实体检索修复口径：禁止为具体实体名或具体问法语义开后门，统一改为通用 CJK query backoff 与中英脚本边界切分规则
 - 2026-03-11: 接受“当前离线回归数字不足以代表产品可用性”的判断，新增外部本地 10 文档 / 15 问可用性 smoke gate 作为第一放行标准；在 gate 通过前，`core_docs / repo_mixed` 仅继续作为内部回归参考
 
+## 2026-04-26 Architecture Documentation Update
+
+- 文档口径升级为 **Local-first Verifiable Memory OS Lite**。
+- README 改为产品介绍口径：解决什么问题、为什么不用其他 RAG 工具、核心优势、快速开始、架构、当前状态。
+- 新增 [MEMORY_OS_LITE.md](./MEMORY_OS_LITE.md) 作为架构总文档。
+- 统一强调 SQLite local-first、证据链、Evidence Firewall、MCP、分层记忆、Trust Panel、CJK/mixed-token 和图谱解释边界。

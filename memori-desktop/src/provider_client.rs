@@ -53,7 +53,10 @@ pub(crate) async fn fetch_models_all_endpoints(
                 service_set.insert(m);
             }
             let from_service_deduped: Vec<String> = service_set.into_iter().collect();
-            Ok((merge_model_candidates(from_folder, from_service_deduped), errors))
+            Ok((
+                merge_model_candidates(from_folder, from_service_deduped),
+                errors,
+            ))
         }
         ModelProvider::OpenAiCompatible => {
             let mut from_service = Vec::new();
@@ -69,7 +72,10 @@ pub(crate) async fn fetch_models_all_endpoints(
                 service_set.insert(m);
             }
             let from_service_deduped: Vec<String> = service_set.into_iter().collect();
-            Ok((merge_model_candidates(Vec::new(), from_service_deduped), errors))
+            Ok((
+                merge_model_candidates(Vec::new(), from_service_deduped),
+                errors,
+            ))
         }
     }
 }

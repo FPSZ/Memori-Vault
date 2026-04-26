@@ -24,7 +24,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 tracing.workspace = true
-tracing-subscriber = "0.3.20"
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
 memori-core = { path = "../memori-core" }
 dirs = "6.0.0"
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
