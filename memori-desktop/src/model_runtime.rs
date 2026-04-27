@@ -110,6 +110,12 @@ pub(crate) struct ActiveRuntimeModelSettings {
     pub(crate) chat_model: String,
     pub(crate) graph_model: String,
     pub(crate) embed_model: String,
+    pub(crate) chat_context_length: Option<u32>,
+    pub(crate) graph_context_length: Option<u32>,
+    pub(crate) embed_context_length: Option<u32>,
+    pub(crate) chat_concurrency: Option<u32>,
+    pub(crate) graph_concurrency: Option<u32>,
+    pub(crate) embed_concurrency: Option<u32>,
 }
 
 pub(crate) fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> RuntimeModelConfig {
@@ -122,6 +128,12 @@ pub(crate) fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> 
         embed_endpoint: settings.embed_endpoint.clone(),
         embed_model: settings.embed_model.clone(),
         api_key: settings.api_key.clone(),
+        chat_context_length: settings.chat_context_length,
+        graph_context_length: settings.graph_context_length,
+        embed_context_length: settings.embed_context_length,
+        chat_concurrency: settings.chat_concurrency,
+        graph_concurrency: settings.graph_concurrency,
+        embed_concurrency: settings.embed_concurrency,
     }
 }
 
@@ -437,6 +449,12 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             chat_model: local_chat_model,
             graph_model: local_graph_model,
             embed_model: local_embed_model,
+            chat_context_length: settings.local_chat_context_length,
+            graph_context_length: settings.local_graph_context_length,
+            embed_context_length: settings.local_embed_context_length,
+            chat_concurrency: settings.local_chat_concurrency,
+            graph_concurrency: settings.local_graph_concurrency,
+            embed_concurrency: settings.local_embed_concurrency,
         },
         remote_profile: RemoteModelProfileDto {
             chat_endpoint: normalize_endpoint(
@@ -455,6 +473,12 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             chat_model: remote_chat_model,
             graph_model: remote_graph_model,
             embed_model: remote_embed_model,
+            chat_context_length: settings.remote_chat_context_length,
+            graph_context_length: settings.remote_graph_context_length,
+            embed_context_length: settings.remote_embed_context_length,
+            chat_concurrency: settings.remote_chat_concurrency,
+            graph_concurrency: settings.remote_graph_concurrency,
+            embed_concurrency: settings.remote_embed_concurrency,
         },
     }
 }
@@ -521,6 +545,12 @@ pub(crate) fn normalize_model_settings_payload(
             chat_model: local_chat_model,
             graph_model: local_graph_model,
             embed_model: local_embed_model,
+            chat_context_length: payload.local_profile.chat_context_length,
+            graph_context_length: payload.local_profile.graph_context_length,
+            embed_context_length: payload.local_profile.embed_context_length,
+            chat_concurrency: payload.local_profile.chat_concurrency,
+            graph_concurrency: payload.local_profile.graph_concurrency,
+            embed_concurrency: payload.local_profile.embed_concurrency,
         },
         remote_profile: RemoteModelProfileDto {
             chat_endpoint: remote_chat_endpoint,
@@ -530,6 +560,12 @@ pub(crate) fn normalize_model_settings_payload(
             chat_model: remote_chat_model,
             graph_model: remote_graph_model,
             embed_model: remote_embed_model,
+            chat_context_length: payload.remote_profile.chat_context_length,
+            graph_context_length: payload.remote_profile.graph_context_length,
+            embed_context_length: payload.remote_profile.embed_context_length,
+            chat_concurrency: payload.remote_profile.chat_concurrency,
+            graph_concurrency: payload.remote_profile.graph_concurrency,
+            embed_concurrency: payload.remote_profile.embed_concurrency,
         },
     })
 }
@@ -598,6 +634,36 @@ pub(crate) fn resolve_active_runtime_settings(
             settings.remote_profile.embed_model.trim().to_string()
         } else {
             settings.local_profile.embed_model.trim().to_string()
+        },
+        chat_context_length: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.chat_context_length
+        } else {
+            settings.local_profile.chat_context_length
+        },
+        graph_context_length: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.graph_context_length
+        } else {
+            settings.local_profile.graph_context_length
+        },
+        embed_context_length: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.embed_context_length
+        } else {
+            settings.local_profile.embed_context_length
+        },
+        chat_concurrency: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.chat_concurrency
+        } else {
+            settings.local_profile.chat_concurrency
+        },
+        graph_concurrency: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.graph_concurrency
+        } else {
+            settings.local_profile.graph_concurrency
+        },
+        embed_concurrency: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.embed_concurrency
+        } else {
+            settings.local_profile.embed_concurrency
         },
     }
 }
@@ -715,6 +781,36 @@ pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) 
             std::env::set_var(MEMORI_MODEL_API_KEY_ENV, key);
         } else {
             std::env::remove_var(MEMORI_MODEL_API_KEY_ENV);
+        }
+        if let Some(v) = settings.chat_context_length {
+            std::env::set_var("MEMORI_CHAT_CONTEXT_LENGTH", v.to_string());
+        } else {
+            std::env::remove_var("MEMORI_CHAT_CONTEXT_LENGTH");
+        }
+        if let Some(v) = settings.graph_context_length {
+            std::env::set_var("MEMORI_GRAPH_CONTEXT_LENGTH", v.to_string());
+        } else {
+            std::env::remove_var("MEMORI_GRAPH_CONTEXT_LENGTH");
+        }
+        if let Some(v) = settings.embed_context_length {
+            std::env::set_var("MEMORI_EMBED_CONTEXT_LENGTH", v.to_string());
+        } else {
+            std::env::remove_var("MEMORI_EMBED_CONTEXT_LENGTH");
+        }
+        if let Some(v) = settings.chat_concurrency {
+            std::env::set_var("MEMORI_CHAT_CONCURRENCY", v.to_string());
+        } else {
+            std::env::remove_var("MEMORI_CHAT_CONCURRENCY");
+        }
+        if let Some(v) = settings.graph_concurrency {
+            std::env::set_var("MEMORI_GRAPH_CONCURRENCY", v.to_string());
+        } else {
+            std::env::remove_var("MEMORI_GRAPH_CONCURRENCY");
+        }
+        if let Some(v) = settings.embed_concurrency {
+            std::env::set_var("MEMORI_EMBED_CONCURRENCY", v.to_string());
+        } else {
+            std::env::remove_var("MEMORI_EMBED_CONCURRENCY");
         }
     }
 }

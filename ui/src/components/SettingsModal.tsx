@@ -1,30 +1,21 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Brain, Cpu, Database, LoaderCircle, Network, Palette, ScrollText, Search, Settings } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, Brain, Cpu, Database, Network, Palette, ScrollText, Search, Settings } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { Language } from "../i18n";
 import { useI18n } from "../i18n";
-import {
-  AnimatedPanel,
-  AnimatedPressButton,
-  fadeSlideUpVariants,
-  staggerContainerVariants
-} from "./MotionKit";
+import { AnimatedPressButton } from "./MotionKit";
 import { rankSettingsQuery } from "../app/api/desktop";
 import { AdvancedTab, BasicTab, LogsTab, McpTab, MemoryTab, ModelsTab, PersonalizationTab } from "./settings/tabs";
 import type {
-  LocalModelProfileDto,
-  RemoteModelProfileDto,
   FontPreset,
   FontScale,
   IndexingMode,
   ModelAvailabilityDto,
   ModelProvider,
-  ModelRole,
   ResourceBudget,
   SettingsModalProps
 } from "./settings/types";
 import type { IndexingActionKey } from "./settings/tabs/AdvancedTab";
-import type { ModelActionKey } from "./settings/tabs/ModelsTab";
 
 type TabKey = "basic" | "models" | "memory" | "mcp" | "advanced" | "personalization" | "logs";
 
@@ -95,23 +86,6 @@ export function SettingsModal({
   const [autoSyncDaemon, setAutoSyncDaemon] = useState(true);
   const [graphRagInfer, setGraphRagInfer] = useState(true);
   type ActionPhase = "idle" | "running" | "success" | "error";
-  const [actionState, setActionState] = useState<Record<ModelActionKey, { phase: ActionPhase; tick: number }>>({
-    probe: { phase: "idle", tick: 0 },
-    refresh: { phase: "idle", tick: 0 },
-    save: { phase: "idle", tick: 0 },
-    pull: { phase: "idle", tick: 0 }
-  });
-  const resetTimersRef = useRef<Record<ModelActionKey, number | null>>({
-    probe: null,
-    refresh: null,
-    save: null,
-    pull: null
-  });
-  const [customMode, setCustomMode] = useState<Record<ModelRole, boolean>>({
-    chat_model: false,
-    graph_model: false,
-    embed_model: false
-  });
   const [indexingAction, setIndexingAction] = useState<{
     key: IndexingActionKey | null;
     phase: ActionPhase;
@@ -122,51 +96,6 @@ export function SettingsModal({
     tick: 0
   });
 
-  const activeProvider = modelSettings.active_provider;
-  const activeProfile =
-    activeProvider === "ollama_local" ? modelSettings.local_profile : modelSettings.remote_profile;
-  const normalizePolicyEndpoint = (value: string) =>
-    value.trim().replace(/\/+$/, "").toLowerCase();
-  const normalizedRemoteEndpoint = normalizePolicyEndpoint(modelSettings.remote_profile.chat_endpoint);
-  const normalizedAllowedEndpoints = enterprisePolicy.allowed_model_endpoints
-    .map(normalizePolicyEndpoint)
-    .filter(Boolean);
-  const normalizedAllowedModels = enterprisePolicy.allowed_models
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const activeProviderPolicyBlock = useMemo(() => {
-    if (modelSettings.active_provider === "ollama_local") {
-      return null;
-    }
-    if (enterprisePolicy.egress_mode === "local_only") {
-      return t("policyStatusLocalOnly");
-    }
-    if (
-      normalizedAllowedEndpoints.length > 0 &&
-      !normalizedAllowedEndpoints.includes(normalizedRemoteEndpoint)
-    ) {
-      return t("policyStatusEndpointBlocked");
-    }
-    if (
-      normalizedAllowedModels.length > 0 &&
-      [modelSettings.remote_profile.chat_model, modelSettings.remote_profile.graph_model, modelSettings.remote_profile.embed_model]
-        .map((item) => item.trim())
-        .some((item) => item && !normalizedAllowedModels.includes(item))
-    ) {
-      return t("policyStatusModelBlocked");
-    }
-    return null;
-  }, [
-    enterprisePolicy.egress_mode,
-    modelSettings.active_provider,
-    modelSettings.remote_profile.chat_model,
-    modelSettings.remote_profile.embed_model,
-    modelSettings.remote_profile.graph_model,
-    normalizedAllowedEndpoints,
-    normalizedAllowedModels,
-    normalizedRemoteEndpoint,
-    t
-  ]);
 
   const tabMeta = useMemo(
     () => [
@@ -285,24 +214,6 @@ export function SettingsModal({
     }
   }, [activeTab, filteredTabs]);
 
-  useEffect(() => {
-    const merged = providerModels.merged ?? [];
-    const next: Record<ModelRole, boolean> = {
-      chat_model: !merged.includes(activeProfile.chat_model),
-      graph_model: !merged.includes(activeProfile.graph_model),
-      embed_model: !merged.includes(activeProfile.embed_model)
-    };
-    setCustomMode((prev) => {
-      if (
-        prev.chat_model === next.chat_model &&
-        prev.graph_model === next.graph_model &&
-        prev.embed_model === next.embed_model
-      ) {
-        return prev;
-      }
-      return next;
-    });
-  }, [activeProfile.chat_model, activeProfile.embed_model, activeProfile.graph_model, providerModels.merged]);
 
   const fontPresetOptions = [
     { value: "system" as const, label: t("fontPresetSystem") },
@@ -314,55 +225,6 @@ export function SettingsModal({
     { value: "m" as const, label: t("fontSizeM") },
     { value: "l" as const, label: t("fontSizeL") }
   ];
-
-  const updateActiveProfile = (next: Partial<LocalModelProfileDto & RemoteModelProfileDto>) => {
-    if (activeProvider === "ollama_local") {
-      onModelSettingsChange({
-        ...modelSettings,
-        local_profile: { ...modelSettings.local_profile, ...next }
-      });
-      return;
-    }
-    onModelSettingsChange({
-      ...modelSettings,
-      remote_profile: { ...modelSettings.remote_profile, ...next }
-    });
-  };
-
-  const onModelAction = async (key: ModelActionKey, action: () => Promise<void>) => {
-    if (resetTimersRef.current[key]) {
-      window.clearTimeout(resetTimersRef.current[key] as number);
-      resetTimersRef.current[key] = null;
-    }
-    setActionState((prev) => ({
-      ...prev,
-      [key]: { phase: "running", tick: prev[key].tick + 1 }
-    }));
-    try {
-      await action();
-      setActionState((prev) => ({
-        ...prev,
-        [key]: { phase: "success", tick: prev[key].tick + 1 }
-      }));
-      resetTimersRef.current[key] = window.setTimeout(() => {
-        setActionState((prev) => ({
-          ...prev,
-          [key]: { phase: "idle", tick: prev[key].tick + 1 }
-        }));
-      }, 2200);
-    } catch {
-      setActionState((prev) => ({
-        ...prev,
-        [key]: { phase: "error", tick: prev[key].tick + 1 }
-      }));
-      resetTimersRef.current[key] = window.setTimeout(() => {
-        setActionState((prev) => ({
-          ...prev,
-          [key]: { phase: "idle", tick: prev[key].tick + 1 }
-        }));
-      }, 2600);
-    }
-  };
 
   const onIndexingAction = async (key: IndexingActionKey, action: () => Promise<void>) => {
     setIndexingAction((prev) => ({ key, phase: "running", tick: prev.tick + 1 }));
@@ -380,56 +242,6 @@ export function SettingsModal({
     }
   };
 
-  useEffect(() => {
-    return () => {
-      const timers = resetTimersRef.current;
-      (Object.keys(timers) as ModelActionKey[]).forEach((key) => {
-        if (timers[key]) {
-          window.clearTimeout(timers[key] as number);
-        }
-      });
-    };
-  }, []);
-
-  const buttonLabelByState = (key: ModelActionKey) => {
-    const phase = actionState[key].phase;
-    if (key === "probe") {
-      if (phase === "running") return t("actionConnecting");
-      if (phase === "success") return t("actionConnected");
-      if (phase === "error") return t("actionConnectFailed");
-      return t("testConnection");
-    }
-    if (key === "refresh") {
-      if (phase === "running") return t("actionRefreshing");
-      if (phase === "success") return t("actionRefreshed");
-      if (phase === "error") return t("actionRefreshFailed");
-      return t("refreshModels");
-    }
-    if (key === "save") {
-      if (phase === "running") return t("actionSaving");
-      if (phase === "success") return t("actionSaved");
-      if (phase === "error") return t("actionSaveFailed");
-      return t("saveModels");
-    }
-    if (phase === "running") return t("actionPulling");
-    if (phase === "success") return t("actionPulled");
-    if (phase === "error") return t("actionPullFailed");
-    return t("pullMissingModels");
-  };
-
-  const buttonClassByState = (key: ModelActionKey) => {
-    const phase = actionState[key].phase;
-    if (phase === "success") {
-      return "bg-[var(--accent-soft)] text-[var(--accent)] shadow-[0_0_8px_rgba(88,166,255,0.2)]";
-    }
-    if (phase === "error") {
-      return "bg-red-500/15 text-red-300 shadow-[0_0_14px_rgba(239,68,68,0.3)]";
-    }
-    if (phase === "running") {
-      return "bg-[var(--accent-soft)] text-[var(--accent)]";
-    }
-    return "bg-transparent text-[var(--text-primary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]";
-  };
   const stableActionButtonClass =
     "inline-flex h-9 w-[170px] items-center justify-center gap-1.5 rounded-md px-3 text-sm whitespace-nowrap transition disabled:opacity-60";
 
@@ -597,29 +409,16 @@ export function SettingsModal({
               <ModelsTab
                 t={t}
                 modelSettings={modelSettings}
-                enterprisePolicy={enterprisePolicy}
                 modelAvailability={modelAvailability}
                 providerModels={providerModels}
                 modelBusy={modelBusy}
-                enterpriseBusy={enterpriseBusy}
-                customMode={customMode}
-                setCustomMode={setCustomMode}
-                activeProviderPolicyBlock={activeProviderPolicyBlock}
                 onProviderSwitch={onProviderSwitch}
-                onEnterprisePolicyChange={onEnterprisePolicyChange}
-                onSaveEnterprisePolicy={onSaveEnterprisePolicy}
-                updateActiveProfile={updateActiveProfile}
-                onModelAction={onModelAction}
+                onModelSettingsChange={onModelSettingsChange}
+                onSaveModelSettings={onSaveModelSettings}
                 onProbeModelProvider={onProbeModelProvider}
                 onRefreshProviderModels={onRefreshProviderModels}
-                onSaveModelSettings={onSaveModelSettings}
-                onPullModel={onPullModel}
                 onPickLocalModelsRoot={onPickLocalModelsRoot}
                 onClearLocalModelsRoot={onClearLocalModelsRoot}
-                actionState={actionState}
-                buttonClassByState={buttonClassByState}
-                buttonLabelByState={buttonLabelByState}
-                stableActionButtonClass={stableActionButtonClass}
               />
             ) : null}
 

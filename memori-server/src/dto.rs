@@ -18,11 +18,23 @@ pub(crate) struct AppSettings {
     pub(crate) local_chat_model: Option<String>,
     pub(crate) local_graph_model: Option<String>,
     pub(crate) local_embed_model: Option<String>,
+    pub(crate) local_chat_context_length: Option<u32>,
+    pub(crate) local_graph_context_length: Option<u32>,
+    pub(crate) local_embed_context_length: Option<u32>,
+    pub(crate) local_chat_concurrency: Option<u32>,
+    pub(crate) local_graph_concurrency: Option<u32>,
+    pub(crate) local_embed_concurrency: Option<u32>,
     pub(crate) remote_endpoint: Option<String>,
     pub(crate) remote_api_key: Option<String>,
     pub(crate) remote_chat_model: Option<String>,
     pub(crate) remote_graph_model: Option<String>,
     pub(crate) remote_embed_model: Option<String>,
+    pub(crate) remote_chat_context_length: Option<u32>,
+    pub(crate) remote_graph_context_length: Option<u32>,
+    pub(crate) remote_embed_context_length: Option<u32>,
+    pub(crate) remote_chat_concurrency: Option<u32>,
+    pub(crate) remote_graph_concurrency: Option<u32>,
+    pub(crate) remote_embed_concurrency: Option<u32>,
     pub(crate) enterprise_egress_mode: Option<String>,
     pub(crate) enterprise_allowed_model_endpoints: Option<Vec<String>>,
     pub(crate) enterprise_allowed_models: Option<Vec<String>>,
@@ -192,6 +204,18 @@ pub(crate) struct LocalModelProfileDto {
     pub(crate) chat_model: String,
     pub(crate) graph_model: String,
     pub(crate) embed_model: String,
+    #[serde(default)]
+    pub(crate) chat_context_length: Option<u32>,
+    #[serde(default)]
+    pub(crate) graph_context_length: Option<u32>,
+    #[serde(default)]
+    pub(crate) embed_context_length: Option<u32>,
+    #[serde(default)]
+    pub(crate) chat_concurrency: Option<u32>,
+    #[serde(default)]
+    pub(crate) graph_concurrency: Option<u32>,
+    #[serde(default)]
+    pub(crate) embed_concurrency: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +225,18 @@ pub(crate) struct RemoteModelProfileDto {
     pub(crate) chat_model: String,
     pub(crate) graph_model: String,
     pub(crate) embed_model: String,
+    #[serde(default)]
+    pub(crate) chat_context_length: Option<u32>,
+    #[serde(default)]
+    pub(crate) graph_context_length: Option<u32>,
+    #[serde(default)]
+    pub(crate) embed_context_length: Option<u32>,
+    #[serde(default)]
+    pub(crate) chat_concurrency: Option<u32>,
+    #[serde(default)]
+    pub(crate) graph_concurrency: Option<u32>,
+    #[serde(default)]
+    pub(crate) embed_concurrency: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

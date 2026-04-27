@@ -589,6 +589,12 @@ pub struct RuntimeModelConfig {
     pub embed_endpoint: String,
     pub embed_model: String,
     pub api_key: Option<String>,
+    pub chat_context_length: Option<u32>,
+    pub graph_context_length: Option<u32>,
+    pub embed_context_length: Option<u32>,
+    pub chat_concurrency: Option<u32>,
+    pub graph_concurrency: Option<u32>,
+    pub embed_concurrency: Option<u32>,
 }
 
 pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
@@ -636,6 +642,24 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
         embed_endpoint,
         embed_model,
         api_key,
+        chat_context_length: std::env::var("MEMORI_CHAT_CONTEXT_LENGTH")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        graph_context_length: std::env::var("MEMORI_GRAPH_CONTEXT_LENGTH")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        embed_context_length: std::env::var("MEMORI_EMBED_CONTEXT_LENGTH")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        chat_concurrency: std::env::var("MEMORI_CHAT_CONCURRENCY")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        graph_concurrency: std::env::var("MEMORI_GRAPH_CONCURRENCY")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        embed_concurrency: std::env::var("MEMORI_EMBED_CONCURRENCY")
+            .ok()
+            .and_then(|v| v.parse().ok()),
     }
 }
 
@@ -1138,6 +1162,12 @@ mod tests {
             embed_endpoint: "https://api.openai.com/v1".to_string(),
             embed_model: "text-embedding-3-small".to_string(),
             api_key: Some("secret".to_string()),
+            chat_context_length: None,
+            graph_context_length: None,
+            embed_context_length: None,
+            chat_concurrency: None,
+            graph_concurrency: None,
+            embed_concurrency: None,
         };
 
         let violation = validate_runtime_model_settings(&policy, &runtime)
@@ -1161,6 +1191,12 @@ mod tests {
             embed_endpoint: "https://models.company.local/v1".to_string(),
             embed_model: "denied-embed".to_string(),
             api_key: None,
+            chat_context_length: None,
+            graph_context_length: None,
+            embed_context_length: None,
+            chat_concurrency: None,
+            graph_concurrency: None,
+            embed_concurrency: None,
         };
 
         let violation = validate_runtime_model_settings(&policy, &runtime)

@@ -610,11 +610,23 @@ async fn set_model_settings(
     settings.local_chat_model = Some(normalized.local_profile.chat_model.clone());
     settings.local_graph_model = Some(normalized.local_profile.graph_model.clone());
     settings.local_embed_model = Some(normalized.local_profile.embed_model.clone());
+    settings.local_chat_context_length = normalized.local_profile.chat_context_length;
+    settings.local_graph_context_length = normalized.local_profile.graph_context_length;
+    settings.local_embed_context_length = normalized.local_profile.embed_context_length;
+    settings.local_chat_concurrency = normalized.local_profile.chat_concurrency;
+    settings.local_graph_concurrency = normalized.local_profile.graph_concurrency;
+    settings.local_embed_concurrency = normalized.local_profile.embed_concurrency;
     settings.remote_endpoint = Some(normalized.remote_profile.endpoint.clone());
     settings.remote_api_key = normalized.remote_profile.api_key.clone();
     settings.remote_chat_model = Some(normalized.remote_profile.chat_model.clone());
     settings.remote_graph_model = Some(normalized.remote_profile.graph_model.clone());
     settings.remote_embed_model = Some(normalized.remote_profile.embed_model.clone());
+    settings.remote_chat_context_length = normalized.remote_profile.chat_context_length;
+    settings.remote_graph_context_length = normalized.remote_profile.graph_context_length;
+    settings.remote_embed_context_length = normalized.remote_profile.embed_context_length;
+    settings.remote_chat_concurrency = normalized.remote_profile.chat_concurrency;
+    settings.remote_graph_concurrency = normalized.remote_profile.graph_concurrency;
+    settings.remote_embed_concurrency = normalized.remote_profile.embed_concurrency;
     save_app_settings(&settings).map_err(JsonRpcError::internal_error)?;
     apply_model_settings_to_env(active_runtime);
     let watch_root =

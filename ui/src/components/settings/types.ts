@@ -18,6 +18,12 @@ export type LocalModelProfileDto = {
   chat_model: string;
   graph_model: string;
   embed_model: string;
+  chat_context_length?: number | null;
+  graph_context_length?: number | null;
+  embed_context_length?: number | null;
+  chat_concurrency?: number | null;
+  graph_concurrency?: number | null;
+  embed_concurrency?: number | null;
 };
 
 export type RemoteModelProfileDto = {
@@ -28,6 +34,12 @@ export type RemoteModelProfileDto = {
   chat_model: string;
   graph_model: string;
   embed_model: string;
+  chat_context_length?: number | null;
+  graph_context_length?: number | null;
+  embed_context_length?: number | null;
+  chat_concurrency?: number | null;
+  graph_concurrency?: number | null;
+  embed_concurrency?: number | null;
 };
 
 export type ModelSettingsDto = {

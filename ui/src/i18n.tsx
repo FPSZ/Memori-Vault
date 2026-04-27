@@ -15,7 +15,7 @@ const MESSAGES = {
     advanced: "高级",
     personalization: "个性化",
 
-    memory: "璁板繂",
+    memory: "记忆",
     memoryArchitectureTitle: "Local-First Verifiable Memory OS Lite",
     memoryArchitectureDesc: "文档证据、对话记忆、图谱解释和策略记忆分层保存；文档问答优先使用可引用 evidence。",
     conversationMemory: "对话长期记忆",

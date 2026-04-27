@@ -204,7 +204,24 @@ export function LogsTab() {
                   return (
                     <tr key={idx} className="transition hover:bg-[var(--bg-surface-2)]/50">
                       <td className="px-3 py-1.5 whitespace-nowrap font-mono text-[var(--text-muted)]">
-                        {entry.timestamp.slice(11, 23)}
+                        {(() => {
+                          try {
+                            const d = new Date(entry.timestamp);
+                            const date = d.toLocaleDateString("zh-CN", {
+                              month: "2-digit",
+                              day: "2-digit"
+                            });
+                            const time = d.toLocaleTimeString("zh-CN", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                              hour12: false
+                            });
+                            return `${date} ${time}`;
+                          } catch {
+                            return entry.timestamp;
+                          }
+                        })()}
                       </td>
                       <td className="px-3 py-1.5">
                         <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${colorClass} ${bgClass}`}>
