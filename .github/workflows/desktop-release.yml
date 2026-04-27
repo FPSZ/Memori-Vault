@@ -129,7 +129,7 @@ jobs:
 
       - name: Build desktop bundle
         working-directory: memori-desktop
-        run: cargo tauri build --ci
+        run: cargo tauri build --ci --config tauri.ci.conf.json
 
       - name: Upload bundle artifacts
         uses: actions/upload-artifact@v4
