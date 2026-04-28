@@ -12,7 +12,11 @@ async fn main() -> Result<(), AnyError> {
     let watch_root = std::env::args()
         .nth(2)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"D:\AI\Tool\Memory\Memory_Test"));
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join("Memory_Test")
+        });
 
     let db_path = std::env::var(MEMORI_DB_PATH_ENV).unwrap_or_else(|_| {
         dirs::data_dir()

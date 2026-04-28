@@ -1,17 +1,17 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{EngineError, resolve_runtime_model_config_from_env};
+use crate::{EngineError, ModelProvider, resolve_runtime_model_config_from_env};
 
 const ANSWER_TEMPERATURE: f32 = 0.1;
 
 #[derive(Debug, Serialize)]
-struct OllamaMessage<'a> {
+struct ChatMessage<'a> {
     role: &'a str,
     content: &'a str,
 }
 
 #[derive(Debug, Deserialize)]
-struct OllamaMessageResponse {
+struct ChatMessageResponse {
     content: String,
 }
 
@@ -19,7 +19,20 @@ struct OllamaMessageResponse {
 struct OpenAiChatCompletionRequest<'a> {
     model: &'a str,
     temperature: f32,
-    messages: Vec<OllamaMessage<'a>>,
+    messages: Vec<ChatMessage<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    think: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable_thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<QwenChatTemplateKwargs>,
+}
+
+#[derive(Debug, Serialize)]
+struct QwenChatTemplateKwargs {
+    enable_thinking: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -29,7 +42,7 @@ struct OpenAiChatCompletionResponse {
 
 #[derive(Debug, Deserialize)]
 struct OpenAiChatChoice {
-    message: OllamaMessageResponse,
+    message: ChatMessageResponse,
 }
 
 /// 结合向量文本上下文与图谱上下文，生成最终回答。
@@ -56,17 +69,23 @@ pub async fn generate_answer(
 输出要求：简洁、准确，优先中文回答。
 "#;
 
-    let user_prompt = format!(
+    let mut user_prompt = format!(
         "用户问题:\n{}\n\n向量检索文本上下文:\n{}\n\n图谱关系上下文:\n{}\n\n请给出最终答案，并尽量引用关键实体关系。",
         question, text_context, graph_context
     );
 
+    if is_qwen_thinking_model(&model) {
+        // Qwen3/QwQ chat templates understand `/no_think`; this keeps local
+        // answers fast even when the serving stack ignores request-level flags.
+        user_prompt = format!("/no_think\n\n{user_prompt}");
+    }
+
     let messages = vec![
-        OllamaMessage {
+        ChatMessage {
             role: "system",
             content: system_prompt,
         },
-        OllamaMessage {
+        ChatMessage {
             role: "user",
             content: &user_prompt,
         },
@@ -76,11 +95,17 @@ pub async fn generate_answer(
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
-    let mut request = client.post(endpoint).json(&OpenAiChatCompletionRequest {
+    let mut request_body = OpenAiChatCompletionRequest {
         model: &model,
         temperature: ANSWER_TEMPERATURE,
         messages,
-    });
+        think: None,
+        thinking: None,
+        enable_thinking: None,
+        chat_template_kwargs: None,
+    };
+    disable_qwen_thinking_if_needed(&model, &endpoint, runtime.provider, &mut request_body);
+    let mut request = client.post(endpoint).json(&request_body);
     if let Some(key) = runtime.api_key.as_ref() {
         request = request.bearer_auth(key);
     }
@@ -118,4 +143,37 @@ pub async fn generate_answer(
     }
 
     Ok(answer.to_string())
+}
+
+fn is_qwen_thinking_model(model: &str) -> bool {
+    let normalized = model.to_ascii_lowercase();
+    normalized.contains("qwen3") || normalized.contains("qwq")
+}
+
+fn disable_qwen_thinking_if_needed(
+    model: &str,
+    endpoint: &str,
+    provider: ModelProvider,
+    request: &mut OpenAiChatCompletionRequest<'_>,
+) {
+    if !is_qwen_thinking_model(model) || !should_send_thinking_flags(endpoint, provider) {
+        return;
+    }
+
+    // Different local OpenAI-compatible servers expose different knobs.
+    // llama.cpp ignores unknown JSON fields, while Qwen-compatible templates
+    // can use `chat_template_kwargs.enable_thinking`.
+    request.think = Some(false);
+    request.thinking = Some(false);
+    request.enable_thinking = Some(false);
+    request.chat_template_kwargs = Some(QwenChatTemplateKwargs {
+        enable_thinking: false,
+    });
+}
+
+fn should_send_thinking_flags(endpoint: &str, provider: ModelProvider) -> bool {
+    provider == ModelProvider::LlamaCppLocal
+        || endpoint.contains("127.0.0.1")
+        || endpoint.contains("localhost")
+        || endpoint.contains("0.0.0.0")
 }

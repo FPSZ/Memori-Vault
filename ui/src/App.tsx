@@ -1,4 +1,4 @@
-﻿import {
+import {
   KeyboardEvent as ReactKeyboardEvent,
   UIEvent as ReactUIEvent,
   WheelEvent as ReactWheelEvent,
@@ -30,6 +30,7 @@ import type {
   ModelAvailabilityDto,
   ModelProvider,
   ModelSettingsDto,
+  LocalModelRuntimeStatusesDto,
   ProviderModelsDto,
   ResourceBudget,
   ThemeMode
@@ -43,13 +44,14 @@ import {
   getMcpSettings,
   getMcpStatus,
   getModelSettings,
+  getLocalModelRuntimeStatus,
   getVaultStats,
   listProviderModels,
   openSourceLocation,
   readFileContent,
   pauseIndexing,
   probeModelProvider,
-  pullModel,
+  restartLocalModel,
   resumeIndexing,
   setEnterprisePolicy as saveEnterprisePolicyRemote,
   setIndexingMode as saveIndexingModeRemote,
@@ -58,6 +60,8 @@ import {
   setModelSettings as saveModelSettingsRemote,
   setWatchRoot as saveWatchRootRemote,
   searchFiles,
+  startLocalModel,
+  stopLocalModel,
   triggerReindex,
   validateModelSetup,
   copyMcpClientConfig
@@ -92,7 +96,7 @@ import type {
   VisibleEvidenceGroup
 } from "./app/types";
 
-const TAURI_HOST_MISSING_MESSAGE = "鏈娴嬪埌 Tauri 瀹夸富鐜锛岃浣跨敤 cargo tauri dev 鍚姩";
+const TAURI_HOST_MISSING_MESSAGE = "未检测到 Tauri 宿主环境，请使用 cargo tauri dev 启动";
 const AI_LANG_STORAGE_KEY = "memori-ai-language";
 const THEME_STORAGE_KEY = "memori-theme";
 const LEGACY_THEME_MODE_STORAGE_KEY = "memori-theme-mode";
@@ -107,15 +111,19 @@ const MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize, rehypeHighlight];
 const MODEL_NOT_CONFIGURED_CODE = "model_not_configured";
 
 const DEFAULT_MODEL_SETTINGS: ModelSettingsDto = {
-  active_provider: "ollama_local",
+  active_provider: "llama_cpp_local",
   local_profile: {
     chat_endpoint: "http://localhost:18001",
     graph_endpoint: "http://localhost:18002",
     embed_endpoint: "http://localhost:18003",
     models_root: "",
+    llama_server_path: "",
     chat_model: "qwen3-14b",
     graph_model: "qwen3-8b",
-    embed_model: "Qwen3-Embedding-4B"
+    embed_model: "Qwen3-Embedding-4B",
+    chat_model_path: "",
+    graph_model_path: "",
+    embed_model_path: ""
   },
   remote_profile: {
     chat_endpoint: "https://api.openai.com",
@@ -264,10 +272,10 @@ function settingsToMemorySettings(settings: AppSettingsDto): MemorySettingsDto {
     conversation_memory_enabled: settings.conversation_memory_enabled ?? true,
     auto_memory_write: settings.auto_memory_write || "suggest",
     memory_write_requires_source: settings.memory_write_requires_source ?? true,
-    memory_markdown_export_enabled: settings.memory_markdown_export_enabled ?? false,
+    memory_markdown_export_enabled: false,
     default_context_budget: normalizeContextBudget(settings.default_context_budget, "16k"),
     complex_context_budget: normalizeContextBudget(settings.complex_context_budget, "32k"),
-    graph_ranking_enabled: settings.graph_ranking_enabled ?? false
+    graph_ranking_enabled: false
   };
 }
 
@@ -360,6 +368,9 @@ export default function App() {
   const [memoryBusy, setMemoryBusy] = useState(false);
   const [memoryMessage, setMemoryMessage] = useState<string | null>(null);
   const [modelAvailability, setModelAvailability] = useState<ModelAvailabilityDto | null>(null);
+  const [localModelRuntimeStatuses, setLocalModelRuntimeStatuses] =
+    useState<LocalModelRuntimeStatusesDto | null>(null);
+  const [localModelRuntimeBusyRole, setLocalModelRuntimeBusyRole] = useState<string | null>(null);
   const [providerModels, setProviderModels] = useState<ProviderModelsDto>({
     from_folder: [],
     from_service: [],
@@ -532,7 +543,7 @@ export default function App() {
   );
   const activeModelProfile = useMemo(
     () =>
-      modelSettings.active_provider === "ollama_local"
+      modelSettings.active_provider === "llama_cpp_local"
         ? modelSettings.local_profile
         : modelSettings.remote_profile,
     [modelSettings]
@@ -615,9 +626,16 @@ export default function App() {
         const settings = await getModelSettings();
         if (active) {
           setModelSettings(settings);
+          getLocalModelRuntimeStatus()
+            .then((runtime) => {
+              if (active) setLocalModelRuntimeStatuses(runtime);
+            })
+            .catch(() => {
+              if (active) setLocalModelRuntimeStatuses(null);
+            });
         }
         const profileConfigured =
-          settings.active_provider === "ollama_local"
+          settings.active_provider === "llama_cpp_local"
             ? settings.local_profile.chat_endpoint.trim().length > 0 &&
               settings.local_profile.graph_endpoint.trim().length > 0 &&
               settings.local_profile.embed_endpoint.trim().length > 0 &&
@@ -640,7 +658,7 @@ export default function App() {
 
         try {
           const profile =
-            settings.active_provider === "ollama_local"
+            settings.active_provider === "llama_cpp_local"
               ? settings.local_profile
               : settings.remote_profile;
           const models = await listProviderModels({
@@ -653,7 +671,7 @@ export default function App() {
                 ? settings.remote_profile.api_key || null
                 : null,
             modelsRoot:
-              settings.active_provider === "ollama_local"
+              settings.active_provider === "llama_cpp_local"
                 ? settings.local_profile.models_root || null
                 : null
           });
@@ -761,7 +779,7 @@ export default function App() {
     let cancelled = false;
     const refreshOnProviderChange = async () => {
       const profileConfigured =
-        modelSettings.active_provider === "ollama_local"
+        modelSettings.active_provider === "llama_cpp_local"
           ? modelSettings.local_profile.chat_endpoint.trim().length > 0 &&
             modelSettings.local_profile.graph_endpoint.trim().length > 0 &&
             modelSettings.local_profile.embed_endpoint.trim().length > 0 &&
@@ -781,7 +799,7 @@ export default function App() {
       }
       try {
         const profile =
-          modelSettings.active_provider === "ollama_local"
+          modelSettings.active_provider === "llama_cpp_local"
             ? modelSettings.local_profile
             : modelSettings.remote_profile;
         const models = await listProviderModels({
@@ -794,7 +812,7 @@ export default function App() {
               ? modelSettings.remote_profile.api_key || null
               : null,
           modelsRoot:
-            modelSettings.active_provider === "ollama_local"
+            modelSettings.active_provider === "llama_cpp_local"
               ? modelSettings.local_profile.models_root || null
               : null
         });
@@ -1004,7 +1022,7 @@ export default function App() {
               ? modelSettings.remote_profile.api_key || null
               : null,
           modelsRoot:
-            modelSettings.active_provider === "ollama_local"
+            modelSettings.active_provider === "llama_cpp_local"
               ? modelSettings.local_profile.models_root || null
               : null
         }),
@@ -1017,7 +1035,7 @@ export default function App() {
       if (!availability.reachable) {
         const first = availability.errors?.[0];
         throw new Error(
-          first ? `${first.code}: ${first.message}` : uiLang === "zh-CN" ? "杩炴帴澶辫触" : "Connection failed"
+          first ? `${first.code}: ${first.message}` : uiLang === "zh-CN" ? "连接失败" : "Connection failed"
         );
       }
     } catch (err) {
@@ -1043,7 +1061,7 @@ export default function App() {
               ? modelSettings.remote_profile.api_key || null
               : null,
           modelsRoot:
-            modelSettings.active_provider === "ollama_local"
+            modelSettings.active_provider === "llama_cpp_local"
               ? modelSettings.local_profile.models_root || null
               : null
         }),
@@ -1069,6 +1087,12 @@ export default function App() {
         "Saving model settings timed out."
       );
       setModelSettings(saved);
+      try {
+        const runtime = await getLocalModelRuntimeStatus();
+        setLocalModelRuntimeStatuses(runtime);
+      } catch {
+        setLocalModelRuntimeStatuses(null);
+      }
       const availability = await withTimeout(
         validateModelSetup(),
         MODEL_ACTION_TIMEOUT_MS,
@@ -1083,15 +1107,15 @@ export default function App() {
           listProviderModels({
             provider: saved.active_provider,
             chatEndpoint:
-              saved.active_provider === "ollama_local"
+              saved.active_provider === "llama_cpp_local"
                 ? saved.local_profile.chat_endpoint
                 : saved.remote_profile.chat_endpoint,
             graphEndpoint:
-              saved.active_provider === "ollama_local"
+              saved.active_provider === "llama_cpp_local"
                 ? saved.local_profile.graph_endpoint
                 : saved.remote_profile.graph_endpoint,
             embedEndpoint:
-              saved.active_provider === "ollama_local"
+              saved.active_provider === "llama_cpp_local"
                 ? saved.local_profile.embed_endpoint
                 : saved.remote_profile.embed_endpoint,
             apiKey:
@@ -1099,7 +1123,7 @@ export default function App() {
                 ? saved.remote_profile.api_key || null
                 : null,
             modelsRoot:
-              saved.active_provider === "ollama_local" ? saved.local_profile.models_root || null : null
+              saved.active_provider === "llama_cpp_local" ? saved.local_profile.models_root || null : null
           }),
           MODEL_ACTION_TIMEOUT_MS,
           "Refreshing model list timed out."
@@ -1118,6 +1142,60 @@ export default function App() {
       setModelBusy(false);
     }
   };
+
+  const onRefreshLocalModelRuntimeStatus = async () => {
+    try {
+      const runtime = await getLocalModelRuntimeStatus();
+      setLocalModelRuntimeStatuses(runtime);
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      throw err;
+    }
+  };
+
+  const runLocalModelRuntimeAction = async (
+    role: "chat" | "graph" | "embed",
+    action: () => Promise<LocalModelRuntimeStatusesDto>
+  ) => {
+    setLocalModelRuntimeBusyRole(role);
+    try {
+      const saved = await withTimeout(
+        saveModelSettingsRemote(modelSettings),
+        MODEL_ACTION_TIMEOUT_MS,
+        "Saving model settings timed out."
+      );
+      setModelSettings(saved);
+      const runtime = await withTimeout(
+        action(),
+        MODEL_ACTION_TIMEOUT_MS,
+        "Local model runtime action timed out."
+      );
+      setLocalModelRuntimeStatuses(runtime);
+      setError(null);
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      try {
+        const runtime = await getLocalModelRuntimeStatus();
+        setLocalModelRuntimeStatuses(runtime);
+      } catch {
+        // Keep the original action error visible.
+      }
+      throw err;
+    } finally {
+      setLocalModelRuntimeBusyRole(null);
+    }
+  };
+
+  const onStartLocalModel = (role: "chat" | "graph" | "embed") =>
+    runLocalModelRuntimeAction(role, () => startLocalModel(role));
+
+  const onStopLocalModel = (role: "chat" | "graph" | "embed") =>
+    runLocalModelRuntimeAction(role, () => stopLocalModel(role));
+
+  const onRestartLocalModel = (role: "chat" | "graph" | "embed") =>
+    runLocalModelRuntimeAction(role, () => restartLocalModel(role));
 
   const onSaveEnterprisePolicy = async () => {
     setEnterpriseBusy(true);
@@ -1151,51 +1229,6 @@ export default function App() {
     }
   };
 
-  const onPullModel = async (model: string) => {
-    setModelBusy(true);
-    try {
-      const availability = await withTimeout(
-        pullModel({
-          model,
-          provider: modelSettings.active_provider,
-          endpoint: activeModelProfile.chat_endpoint,
-          apiKey:
-            modelSettings.active_provider === "openai_compatible"
-              ? modelSettings.remote_profile.api_key || null
-              : null
-        }),
-        MODEL_ACTION_TIMEOUT_MS * 3,
-        "Pull model timed out."
-      );
-      setModelAvailability(availability);
-      const refreshedModels = await withTimeout(
-        listProviderModels({
-          provider: modelSettings.active_provider,
-          chatEndpoint: activeModelProfile.chat_endpoint,
-          graphEndpoint: activeModelProfile.graph_endpoint,
-          embedEndpoint: activeModelProfile.embed_endpoint,
-          apiKey:
-            modelSettings.active_provider === "openai_compatible"
-              ? modelSettings.remote_profile.api_key || null
-              : null,
-          modelsRoot:
-            modelSettings.active_provider === "ollama_local"
-              ? modelSettings.local_profile.models_root || null
-              : null
-        }),
-        MODEL_ACTION_TIMEOUT_MS,
-        "Refreshing model list timed out."
-      );
-      setProviderModels(refreshedModels);
-    } catch (err) {
-      const message = toUiErrorMessage(err);
-      setError(message);
-      throw err;
-    } finally {
-      setModelBusy(false);
-    }
-  };
-
   const onSelectProvider = (provider: ModelProvider) => {
     setModelAvailability(null);
     setProviderModels({ from_folder: [], from_service: [], merged: [] });
@@ -1226,7 +1259,7 @@ export default function App() {
       }
     };
     setModelSettings(next);
-    if (next.active_provider === "ollama_local") {
+    if (next.active_provider === "llama_cpp_local") {
       const models = await listProviderModels({
         provider: next.active_provider,
         chatEndpoint: next.local_profile.chat_endpoint,
@@ -1318,7 +1351,7 @@ export default function App() {
     }>
   ) => {
     setModelSettings((prev) => {
-      if (prev.active_provider === "ollama_local") {
+      if (prev.active_provider === "llama_cpp_local") {
         return {
           ...prev,
           local_profile: { ...prev.local_profile, ...patch }
@@ -1667,7 +1700,12 @@ export default function App() {
                 onSaveEnterprisePolicy={onSaveEnterprisePolicy}
                 onProbeModelProvider={onProbeModelProvider}
                 onRefreshProviderModels={onRefreshProviderModels}
-                onPullModel={onPullModel}
+                localModelRuntimeStatuses={localModelRuntimeStatuses}
+                localModelRuntimeBusyRole={localModelRuntimeBusyRole}
+                onRefreshLocalModelRuntimeStatus={onRefreshLocalModelRuntimeStatus}
+                onStartLocalModel={onStartLocalModel}
+                onStopLocalModel={onStopLocalModel}
+                onRestartLocalModel={onRestartLocalModel}
                 onPickLocalModelsRoot={onPickLocalModelsRoot}
                 onClearLocalModelsRoot={onClearLocalModelsRoot}
                 indexingMode={indexingMode}
@@ -1728,7 +1766,6 @@ export default function App() {
           modelSetupReady={modelSetupReady}
           onProbeModelProvider={onProbeModelProvider}
           onRefreshProviderModels={onRefreshProviderModels}
-          onPullModel={onPullModel}
         />
       </div>
     </div>

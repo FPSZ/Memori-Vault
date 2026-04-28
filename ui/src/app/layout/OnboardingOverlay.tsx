@@ -29,7 +29,6 @@ type OnboardingOverlayProps = {
   modelSetupReady: boolean;
   onProbeModelProvider: () => Promise<void>;
   onRefreshProviderModels: () => Promise<void>;
-  onPullModel: (model: string) => Promise<void>;
 };
 
 export function OnboardingOverlay({
@@ -49,8 +48,7 @@ export function OnboardingOverlay({
   modelBusy,
   modelSetupReady,
   onProbeModelProvider,
-  onRefreshProviderModels,
-  onPullModel
+  onRefreshProviderModels
 }: OnboardingOverlayProps) {
   return (
     <AnimatePresence>
@@ -87,14 +85,14 @@ export function OnboardingOverlay({
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => onSelectProvider("ollama_local")}
+                    onClick={() => onSelectProvider("llama_cpp_local")}
                     className={`rounded-md border px-3 py-2 text-xs transition ${
-                      modelSettings.active_provider === "ollama_local"
+                      modelSettings.active_provider === "llama_cpp_local"
                         ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
                         : "border-[var(--border-strong)] text-[var(--text-secondary)]"
                     }`}
                   >
-                    {t("providerOllama")}
+                    {t("providerLocal")}
                   </button>
                   <button
                     type="button"
@@ -219,17 +217,6 @@ export function OnboardingOverlay({
                   >
                     {t("refreshModels")}
                   </button>
-                  {modelSettings.active_provider === "ollama_local" &&
-                    modelAvailability?.missing_roles?.includes("embed") && (
-                      <button
-                        type="button"
-                        onClick={() => void onPullModel(activeModelProfile.embed_model)}
-                        disabled={modelBusy}
-                        className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface-2)] px-3 py-2 text-xs text-[var(--text-primary)] transition hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-60"
-                      >
-                        {t("pullMissingModels")}
-                      </button>
-                    )}
                 </div>
                 <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2 text-xs text-[var(--text-secondary)]">
                   {modelAvailability?.reachable ? t("modelStatusReachable") : t("modelStatusUnreachable")}
@@ -275,4 +262,3 @@ export function OnboardingOverlay({
     </AnimatePresence>
   );
 }
-

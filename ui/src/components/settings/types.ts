@@ -3,7 +3,7 @@ import type { Language } from "../../i18n";
 export type FontPreset = "system" | "neo" | "mono";
 export type FontScale = "s" | "m" | "l";
 export type ThemeMode = "dark" | "light";
-export type ModelProvider = "ollama_local" | "openai_compatible";
+export type ModelProvider = "llama_cpp_local" | "openai_compatible";
 export type IndexingMode = "continuous" | "manual" | "scheduled";
 export type ResourceBudget = "low" | "balanced" | "fast";
 export type ModelRole = "chat_model" | "graph_model" | "embed_model";
@@ -15,9 +15,13 @@ export type LocalModelProfileDto = {
   graph_endpoint: string;
   embed_endpoint: string;
   models_root?: string | null;
+  llama_server_path?: string | null;
   chat_model: string;
   graph_model: string;
   embed_model: string;
+  chat_model_path?: string | null;
+  graph_model_path?: string | null;
+  embed_model_path?: string | null;
   chat_context_length?: number | null;
   graph_context_length?: number | null;
   embed_context_length?: number | null;
@@ -46,6 +50,19 @@ export type ModelSettingsDto = {
   active_provider: ModelProvider;
   local_profile: LocalModelProfileDto;
   remote_profile: RemoteModelProfileDto;
+};
+
+export type LocalModelRuntimeStatusDto = {
+  role: "chat" | "graph" | "embed" | string;
+  endpoint: string;
+  port?: number | null;
+  pid?: number | null;
+  state: "stopped" | "running" | "error" | string;
+  message?: string | null;
+};
+
+export type LocalModelRuntimeStatusesDto = {
+  roles: LocalModelRuntimeStatusDto[];
 };
 
 export type EnterprisePolicyDto = {
@@ -77,6 +94,9 @@ export type IndexingStatusDto = {
   indexed_chunks: number;
   graphed_chunks: number;
   graph_backlog: number;
+  total_docs: number;
+  total_chunks: number;
+  progress_percent: number;
   last_scan_at?: number | null;
   last_error?: string | null;
   paused: boolean;
@@ -147,7 +167,12 @@ export type SettingsModalProps = {
   onSaveEnterprisePolicy: () => Promise<void>;
   onProbeModelProvider: () => Promise<void>;
   onRefreshProviderModels: () => Promise<void>;
-  onPullModel: (model: string) => Promise<void>;
+  localModelRuntimeStatuses: LocalModelRuntimeStatusesDto | null;
+  localModelRuntimeBusyRole: string | null;
+  onRefreshLocalModelRuntimeStatus: () => Promise<void>;
+  onStartLocalModel: (role: "chat" | "graph" | "embed") => Promise<void>;
+  onStopLocalModel: (role: "chat" | "graph" | "embed") => Promise<void>;
+  onRestartLocalModel: (role: "chat" | "graph" | "embed") => Promise<void>;
   onPickLocalModelsRoot: () => Promise<void>;
   onClearLocalModelsRoot: () => void;
   indexingMode: IndexingMode;

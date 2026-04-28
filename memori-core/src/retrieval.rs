@@ -380,9 +380,14 @@ pub(crate) fn is_routing_noise_document(relative_path: &str) -> bool {
     let lower = relative_path.to_ascii_lowercase();
     matches!(
         lower.as_str(),
-        "readme.md" | "docs/plan.md" | "docs/tutorial.md"
+        "readme.md"
+            | "docs/plan.md"
+            | "docs/planning/plan.md"
+            | "docs/tutorial.md"
+            | "docs/guides/tutorial.md"
     ) || lower.starts_with("docs/ai")  // docs/AI.md, docs/ai-overview.md 等 meta-analysis
         || lower == "docs/structure.md"
+        || lower == "docs/architecture/structure.md"
         || lower == "docs/architecture.md"
         || lower == "docs/overview.md"
         || lower == "docs/design.md"

@@ -17,6 +17,8 @@ type AnyError = Box<dyn std::error::Error + Send + Sync>;
 const DEFAULT_OFFLINE_EMBEDDING_DIM: usize = 256;
 const DEFAULT_MAX_INDEX_PREP_SECS: u64 = 180;
 const DEFAULT_MAX_CASE_SECS: u64 = 30;
+const DEFAULT_SUITE_PATH: &str = "docs/qa/retrieval_regression_suite.json";
+const BASELINE_DOC_PATH: &str = "docs/qa/RETRIEVAL_BASELINE.md";
 
 #[derive(Debug, Clone)]
 struct CliArgs {
@@ -255,7 +257,7 @@ async fn main() -> Result<(), AnyError> {
 
     if args.write_baseline_doc {
         fs::write(
-            args.watch_root.join("docs").join("RETRIEVAL_BASELINE.md"),
+            args.watch_root.join(BASELINE_DOC_PATH),
             render_baseline_markdown(&report),
         )?;
     }
@@ -266,7 +268,7 @@ async fn main() -> Result<(), AnyError> {
 
 fn parse_args() -> Result<CliArgs, AnyError> {
     let cwd = std::env::current_dir()?;
-    let mut suite_path = cwd.join("docs").join("retrieval_regression_suite.json");
+    let mut suite_path = cwd.join(DEFAULT_SUITE_PATH);
     let mut watch_root = cwd.clone();
     let mut db_path = None;
     let mut case_filter = None;
@@ -350,6 +352,7 @@ fn load_suite(
     profile: RegressionProfile,
 ) -> Result<RegressionSuite, AnyError> {
     let raw = fs::read_to_string(path)?;
+    let raw = raw.trim_start_matches('\u{feff}');
     let mut suite: RegressionSuite = serde_json::from_str(&raw)?;
     suite.cases.retain(|case| {
         let matches_case_filter = case_filter
@@ -1040,7 +1043,7 @@ fn render_baseline_markdown(report: &RegressionReport) -> String {
     let offline = render_baseline_section(report, EvaluationMode::OfflineDeterministic);
     let live = render_baseline_section(report, EvaluationMode::LiveEmbedding);
     format!(
-        "# Retrieval Baseline Snapshot\n\nUpdated: {} UTC\n\nThis document captures the current measured retrieval baseline for the rebuilt two-stage retrieval pipeline.\n\n## Offline Deterministic Baseline\n{}\n\n## Live Embedding Baseline\n{}\n\n## Report Source\n- suite: `{}`\n- generated report: `target/retrieval-regression/.../report.json`\n- runner: `cargo run -p memori-core --example retrieval_regression -- --suite docs/retrieval_regression_suite.json --watch-root .`\n",
+        "# Retrieval Baseline Snapshot\n\nUpdated: {} UTC\n\nThis document captures the current measured retrieval baseline for the rebuilt two-stage retrieval pipeline.\n\n## Offline Deterministic Baseline\n{}\n\n## Live Embedding Baseline\n{}\n\n## Report Source\n- suite: `{}`\n- generated report: `target/retrieval-regression/.../report.json`\n- runner: `cargo run -p memori-core --example retrieval_regression -- --suite {DEFAULT_SUITE_PATH} --watch-root .`\n",
         report.generated_at_utc, offline, live, report.suite_path
     )
 }
@@ -1181,7 +1184,7 @@ mod tests {
             query: "hello".to_string(),
             mode: RegressionMode::Answer,
             scope_paths: Vec::new(),
-            target_documents: vec!["docs/plan.md".to_string()],
+            target_documents: vec!["docs/planning/plan.md".to_string()],
             target_clues: vec!["plan".to_string()],
             profile_tags: vec!["core_docs".to_string()],
             notes: None,

@@ -186,9 +186,9 @@ http://127.0.0.1:3757/mcp
 Memori-Vault can use different local models for different jobs:
 
 ```bash
-MEMORI_CHAT_ENDPOINT=http://localhost:8001   # main answer model, e.g. Qwen3 14B
-MEMORI_GRAPH_ENDPOINT=http://localhost:8002  # graph/summary/settings helper, e.g. Qwen3 8B
-MEMORI_EMBED_ENDPOINT=http://localhost:8003  # embedding model, e.g. Qwen3-Embedding-4B
+MEMORI_CHAT_ENDPOINT=http://localhost:18001   # main answer model, e.g. Qwen3 14B
+MEMORI_GRAPH_ENDPOINT=http://localhost:18002  # graph/summary/settings helper, e.g. Qwen3 8B
+MEMORI_EMBED_ENDPOINT=http://localhost:18003  # embedding model, e.g. Qwen3-Embedding-4B
 ```
 
 Do not treat long context as the default memory strategy:

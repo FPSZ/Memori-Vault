@@ -13,8 +13,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine;
 use memori_core::{
-    AskResponseStructured, AskStatus, DEFAULT_CHAT_MODEL, DEFAULT_GRAPH_MODEL,
-    DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER, DEFAULT_OLLAMA_EMBED_MODEL, EgressMode,
+    AskResponseStructured, AskStatus, DEFAULT_CHAT_ENDPOINT, DEFAULT_CHAT_MODEL,
+    DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_GRAPH_MODEL, DEFAULT_MODEL_PROVIDER, EgressMode,
     EngineError, EnterpriseModelPolicy, IndexingConfig, IndexingMode, IndexingStatus,
     MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_MODEL_ENV,
     MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine,

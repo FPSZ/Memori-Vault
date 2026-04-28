@@ -167,7 +167,7 @@ pub(crate) async fn list_provider_models_handler(
         .await;
         return Err(ApiError::forbidden(violation.message));
     }
-    if provider == ModelProvider::OllamaLocal {
+    if provider == ModelProvider::LlamaCppLocal {
         let from_folder = models_root
             .as_deref()
             .map(PathBuf::from)
@@ -175,7 +175,9 @@ pub(crate) async fn list_provider_models_handler(
             .transpose()
             .map_err(ApiError::bad_request)?
             .unwrap_or_default();
-        let from_service = list_ollama_models(&endpoint).await.unwrap_or_default();
+        let from_service = list_openai_compatible_models(&endpoint, None)
+            .await
+            .unwrap_or_default();
         return Ok(Json(merge_model_candidates(from_folder, from_service)));
     }
     let models = fetch_provider_models(
@@ -248,12 +250,9 @@ pub(crate) async fn pull_model_handler(
 ) -> Result<Json<ModelAvailabilityDto>, ApiError> {
     let model = payload.model.trim().to_string();
     if model.is_empty() {
-        return Err(ApiError::bad_request("模型名不能为空"));
+        return Err(ApiError::bad_request("model name cannot be empty"));
     }
     let provider = ModelProvider::from_value(&payload.provider);
-    if provider != ModelProvider::OllamaLocal {
-        return Err(ApiError::bad_request("仅本地 Ollama 模式支持拉取模型"));
-    }
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
     let policy = resolve_enterprise_policy(&load_app_settings().map_err(ApiError::internal)?);
     if let Err(violation) =
@@ -272,9 +271,9 @@ pub(crate) async fn pull_model_handler(
         return Err(ApiError::forbidden(violation.message));
     }
     let api_key = normalize_optional_text(payload.api_key);
-    pull_ollama_model(&endpoint, &model, api_key.as_deref())
+    pull_llama_cpp_model(&endpoint, &model, api_key.as_deref())
         .await
-        .map_err(ApiError::internal)?;
+        .map_err(ApiError::bad_request)?;
     validate_model_setup_handler(State(state)).await
 }
 
@@ -287,13 +286,13 @@ pub(crate) async fn set_local_models_root_handler(
         let root = PathBuf::from(root_path);
         if !root.exists() {
             return Err(ApiError::bad_request(format!(
-                "模型目录不存在: {}",
+                "models root does not exist: {}",
                 root.display()
             )));
         }
         if !root.is_dir() {
             return Err(ApiError::bad_request(format!(
-                "路径不是目录: {}",
+                "path is not a directory: {}",
                 root.display()
             )));
         }

@@ -175,16 +175,14 @@ impl AppSettingsDto {
                 .auto_memory_write
                 .unwrap_or_else(|| "suggest".to_string()),
             memory_write_requires_source: settings.memory_write_requires_source.unwrap_or(true),
-            memory_markdown_export_enabled: settings
-                .memory_markdown_export_enabled
-                .unwrap_or(false),
+            memory_markdown_export_enabled: false,
             default_context_budget: settings
                 .default_context_budget
                 .unwrap_or_else(|| "16k".to_string()),
             complex_context_budget: settings
                 .complex_context_budget
                 .unwrap_or_else(|| "32k".to_string()),
-            graph_ranking_enabled: settings.graph_ranking_enabled.unwrap_or(false),
+            graph_ranking_enabled: false,
         }
     }
 }

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use memori_storage::{GraphEdge, GraphNode};
 use serde::{Deserialize, Serialize};
 
-use crate::{EngineError, resolve_runtime_model_config_from_env};
+use crate::{EngineError, ModelProvider, resolve_runtime_model_config_from_env};
 
 const GRAPH_TEMPERATURE: f32 = 0.0;
 
@@ -16,13 +16,13 @@ pub struct GraphData {
 }
 
 #[derive(Debug, Serialize)]
-struct OllamaMessage<'a> {
+struct ChatMessage<'a> {
     role: &'a str,
     content: &'a str,
 }
 
 #[derive(Debug, Deserialize)]
-struct OllamaMessageResponse {
+struct ChatMessageResponse {
     content: String,
 }
 
@@ -30,7 +30,20 @@ struct OllamaMessageResponse {
 struct OpenAiChatCompletionRequest<'a> {
     model: &'a str,
     temperature: f32,
-    messages: Vec<OllamaMessage<'a>>,
+    messages: Vec<ChatMessage<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    think: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable_thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chat_template_kwargs: Option<QwenChatTemplateKwargs>,
+}
+
+#[derive(Debug, Serialize)]
+struct QwenChatTemplateKwargs {
+    enable_thinking: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,13 +53,13 @@ struct OpenAiChatCompletionResponse {
 
 #[derive(Debug, Deserialize)]
 struct OpenAiChatChoice {
-    message: OllamaMessageResponse,
+    message: ChatMessageResponse,
 }
 
 /// 从文本块中抽取实体与关系。
 ///
 /// 关键点：
-/// - 强制 Ollama 返回 JSON（format=json）
+/// - 要求本地 OpenAI-compatible 服务返回 JSON
 /// - temperature 固定为 0.0，减少幻觉与结构漂移
 /// - 解析失败时返回 EngineError，不允许 panic
 pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError> {
@@ -82,12 +95,19 @@ pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError
 
     let user_prompt = format!("请抽取以下文本中的实体与关系：\n{}", text_chunk);
 
+    let user_prompt = if is_qwen_thinking_model(&model) {
+        // Entity extraction needs strict JSON and low latency, not chain-of-thought.
+        format!("/no_think\n\n{user_prompt}")
+    } else {
+        user_prompt
+    };
+
     let messages = vec![
-        OllamaMessage {
+        ChatMessage {
             role: "system",
             content: system_prompt,
         },
-        OllamaMessage {
+        ChatMessage {
             role: "user",
             content: &user_prompt,
         },
@@ -97,11 +117,17 @@ pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError
         "{}/v1/chat/completions",
         runtime.graph_endpoint.trim_end_matches('/')
     );
-    let mut request = client.post(endpoint).json(&OpenAiChatCompletionRequest {
+    let mut request_body = OpenAiChatCompletionRequest {
         model: &model,
         temperature: GRAPH_TEMPERATURE,
         messages,
-    });
+        think: None,
+        thinking: None,
+        enable_thinking: None,
+        chat_template_kwargs: None,
+    };
+    disable_qwen_thinking_if_needed(&model, &endpoint, runtime.provider, &mut request_body);
+    let mut request = client.post(endpoint).json(&request_body);
     if let Some(key) = runtime.api_key.as_ref() {
         request = request.bearer_auth(key);
     }
@@ -134,6 +160,39 @@ pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError
         .unwrap_or_default();
 
     parse_graph_data(&raw_content)
+}
+
+fn is_qwen_thinking_model(model: &str) -> bool {
+    let normalized = model.to_ascii_lowercase();
+    normalized.contains("qwen3") || normalized.contains("qwq")
+}
+
+fn disable_qwen_thinking_if_needed(
+    model: &str,
+    endpoint: &str,
+    provider: ModelProvider,
+    request: &mut OpenAiChatCompletionRequest<'_>,
+) {
+    if !is_qwen_thinking_model(model) || !should_send_thinking_flags(endpoint, provider) {
+        return;
+    }
+
+    // Different local OpenAI-compatible servers expose different knobs.
+    // llama.cpp ignores unknown JSON fields, while Qwen-compatible templates
+    // can use `chat_template_kwargs.enable_thinking`.
+    request.think = Some(false);
+    request.thinking = Some(false);
+    request.enable_thinking = Some(false);
+    request.chat_template_kwargs = Some(QwenChatTemplateKwargs {
+        enable_thinking: false,
+    });
+}
+
+fn should_send_thinking_flags(endpoint: &str, provider: ModelProvider) -> bool {
+    provider == ModelProvider::LlamaCppLocal
+        || endpoint.contains("127.0.0.1")
+        || endpoint.contains("localhost")
+        || endpoint.contains("0.0.0.0")
 }
 
 fn parse_graph_data(raw: &str) -> Result<GraphData, EngineError> {

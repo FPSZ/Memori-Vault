@@ -15,6 +15,7 @@ import type {
   ModelAvailabilityDto,
   ModelProvider,
   ModelSettingsDto,
+  LocalModelRuntimeStatusesDto,
   ProviderModelsDto
 } from "../../components/settings/types";
 
@@ -101,17 +102,24 @@ export function validateModelSetup() {
   return invoke<ModelAvailabilityDto>("validate_model_setup");
 }
 
-export function probeModelProvider(payload: ProviderModelsPayload) {
-  return invoke<ModelAvailabilityDto>("probe_model_provider", payload);
+export function getLocalModelRuntimeStatus() {
+  return invoke<LocalModelRuntimeStatusesDto>("get_local_model_runtime_status");
 }
 
-export function pullModel(payload: {
-  model: string;
-  provider: ModelProvider;
-  endpoint: string;
-  apiKey: string | null;
-}) {
-  return invoke<ModelAvailabilityDto>("pull_model", payload);
+export function startLocalModel(role: "chat" | "graph" | "embed") {
+  return invoke<LocalModelRuntimeStatusesDto>("start_local_model", { role });
+}
+
+export function stopLocalModel(role: "chat" | "graph" | "embed") {
+  return invoke<LocalModelRuntimeStatusesDto>("stop_local_model", { role });
+}
+
+export function restartLocalModel(role: "chat" | "graph" | "embed") {
+  return invoke<LocalModelRuntimeStatusesDto>("restart_local_model", { role });
+}
+
+export function probeModelProvider(payload: ProviderModelsPayload) {
+  return invoke<ModelAvailabilityDto>("probe_model_provider", payload);
 }
 
 export function listSearchScopes() {

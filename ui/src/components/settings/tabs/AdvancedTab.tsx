@@ -123,6 +123,36 @@ export function AdvancedTab({
 
         <AnimatedPanel className="glass-panel-infer rounded-lg px-3 py-3">
           <div className="mb-2 text-sm text-[var(--text-primary)]">{t("indexingStatusTitle")}</div>
+          {/* Progress bar */}
+          {indexingStatus && indexingStatus.phase !== "idle" ? (
+            <div className="mb-3">
+              <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)] mb-1">
+                <span>{indexingPhaseLabel}</span>
+                <span className="font-mono">{indexingStatus.progress_percent}%</span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-[var(--bg-surface-2)] overflow-hidden">
+                <motion.div
+                  className={`h-full rounded-full ${
+                    indexingStatus.phase === "scanning"
+                      ? "bg-sky-400"
+                      : indexingStatus.phase === "embedding"
+                        ? "bg-emerald-400"
+                        : indexingStatus.phase === "graphing"
+                          ? "bg-violet-400"
+                          : "bg-[var(--accent)]"
+                  }`}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${indexingStatus.progress_percent}%` }}
+                  transition={{ duration: 0.5, ease: "easeOut" }}
+                />
+              </div>
+              <div className="mt-1 flex gap-3 text-[10px] text-[var(--text-muted)]">
+                <span>文档 {indexingStatus.indexed_docs}/{indexingStatus.total_docs}</span>
+                <span>分块 {indexingStatus.indexed_chunks}/{indexingStatus.total_chunks}</span>
+                <span>图谱 {indexingStatus.graphed_chunks}</span>
+              </div>
+            </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)]">
             <div>{t("indexingPhase")}</div>
             <div className="text-[var(--text-primary)]">{indexingPhaseLabel}</div>

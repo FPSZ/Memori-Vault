@@ -838,7 +838,7 @@ mod tests {
 
         let store = SqliteStore::new(&db_path).expect("create sqlite store");
         let watch_root = std::path::PathBuf::from(".");
-        let tutorial_file = std::path::PathBuf::from("docs/TUTORIAL.md");
+        let tutorial_file = std::path::PathBuf::from("docs/guides/TUTORIAL.md");
         let readme_file = std::path::PathBuf::from("README.md");
 
         store
@@ -887,7 +887,7 @@ mod tests {
                 item.file_path
                     .replace('\\', "/")
                     .to_ascii_lowercase()
-                    .ends_with("docs/tutorial.md")
+                    .ends_with("docs/guides/tutorial.md")
                     && item
                         .matched_fields
                         .iter()

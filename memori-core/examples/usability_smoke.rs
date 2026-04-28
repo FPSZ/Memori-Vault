@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use memori_core::{
     AskResponseStructured, AskStatus, MEMORI_DB_PATH_ENV, MemoriEngine, RuntimeRetrievalBaseline,
 };
+use memori_vault::is_supported_content_file;
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
 
@@ -578,10 +579,7 @@ fn count_supported_documents(root: &Path) -> Result<usize, AnyError> {
 }
 
 fn is_supported_index_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "md" | "txt"))
-        .unwrap_or(false)
+    is_supported_content_file(path)
 }
 
 fn question_mode_as_str(mode: QuestionMode) -> &'static str {

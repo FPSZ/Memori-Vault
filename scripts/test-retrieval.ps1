@@ -26,7 +26,7 @@ if (-not (Test-Path (Join-Path $repoRoot "Cargo.toml"))) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Suite)) {
-    $Suite = Join-Path $repoRoot "docs\retrieval_regression_suite.json"
+    $Suite = Join-Path $repoRoot "docs\qa\retrieval_regression_suite.json"
 }
 if ([string]::IsNullOrWhiteSpace($WatchRoot)) {
     $WatchRoot = $repoRoot

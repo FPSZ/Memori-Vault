@@ -112,7 +112,7 @@ jobs:
           print(json.loads(pathlib.Path('memori-desktop/tauri.conf.json').read_text(encoding='utf-8'))['version'])
           PY
           )
-          RELEASE_NOTES_PATH="docs/RELEASE_NOTES_v${WORKSPACE_VERSION}.md"
+          RELEASE_NOTES_PATH="docs/release/RELEASE_NOTES_v${WORKSPACE_VERSION}.md"
 
           if [ "$WORKSPACE_VERSION" != "$UI_VERSION" ] || [ "$WORKSPACE_VERSION" != "$TAURI_VERSION" ]; then
             echo "Version mismatch detected among Cargo workspace, ui/package.json, and memori-desktop/tauri.conf.json"
@@ -186,7 +186,7 @@ jobs:
           )
           EXPECTED_VERSION="${{ steps.release_meta.outputs.version }}"
           EXPECTED_TAG="v${EXPECTED_VERSION}"
-          RELEASE_NOTES_PATH="docs/RELEASE_NOTES_v${EXPECTED_VERSION}.md"
+          RELEASE_NOTES_PATH="docs/release/RELEASE_NOTES_v${EXPECTED_VERSION}.md"
 
           echo "workspace version: $WORKSPACE_VERSION"
           echo "ui version: $UI_VERSION"
@@ -224,7 +224,7 @@ jobs:
           name: Memori-Vault ${{ steps.release_meta.outputs.version }}
           draft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.publish != 'true' }}
           target_commitish: ${{ github.sha }}
-          body_path: docs/RELEASE_NOTES_v${{ steps.release_meta.outputs.version }}.md
+          body_path: docs/release/RELEASE_NOTES_v${{ steps.release_meta.outputs.version }}.md
           files: |
             release-artifacts/**/*.msi
             release-artifacts/**/*-setup.exe

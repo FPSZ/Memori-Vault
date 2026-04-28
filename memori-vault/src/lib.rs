@@ -23,6 +23,7 @@ pub const DEFAULT_DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
 
 /// 事件通道容量：8192（按架构要求固定）
 pub const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 8192;
+pub const SUPPORTED_CONTENT_EXTENSIONS: &[&str] = &["md", "txt", "docx", "pdf"];
 
 /// 对外暴露的标准化文件事件类型。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -324,13 +325,13 @@ fn normalize_notify_event(event: Event) -> Vec<WatchEvent> {
 }
 
 /// 是否保留该事件进入业务通道。
-/// 规则：当前路径或旧路径只要任一为 .md/.txt 即保留（兼容 rename 场景）。
+/// 规则：当前路径或旧路径只要任一为受支持内容文件即保留（兼容 rename 场景）。
 fn should_keep_event(event: &WatchEvent) -> bool {
-    if is_supported_text_file(&event.path) {
+    if is_supported_content_file(&event.path) {
         return true;
     }
     if let Some(old) = &event.old_path
-        && is_supported_text_file(old)
+        && is_supported_content_file(old)
     {
         return true;
     }
@@ -352,13 +353,14 @@ fn should_keep_event(event: &WatchEvent) -> bool {
     false
 }
 
-/// 扩展名过滤：仅允许 md/txt（大小写不敏感）。
-fn is_supported_text_file(path: &Path) -> bool {
+/// 扩展名过滤：与 core 索引层保持一致（大小写不敏感）。
+pub fn is_supported_content_file(path: &Path) -> bool {
     let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
         return false;
     };
 
-    ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("txt")
+    let ext = ext.to_ascii_lowercase();
+    SUPPORTED_CONTENT_EXTENSIONS.contains(&ext.as_str())
 }
 
 fn path_has_no_extension(path: &Path) -> bool {
@@ -376,7 +378,7 @@ pub fn memori_vault_defaults_debug() {
 
 #[cfg(test)]
 mod tests {
-    use super::{WatchEvent, WatchEventKind, should_keep_event};
+    use super::{WatchEvent, WatchEventKind, is_supported_content_file, should_keep_event};
     use std::path::PathBuf;
     use std::time::SystemTime;
 
@@ -402,5 +404,20 @@ mod tests {
         };
 
         assert!(should_keep_event(&event));
+    }
+
+    #[test]
+    fn keeps_all_core_supported_document_extensions() {
+        for ext in ["md", "txt", "docx", "pdf"] {
+            let event = WatchEvent {
+                kind: WatchEventKind::Modified,
+                path: PathBuf::from(format!("notes/sample.{ext}")),
+                old_path: None,
+                observed_at: SystemTime::now(),
+            };
+
+            assert!(is_supported_content_file(&event.path));
+            assert!(should_keep_event(&event));
+        }
     }
 }

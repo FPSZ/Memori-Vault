@@ -20,12 +20,12 @@ pub(crate) async fn replace_engine(
         {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
-                warn!(error = %err, "关闭旧引擎失败，继续尝试重建");
+                warn!(error = %err, "old engine shutdown failed; rebuilding anyway");
             }
             Err(_) => {
                 warn!(
                     timeout_secs = ENGINE_SHUTDOWN_TIMEOUT_SECS,
-                    "关闭旧引擎超时，继续尝试重建"
+                    "old engine shutdown timed out; rebuilding anyway"
                 );
             }
         }
@@ -76,7 +76,6 @@ pub(crate) async fn replace_engine(
 
     result
 }
-
 pub(crate) struct ActiveRuntimeModelSettings {
     pub(crate) provider: ModelProvider,
     pub(crate) chat_endpoint: String,
@@ -126,7 +125,7 @@ pub(crate) fn provider_to_string(provider: ModelProvider) -> String {
     if provider == ModelProvider::OpenAiCompatible {
         "openai_compatible".to_string()
     } else {
-        "ollama_local".to_string()
+        "llama_cpp_local".to_string()
     }
 }
 
@@ -152,7 +151,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                     .provider
                     .as_deref()
                     .unwrap_or(fallback_provider.as_str()),
-            ) == ModelProvider::OllamaLocal
+            ) == ModelProvider::LlamaCppLocal
             {
                 settings.endpoint.clone()
             } else {
@@ -160,13 +159,13 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             }
         })
         .or_else(|| {
-            if env_provider == ModelProvider::OllamaLocal {
+            if env_provider == ModelProvider::LlamaCppLocal {
                 std::env::var(MEMORI_MODEL_ENDPOINT_ENV).ok()
             } else {
                 None
             }
         })
-        .unwrap_or_else(|| DEFAULT_MODEL_ENDPOINT_OLLAMA.to_string());
+        .unwrap_or_else(|| DEFAULT_CHAT_ENDPOINT.to_string());
 
     let remote_endpoint = settings
         .remote_endpoint
@@ -202,7 +201,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                     .provider
                     .as_deref()
                     .unwrap_or(fallback_provider.as_str()),
-            ) == ModelProvider::OllamaLocal
+            ) == ModelProvider::LlamaCppLocal
             {
                 settings.chat_model.clone()
             } else {
@@ -210,7 +209,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             }
         })
         .or_else(|| {
-            if env_provider == ModelProvider::OllamaLocal {
+            if env_provider == ModelProvider::LlamaCppLocal {
                 std::env::var(MEMORI_CHAT_MODEL_ENV).ok()
             } else {
                 None
@@ -227,7 +226,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                     .provider
                     .as_deref()
                     .unwrap_or(fallback_provider.as_str()),
-            ) == ModelProvider::OllamaLocal
+            ) == ModelProvider::LlamaCppLocal
             {
                 settings.graph_model.clone()
             } else {
@@ -235,7 +234,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             }
         })
         .or_else(|| {
-            if env_provider == ModelProvider::OllamaLocal {
+            if env_provider == ModelProvider::LlamaCppLocal {
                 std::env::var(MEMORI_GRAPH_MODEL_ENV).ok()
             } else {
                 None
@@ -252,7 +251,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                     .provider
                     .as_deref()
                     .unwrap_or(fallback_provider.as_str()),
-            ) == ModelProvider::OllamaLocal
+            ) == ModelProvider::LlamaCppLocal
             {
                 settings.embed_model.clone()
             } else {
@@ -260,13 +259,13 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             }
         })
         .or_else(|| {
-            if env_provider == ModelProvider::OllamaLocal {
+            if env_provider == ModelProvider::LlamaCppLocal {
                 std::env::var(MEMORI_EMBED_MODEL_ENV).ok()
             } else {
                 None
             }
         })
-        .unwrap_or_else(|| DEFAULT_OLLAMA_EMBED_MODEL.to_string());
+        .unwrap_or_else(|| DEFAULT_EMBED_MODEL_QWEN3.to_string());
 
     let remote_chat_model = settings
         .remote_chat_model
@@ -341,7 +340,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                 None
             }
         })
-        .unwrap_or_else(|| DEFAULT_OLLAMA_EMBED_MODEL.to_string());
+        .unwrap_or_else(|| DEFAULT_EMBED_MODEL_QWEN3.to_string());
 
     let remote_api_key = settings
         .remote_api_key
@@ -371,7 +370,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
     ModelSettingsDto {
         active_provider: provider_to_string(active_provider),
         local_profile: LocalModelProfileDto {
-            endpoint: normalize_endpoint(ModelProvider::OllamaLocal, &local_endpoint),
+            endpoint: normalize_endpoint(ModelProvider::LlamaCppLocal, &local_endpoint),
             models_root: normalize_optional_text(settings.local_models_root.clone()),
             chat_model: local_chat_model,
             graph_model: local_graph_model,
@@ -403,8 +402,10 @@ pub(crate) fn normalize_model_settings_payload(
     payload: ModelSettingsDto,
 ) -> Result<ModelSettingsDto, String> {
     let active_provider = ModelProvider::from_value(&payload.active_provider);
-    let local_endpoint =
-        normalize_endpoint(ModelProvider::OllamaLocal, &payload.local_profile.endpoint);
+    let local_endpoint = normalize_endpoint(
+        ModelProvider::LlamaCppLocal,
+        &payload.local_profile.endpoint,
+    );
     let remote_endpoint = normalize_endpoint(
         ModelProvider::OpenAiCompatible,
         &payload.remote_profile.endpoint,
@@ -424,7 +425,7 @@ pub(crate) fn normalize_model_settings_payload(
         || remote_graph_model.is_empty()
         || remote_embed_model.is_empty()
     {
-        return Err("chat/graph/embed 模型名均不能为空".to_string());
+        return Err("chat/graph/embed model names cannot be empty".to_string());
     }
 
     let local_models_root =
@@ -483,7 +484,7 @@ pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> Str
     if provider == ModelProvider::OpenAiCompatible {
         memori_core::DEFAULT_MODEL_ENDPOINT_OPENAI.to_string()
     } else {
-        DEFAULT_MODEL_ENDPOINT_OLLAMA.to_string()
+        DEFAULT_CHAT_ENDPOINT.to_string()
     }
 }
 
@@ -497,7 +498,10 @@ pub(crate) fn resolve_active_runtime_settings(
             &settings.remote_profile.endpoint,
         )
     } else {
-        normalize_endpoint(ModelProvider::OllamaLocal, &settings.local_profile.endpoint)
+        normalize_endpoint(
+            ModelProvider::LlamaCppLocal,
+            &settings.local_profile.endpoint,
+        )
     };
 
     ActiveRuntimeModelSettings {
@@ -510,7 +514,7 @@ pub(crate) fn resolve_active_runtime_settings(
         } else {
             None
         },
-        models_root: if active_provider == ModelProvider::OllamaLocal {
+        models_root: if active_provider == ModelProvider::LlamaCppLocal {
             normalize_optional_text(settings.local_profile.models_root.clone())
         } else {
             None
@@ -565,14 +569,12 @@ pub(crate) fn resolve_active_runtime_settings(
 
 pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) {
     // SAFETY: process-global config source for memori-core runtime.
-    // 注意：前端设置只有一个 endpoint 输入框，不应覆盖三个独立端点。
-    // 独立端点（CHAT/GRAPH/EMBED）由 resolve_runtime_model_config_from_env() 的默认值管理。
     unsafe {
         std::env::set_var(
             MEMORI_MODEL_PROVIDER_ENV,
             provider_to_string(settings.provider),
         );
-        // legacy endpoint: 用于向后兼容，优先使用 chat 端点
+        // Legacy endpoint compatibility: expose the chat endpoint as the single endpoint.
         std::env::set_var(MEMORI_MODEL_ENDPOINT_ENV, &settings.chat_endpoint);
         std::env::set_var(MEMORI_CHAT_MODEL_ENV, &settings.chat_model);
         std::env::set_var(MEMORI_GRAPH_MODEL_ENV, &settings.graph_model);
@@ -614,7 +616,6 @@ pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) 
         }
     }
 }
-
 pub(crate) async fn fetch_provider_models(
     provider: ModelProvider,
     endpoint: &str,
@@ -622,7 +623,7 @@ pub(crate) async fn fetch_provider_models(
     models_root: Option<&str>,
 ) -> Result<ProviderModelsDto, ProviderModelFetchError> {
     match provider {
-        ModelProvider::OllamaLocal => {
+        ModelProvider::LlamaCppLocal => {
             let from_folder = models_root
                 .map(PathBuf::from)
                 .map(|root| scan_local_model_files_from_root(&root))
@@ -632,7 +633,7 @@ pub(crate) async fn fetch_provider_models(
                     message: err,
                 })?
                 .unwrap_or_default();
-            let from_service = list_ollama_models(endpoint).await?;
+            let from_service = list_openai_compatible_models(endpoint, None).await?;
             Ok(merge_model_candidates(from_folder, from_service))
         }
         ModelProvider::OpenAiCompatible => {
@@ -660,49 +661,6 @@ pub(crate) fn merge_model_candidates(
     }
 }
 
-pub(crate) async fn list_ollama_models(
-    endpoint: &str,
-) -> Result<Vec<String>, ProviderModelFetchError> {
-    #[derive(Debug, Deserialize)]
-    struct OllamaTagResp {
-        models: Vec<OllamaTagItem>,
-    }
-    #[derive(Debug, Deserialize)]
-    struct OllamaTagItem {
-        name: String,
-    }
-    let url = format!("{}/api/tags", endpoint.trim_end_matches('/'));
-    let response = timeout(
-        Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS),
-        reqwest::Client::new().get(url).send(),
-    )
-    .await
-    .map_err(|_| ProviderModelFetchError {
-        code: "request_timeout".to_string(),
-        message: format!("连接 Ollama 超时({}s)", PROVIDER_HTTP_TIMEOUT_SECS),
-    })?
-    .map_err(|err| ProviderModelFetchError {
-        code: "endpoint_unreachable".to_string(),
-        message: format!("连接 Ollama 失败: {err}"),
-    })?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(ProviderModelFetchError {
-            code: "endpoint_unreachable".to_string(),
-            message: format!("Ollama 模型列表请求失败: status={}, body={body}", status),
-        });
-    }
-    let parsed: OllamaTagResp = response
-        .json()
-        .await
-        .map_err(|err| ProviderModelFetchError {
-            code: "endpoint_unreachable".to_string(),
-            message: format!("解析 Ollama 模型列表失败: {err}"),
-        })?;
-    Ok(parsed.models.into_iter().map(|m| m.name).collect())
-}
-
 pub(crate) async fn list_openai_compatible_models(
     endpoint: &str,
     api_key: Option<&str>,
@@ -727,11 +685,14 @@ pub(crate) async fn list_openai_compatible_models(
     .await
     .map_err(|_| ProviderModelFetchError {
         code: "request_timeout".to_string(),
-        message: format!("连接远程模型服务超时({}s)", PROVIDER_HTTP_TIMEOUT_SECS),
+        message: format!(
+            "model service request timed out ({}s)",
+            PROVIDER_HTTP_TIMEOUT_SECS
+        ),
     })?
     .map_err(|err| ProviderModelFetchError {
         code: "endpoint_unreachable".to_string(),
-        message: format!("连接远程模型服务失败: {err}"),
+        message: format!("model service endpoint unreachable: {err}"),
     })?;
     let status = response.status();
     if !status.is_success() {
@@ -752,17 +713,17 @@ pub(crate) async fn list_openai_compatible_models(
             .await
             .map_err(|err| ProviderModelFetchError {
                 code: "endpoint_unreachable".to_string(),
-                message: format!("解析远程模型列表失败: {err}"),
+                message: format!("failed to parse model list response: {err}"),
             })?;
     Ok(parsed.data.into_iter().map(|m| m.id).collect())
 }
 
 pub(crate) fn scan_local_model_files_from_root(root: &Path) -> Result<Vec<String>, String> {
     if !root.exists() {
-        return Err(format!("模型目录不存在: {}", root.display()));
+        return Err(format!("models root does not exist: {}", root.display()));
     }
     if !root.is_dir() {
-        return Err(format!("路径不是目录: {}", root.display()));
+        return Err(format!("path is not a directory: {}", root.display()));
     }
     let mut set = BTreeSet::new();
     collect_local_model_files_recursive(root, &mut set, 0, 8)?;
@@ -778,14 +739,22 @@ pub(crate) fn collect_local_model_files_recursive(
     if depth > max_depth {
         return Ok(());
     }
-    let entries =
-        fs::read_dir(dir).map_err(|err| format!("读取模型目录失败({}): {err}", dir.display()))?;
+    let entries = fs::read_dir(dir)
+        .map_err(|err| format!("failed to read model directory ({}): {err}", dir.display()))?;
     for entry in entries {
-        let entry = entry.map_err(|err| format!("读取模型目录项失败({}): {err}", dir.display()))?;
+        let entry = entry.map_err(|err| {
+            format!(
+                "failed to read model directory entry ({}): {err}",
+                dir.display()
+            )
+        })?;
         let path = entry.path();
-        let metadata = entry
-            .metadata()
-            .map_err(|err| format!("读取模型目录元数据失败({}): {err}", path.display()))?;
+        let metadata = entry.metadata().map_err(|err| {
+            format!(
+                "failed to read model file metadata ({}): {err}",
+                path.display()
+            )
+        })?;
         if metadata.is_dir() {
             collect_local_model_files_recursive(&path, set, depth + 1, max_depth)?;
             continue;
@@ -809,36 +778,12 @@ pub(crate) fn collect_local_model_files_recursive(
     Ok(())
 }
 
-pub(crate) async fn pull_ollama_model(
-    endpoint: &str,
-    model: &str,
+pub(crate) async fn pull_llama_cpp_model(
+    _endpoint: &str,
+    _model: &str,
     _api_key: Option<&str>,
 ) -> Result<(), String> {
-    #[derive(Debug, Serialize)]
-    struct PullBody<'a> {
-        name: &'a str,
-        stream: bool,
-    }
-    let url = format!("{}/api/pull", endpoint.trim_end_matches('/'));
-    let response = timeout(
-        Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS),
-        reqwest::Client::new()
-            .post(url)
-            .json(&PullBody {
-                name: model,
-                stream: false,
-            })
-            .send(),
-    )
-    .await
-    .map_err(|_| format!("拉取模型超时({}s)", PROVIDER_HTTP_TIMEOUT_SECS))?
-    .map_err(|err| format!("拉取模型失败: {err}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("拉取模型失败: status={}, body={body}", status));
-    }
-    Ok(())
+    Err("llama.cpp local runtime does not support pulling models. Place GGUF files in the configured models root and start llama-server manually.".to_string())
 }
 
 pub(crate) fn model_exists(models: &[String], expected: &str) -> bool {

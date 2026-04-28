@@ -1,14 +1,16 @@
 param(
     [string]$WatchRoot = "",
     [string]$DbPath = "",
-    [string]$OllamaModelsRoot = "",
+    [string]$ModelsRoot = "",
     [string]$UiHost = "127.0.0.1",
     [int]$UiPort = 1420,
     [string]$ServerAddr = "127.0.0.1:3757",
-    [string]$EmbeddingModel = "nomic-embed-text:latest",
-    [string]$ChatModel = "qwen2.5:7b",
-    [string]$GraphModel = "qwen2.5:7b",
-    [switch]$AutoPullMissingModels,
+    [string]$ChatEndpoint = "http://localhost:18001",
+    [string]$GraphEndpoint = "http://localhost:18002",
+    [string]$EmbedEndpoint = "http://localhost:18003",
+    [string]$EmbeddingModel = "Qwen3-Embedding-4B",
+    [string]$ChatModel = "qwen3-14b",
+    [string]$GraphModel = "qwen3-8b",
     [switch]$SkipModelCheck,
     [switch]$SkipUi,
     [switch]$SkipDesktop,
@@ -24,27 +26,6 @@ function Write-Info([string]$Message) {
 
 function Write-WarnMsg([string]$Message) {
     Write-Host "[WARN] $Message" -ForegroundColor Yellow
-}
-
-function Find-OllamaExe {
-    $candidates = @(
-        (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
-        (Join-Path $env:ProgramFiles "Ollama\ollama.exe"),
-        (Join-Path ${env:ProgramFiles(x86)} "Ollama\ollama.exe")
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) {
-            return $candidate
-        }
-    }
-
-    $cmd = Get-Command ollama -ErrorAction SilentlyContinue
-    if ($null -ne $cmd) {
-        return $cmd.Source
-    }
-
-    throw "Cannot find ollama executable. Please install Ollama or add it to PATH."
 }
 
 function Resolve-ShellExe {
@@ -97,6 +78,41 @@ function Wait-ForPort([string]$LocalHost, [int]$Port, [int]$TimeoutSec = 45) {
     return $null
 }
 
+function Get-LlamaCppModels([string]$Endpoint) {
+    $url = $Endpoint.TrimEnd("/") + "/v1/models"
+    try {
+        $response = Invoke-RestMethod -Method Get -Uri $url -TimeoutSec 15
+        if ($null -eq $response.data) {
+            return @()
+        }
+        return @($response.data | ForEach-Object { $_.id } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+    catch {
+        throw "llama.cpp endpoint is not reachable or does not expose /v1/models: $url. $($_.Exception.Message)"
+    }
+}
+
+function Test-LlamaCppEmbedding([string]$Endpoint, [string]$Model) {
+    $url = $Endpoint.TrimEnd("/") + "/v1/embeddings"
+    $body = @{ model = $Model; input = "ping" } | ConvertTo-Json -Depth 4
+    try {
+        $response = Invoke-RestMethod -Method Post -Uri $url -Body $body -ContentType "application/json" -TimeoutSec 20
+        if ($null -eq $response.data -or $response.data.Count -lt 1 -or $null -eq $response.data[0].embedding) {
+            throw "embedding response does not contain data[0].embedding"
+        }
+    }
+    catch {
+        throw "llama.cpp embedding endpoint probe failed: $url. $($_.Exception.Message)"
+    }
+}
+
+function Test-ModelPresent([string[]]$Models, [string]$Expected) {
+    if ([string]::IsNullOrWhiteSpace($Expected)) {
+        return $true
+    }
+    return $Models -contains $Expected
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path (Join-Path $repoRoot "Cargo.toml"))) {
     throw "Cannot find Cargo.toml in repo root. Run this script from <repo>\scripts\smoke-start.ps1."
@@ -123,24 +139,12 @@ if ($DbPath -match "[/\\]") {
 }
 New-Item -ItemType Directory -Force $WatchRoot | Out-Null
 
-$ollamaExe = $null
-$ollamaModels = $OllamaModelsRoot
-if ([string]::IsNullOrWhiteSpace($ollamaModels)) {
-    $ollamaModels = $env:OLLAMA_MODELS
-}
-if ([string]::IsNullOrWhiteSpace($ollamaModels)) {
-    $ollamaModels = [Environment]::GetEnvironmentVariable("OLLAMA_MODELS", "User")
-}
-if ([string]::IsNullOrWhiteSpace($ollamaModels)) {
-    $ollamaModels = [Environment]::GetEnvironmentVariable("OLLAMA_MODELS", "Machine")
-}
-if (-not [string]::IsNullOrWhiteSpace($ollamaModels) -and -not (Test-Path $ollamaModels)) {
-    throw "Configured Ollama models directory does not exist: $ollamaModels"
+if (-not [string]::IsNullOrWhiteSpace($ModelsRoot) -and -not (Test-Path $ModelsRoot)) {
+    throw "Configured GGUF models directory does not exist: $ModelsRoot"
 }
 
-if (-not [string]::IsNullOrWhiteSpace($ollamaModels)) {
-    $env:OLLAMA_MODELS = (Resolve-Path $ollamaModels).Path
-    $ollamaModels = $env:OLLAMA_MODELS
+if (-not [string]::IsNullOrWhiteSpace($ModelsRoot)) {
+    $ModelsRoot = (Resolve-Path $ModelsRoot).Path
 }
 
 Write-Info ("Repo: " + $repoRoot)
@@ -148,39 +152,42 @@ Write-Info ("Watch root: " + $WatchRoot)
 Write-Info ("DB path: " + $DbPath)
 Write-Info ("Mode: " + $Mode)
 Write-Info ("Server addr: " + $ServerAddr)
+Write-Info ("llama.cpp chat endpoint: " + $ChatEndpoint)
+Write-Info ("llama.cpp graph endpoint: " + $GraphEndpoint)
+Write-Info ("llama.cpp embed endpoint: " + $EmbedEndpoint)
 
 if (-not $SkipModelCheck) {
-    $ollamaExe = Find-OllamaExe
-    Write-Info ("Ollama: " + $ollamaExe)
-    if (-not [string]::IsNullOrWhiteSpace($ollamaModels)) {
-        Write-Info ("OLLAMA_MODELS: " + $ollamaModels)
+    if (-not [string]::IsNullOrWhiteSpace($ModelsRoot)) {
+        Write-Info ("GGUF models root: " + $ModelsRoot)
     }
     else {
-        Write-WarnMsg "Ollama models directory is not set. Start the app first and pick it in Settings, or pass -OllamaModelsRoot for script-driven smoke."
+        Write-WarnMsg "GGUF models root is not set. The script will validate running llama-server endpoints only."
     }
 
-    $modelList = & $ollamaExe list | Out-String
-    Write-Info ("Models:`n" + $modelList)
+    $chatModels = Get-LlamaCppModels -Endpoint $ChatEndpoint
+    $graphModels = Get-LlamaCppModels -Endpoint $GraphEndpoint
+    $embedModels = Get-LlamaCppModels -Endpoint $EmbedEndpoint
+    Write-Info ("Chat endpoint models: " + (($chatModels -join ", ") | ForEach-Object { if ($_){$_} else {"<empty>"} }))
+    Write-Info ("Graph endpoint models: " + (($graphModels -join ", ") | ForEach-Object { if ($_){$_} else {"<empty>"} }))
+    Write-Info ("Embed endpoint models: " + (($embedModels -join ", ") | ForEach-Object { if ($_){$_} else {"<empty>"} }))
 
-    if ($modelList -notmatch "\S+\s+\S+\s+\S+") {
-        Write-WarnMsg "Ollama model list looks empty. Ensure Ollama app/service is running."
+    if (-not (Test-ModelPresent -Models $chatModels -Expected $ChatModel)) {
+        Write-WarnMsg ("Chat model may be missing from chat endpoint: " + $ChatModel)
     }
-
-    $requiredModels = @($EmbeddingModel, $ChatModel, $GraphModel) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
-    foreach ($required in $requiredModels) {
-        if ($modelList -notmatch [regex]::Escape($required)) {
-            if ($AutoPullMissingModels) {
-                Write-Info ("Missing model, pulling: " + $required)
-                & $ollamaExe pull $required
-            }
-            else {
-                Write-WarnMsg ("Model may be missing: " + $required + ". If needed, run: " + $ollamaExe + " pull " + $required)
-            }
-        }
+    if (-not (Test-ModelPresent -Models $graphModels -Expected $GraphModel)) {
+        Write-WarnMsg ("Graph model may be missing from graph endpoint: " + $GraphModel)
     }
+    if (-not (Test-ModelPresent -Models $embedModels -Expected $EmbeddingModel)) {
+        Write-WarnMsg ("Embedding model may be missing from embed endpoint: " + $EmbeddingModel)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ModelsRoot)) {
+        $ggufCount = @(Get-ChildItem -LiteralPath $ModelsRoot -Recurse -Filter "*.gguf" -File -ErrorAction SilentlyContinue).Count
+        Write-Info ("GGUF files under models root: " + $ggufCount)
+    }
+    Test-LlamaCppEmbedding -Endpoint $EmbedEndpoint -Model $EmbeddingModel
 }
 else {
-    Write-WarnMsg "Skip model check enabled. UI/server smoke can run without local Ollama validation."
+    Write-WarnMsg "Skip model check enabled. UI/server smoke can run without local llama.cpp validation."
 }
 
 $uiPid = $null
@@ -216,13 +223,14 @@ if (-not $SkipDesktop -and $Mode -in @("desktop", "both")) {
 Set-Location '$repoRoot'
 `$env:MEMORI_WATCH_ROOT='$WatchRoot'
 `$env:MEMORI_DB_PATH='$DbPath'
+`$env:MEMORI_MODEL_PROVIDER='llama_cpp_local'
+`$env:MEMORI_CHAT_ENDPOINT='$ChatEndpoint'
+`$env:MEMORI_GRAPH_ENDPOINT='$GraphEndpoint'
+`$env:MEMORI_EMBED_ENDPOINT='$EmbedEndpoint'
 `$env:MEMORI_CHAT_MODEL='$ChatModel'
 `$env:MEMORI_GRAPH_MODEL='$GraphModel'
 `$env:MEMORI_EMBED_MODEL='$EmbeddingModel'
 "@
-    if (-not [string]::IsNullOrWhiteSpace($ollamaModels)) {
-        $desktopScript += "`n`$env:OLLAMA_MODELS='$ollamaModels'"
-    }
     $desktopScript += "`n$desktopRunCommand"
 
     $desktopProc = Start-Process -FilePath $shellExe `
@@ -245,14 +253,15 @@ if ($Mode -in @("server", "both")) {
 Set-Location '$repoRoot'
 `$env:MEMORI_WATCH_ROOT='$WatchRoot'
 `$env:MEMORI_DB_PATH='$DbPath'
+`$env:MEMORI_MODEL_PROVIDER='llama_cpp_local'
+`$env:MEMORI_CHAT_ENDPOINT='$ChatEndpoint'
+`$env:MEMORI_GRAPH_ENDPOINT='$GraphEndpoint'
+`$env:MEMORI_EMBED_ENDPOINT='$EmbedEndpoint'
 `$env:MEMORI_CHAT_MODEL='$ChatModel'
 `$env:MEMORI_GRAPH_MODEL='$GraphModel'
 `$env:MEMORI_EMBED_MODEL='$EmbeddingModel'
 `$env:MEMORI_SERVER_ADDR='$ServerAddr'
 "@
-    if (-not [string]::IsNullOrWhiteSpace($ollamaModels)) {
-        $serverScript += "`n`$env:OLLAMA_MODELS='$ollamaModels'"
-    }
     $serverScript += "`n$serverRunCommand"
 
     $serverProc = Start-Process -FilePath $shellExe `

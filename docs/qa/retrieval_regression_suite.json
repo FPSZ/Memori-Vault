@@ -1,0 +1,868 @@
+﻿{
+  "version": 1,
+  "watch_root": ".",
+  "notes": "Empty scope_paths means the whole watch_root. This JSON file is the canonical execution source for regression runs.",
+  "cases": [
+    {
+      "id": "R01",
+      "query": "What is the recommended local embed model?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/TUTORIAL.md"
+      ],
+      "target_clues": [
+        "nomic-embed-text:latest"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R02",
+      "query": "Which runtime is described as desktop-first?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "README.md"
+      ],
+      "target_clues": [
+        "desktop-first"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R03",
+      "query": "What are the current indexing modes?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "README.md",
+        "docs/guides/TUTORIAL.md",
+        "docs/release/RELEASE_NOTES_v0.2.0.md"
+      ],
+      "target_clues": [
+        "continuous",
+        "manual",
+        "scheduled"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R04",
+      "query": "What resource budget is best for laptop foreground UX?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/TUTORIAL.md"
+      ],
+      "target_clues": [
+        "low"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R05",
+      "query": "How do you start server mode?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/TUTORIAL.md"
+      ],
+      "target_clues": [
+        "cargo run -p memori-server"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R06",
+      "query": "Which file explains private deployment preview?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "README.md"
+      ],
+      "target_clues": [
+        "docs/guides/enterprise.md"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R07",
+      "query": "Where is the audit log stored?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/enterprise.md"
+      ],
+      "target_clues": [
+        "audit.log.jsonl"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R08",
+      "query": "Which RBAC roles are listed in enterprise preview?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/enterprise.md"
+      ],
+      "target_clues": [
+        "viewer",
+        "operator",
+        "admin"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R09",
+      "query": "What does POST /api/auth/oidc/login return?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/enterprise.md"
+      ],
+      "target_clues": [
+        "session_token",
+        "role",
+        "expires_at"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R10",
+      "query": "What are the admin APIs for indexing control?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/enterprise.md"
+      ],
+      "target_clues": [
+        "reindex",
+        "pause",
+        "resume"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R11",
+      "query": "Which version is the first public desktop build?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/release/RELEASE_NOTES_v0.2.0.md"
+      ],
+      "target_clues": [
+        "0.2.0"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R12",
+      "query": "What does the release note say about graph build behavior?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/release/RELEASE_NOTES_v0.2.0.md"
+      ],
+      "target_clues": [
+        "Graph build is intentionally non-blocking"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R13",
+      "query": "Which file says source cards support markdown preview?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "README.md"
+      ],
+      "target_clues": [
+        "Source cards"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R14",
+      "query": "What is the current answer mode in the rebuild plan?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/planning/plan.md"
+      ],
+      "target_clues": [
+        "Answer Mode",
+        "默认强证据模式"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R15",
+      "query": "What are the two retrieval stages in the rebuild plan?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/planning/plan.md"
+      ],
+      "target_clues": [
+        "document routing",
+        "chunk retrieval"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R16",
+      "query": "What metric names should be recorded for retrieval latency?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/planning/plan.md"
+      ],
+      "target_clues": [
+        "doc_recall_ms",
+        "chunk_recall_ms",
+        "merge_ms",
+        "answer_ms"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R17",
+      "query": "What is the parser technology chosen for the rebuild?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/planning/plan.md"
+      ],
+      "target_clues": [
+        "pulldown-cmark"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R18",
+      "query": "What is the graph role in the rebuild plan?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/planning/plan.md"
+      ],
+      "target_clues": [
+        "Graph",
+        "仅作后置上下文增强"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R19",
+      "query": "What does the tutorial say if vault stats stay at 0?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/TUTORIAL.md"
+      ],
+      "target_clues": [
+        "Confirm watch folder exists"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R20",
+      "query": "Which checklist commands are required before publishing?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/TUTORIAL.md"
+      ],
+      "target_clues": [
+        "cargo fmt",
+        "clippy",
+        "test",
+        "pnpm build"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R21",
+      "query": "What does README say about enterprise auth/session maturity?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "README.md"
+      ],
+      "target_clues": [
+        "controlled internal environments first"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R22",
+      "query": "Which deployment assets are included for enterprise preview?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "README.md"
+      ],
+      "target_clues": [
+        "systemd",
+        "backup/restore",
+        "env template"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R23",
+      "query": "What does enterprise preview say about egress policy?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/enterprise.md"
+      ],
+      "target_clues": [
+        "local_only",
+        "allowlist"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R24",
+      "query": "Which metrics are returned by GET /api/admin/metrics?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/enterprise.md"
+      ],
+      "target_clues": [
+        "total_requests",
+        "failed_requests",
+        "ask_latency_avg_ms"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R25",
+      "query": "What changed post-0.2.0 for first-answer speed?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/release/RELEASE_NOTES_v0.2.0.md"
+      ],
+      "target_clues": [
+        "fast searchable chunk persistence first"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R26",
+      "query": "Which file mentions the Advanced tab indexing controls?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/release/RELEASE_NOTES_v0.2.0.md"
+      ],
+      "target_clues": [
+        "settings Advanced tab"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R27",
+      "query": "Which document says markdown tables may look broken due to chunk boundaries?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/TUTORIAL.md"
+      ],
+      "target_clues": [
+        "Markdown table looks broken"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R28",
+      "query": "What are the current highlights of Memori-Vault?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "README.md"
+      ],
+      "target_clues": [
+        "local-first ingestion pipeline"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R29",
+      "query": "Which file explains the rebuilt plan鈥檚 Phase 3 objective?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/planning/plan.md"
+      ],
+      "target_clues": [
+        "dense",
+        "lexical",
+        "RRF"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R30",
+      "query": "What does the rebuild plan require for citation validity?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/planning/plan.md"
+      ],
+      "target_clues": [
+        "100%"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R31",
+      "query": "What is the CEO of OpenAI?",
+      "mode": "refuse",
+      "scope_paths": [],
+      "target_documents": [],
+      "target_clues": [],
+      "notes": "external fact should be refused",
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R32",
+      "query": "What is the Bitcoin price today?",
+      "mode": "refuse",
+      "scope_paths": [],
+      "target_documents": [],
+      "target_clues": [],
+      "notes": "time-sensitive external fact should be refused",
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R33",
+      "query": "Summarize week 8 report from my vault.",
+      "mode": "refuse",
+      "scope_paths": [],
+      "target_documents": [],
+      "target_clues": [],
+      "notes": "baseline repo has no week8 report document",
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R34",
+      "query": "What is the hidden remote API key in local settings?",
+      "mode": "refuse",
+      "scope_paths": [],
+      "target_documents": [],
+      "target_clues": [],
+      "notes": "secret material must not be surfaced",
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R35",
+      "query": "Which file documents a two-stage retrieval plan for 50,000 documents?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/planning/plan.md"
+      ],
+      "target_clues": [
+        "50,000"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R36",
+      "query": "Which file says graph should not decide the primary hit result?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/planning/plan.md"
+      ],
+      "target_clues": [
+        "Graph remains an explanation layer",
+        "must not affect P0 ranking metrics"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R38",
+      "query": "What structured response type does POST /api/ask return?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "memori-server/src/main.rs"
+      ],
+      "target_clues": [
+        "AskResponseStructured"
+      ],
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R39",
+      "query": "Which desktop entry point is ask_vault_structured?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "memori-desktop/src/lib.rs"
+      ],
+      "target_clues": [
+        "ask_vault_structured"
+      ],
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R40",
+      "query": "Which file contains the filename-signal test for week8_report.md?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "memori-core/src/lib.rs"
+      ],
+      "target_clues": [
+        "document_merge_prefers_filename_signal_when_scores_are_stronger"
+      ],
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R41",
+      "query": "What metric field records query analysis latency?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "memori-core/src/lib.rs"
+      ],
+      "target_clues": [
+        "pub query_analysis_ms: u64"
+      ],
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R42",
+      "query": "Should a weekly report filename query rely on filename signals instead of dense search only?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "memori-core/src/lib.rs"
+      ],
+      "target_clues": [
+        "document_merge_prefers_filename_signal_for_cjk_filename_terms",
+        "document_reason: \"filename\".to_string()"
+      ],
+      "notes": "clue refreshed for current corpus; implementation truth lives in core retrieval tests",
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R43",
+      "query": "Which terms should be preserved for a week8_report.md query?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "memori-storage/src/lib.rs"
+      ],
+      "target_clues": [
+        "term == \"week8_report.md\"",
+        "term == \"week8_report\""
+      ],
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R44",
+      "query": "How does the plan handle foo_bar.rs style code tokens?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/planning/plan.md"
+      ],
+      "target_clues": [
+        "mixed-token",
+        "implementation lookup"
+      ],
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R45",
+      "query": "What query flags classify POST /api/ask and ask_vault_structured lookups?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "memori-core/src/lib.rs"
+      ],
+      "target_clues": [
+        "flags.has_path_like_token",
+        "flags.is_lookup_like"
+      ],
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R46",
+      "query": "Does an exact filename match automatically lock file-only scope?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "memori-core/src/lib.rs"
+      ],
+      "target_clues": [
+        "file_only_scope",
+        "document_reason: \"scope\".to_string()"
+      ],
+      "notes": "clue refreshed for current corpus; implementation truth lives in scope resolution code",
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R47",
+      "query": "What happens when only dense retrieval hits without lexical or document support?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "memori-core/src/lib.rs"
+      ],
+      "target_clues": [
+        "fn dense_only_long_query_is_rejected()"
+      ],
+      "notes": "clue refreshed for current corpus; implementation truth lives in gating tests",
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R48",
+      "query": "Can filename signals cross the current retrieval scope when the target file is outside scope?",
+      "mode": "refuse",
+      "scope_paths": [],
+      "target_documents": [],
+      "target_clues": [],
+      "notes": "must not cross scope or cross library",
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R49",
+      "query": "Summarize the content of week8_report.md.",
+      "mode": "refuse",
+      "scope_paths": [],
+      "target_documents": [],
+      "target_clues": [],
+      "notes": "baseline repo has no such file",
+      "profile_tags": [
+        "core_docs",
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R50",
+      "query": "query_analysis_ms銆乨oc_lexical_ms銆乨oc_merge_ms 浼氬睍绀哄湪鍝紵",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "ui/src/App.tsx"
+      ],
+      "target_clues": [
+        "answerResponse.metrics.query_analysis_ms",
+        "answerResponse.metrics.doc_merge_ms"
+      ],
+      "notes": "clue refreshed for current corpus; implementation truth lives in UI",
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R51",
+      "query": "Should week8_report.md style queries display a 100% semantic score?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "ui/src/App.tsx"
+      ],
+      "target_clues": [
+        "document_raw_score?: number | null;",
+        "dense_raw_score?: number | null;"
+      ],
+      "notes": "clue refreshed for current corpus; UI currently exposes raw score fields rather than percentage similarity",
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    }
+  ]
+}
+

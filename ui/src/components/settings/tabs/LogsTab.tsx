@@ -36,7 +36,8 @@ export function LogsTab() {
   const { t } = useI18n();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [levelFilter, setLevelFilter] = useState<string>("ALL");
+  const [levelFilter, setLevelFilter] = useState<string>("INFO");
+  const [compactMode, setCompactMode] = useState(true);
   const [logDir, setLogDir] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -83,7 +84,28 @@ export function LogsTab() {
     };
   }, [autoRefresh, levelFilter]);
 
-  const filtered = useMemo(() => entries, [entries]);
+  const filtered = useMemo(() => {
+    if (!compactMode) return entries;
+    // Compact mode: deduplicate rapid per-file logs by keeping only
+    // the first and last of consecutive logs with the same target + similar message prefix
+    const result: LogEntry[] = [];
+    let lastKey = "";
+    let lastIdx = -1;
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const msgPrefix = e.message.split("chunk")[0].slice(0, 40);
+      const key = `${e.target}|${msgPrefix}`;
+      if (key === lastKey && lastIdx >= 0) {
+        // Replace last with current (keeps the latest of the streak)
+        result[lastIdx] = e;
+      } else {
+        result.push(e);
+        lastIdx = result.length - 1;
+        lastKey = key;
+      }
+    }
+    return result;
+  }, [entries, compactMode]);
 
   const levels = ["ALL", "TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
 
@@ -139,6 +161,15 @@ export function LogsTab() {
             </button>
           ))}
           <div className="ml-auto flex items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                checked={compactMode}
+                onChange={(e) => setCompactMode(e.target.checked)}
+                className="h-3.5 w-3.5 accent-[var(--accent)]"
+              />
+              精简
+            </label>
             <label className="flex cursor-pointer items-center gap-1.5 text-xs text-[var(--text-secondary)]">
               <input
                 type="checkbox"

@@ -100,16 +100,16 @@ export function MemoryTab({
 
         <SettingCard title={t("memoryMarkdownExport")} description={t("memoryMarkdownExportDesc")}>
           <SelectionChips
-            value={memorySettings.memory_markdown_export_enabled ? "enabled" : "disabled"}
-            onChange={(value) =>
+            value="disabled"
+            onChange={() =>
               onMemorySettingsChange({
                 ...memorySettings,
-                memory_markdown_export_enabled: value === "enabled"
+                memory_markdown_export_enabled: false
               })
             }
             options={[
-              { value: "enabled", label: t("mcpEnabled") },
-              { value: "disabled", label: t("mcpDisabled") }
+              { value: "disabled", label: t("mcpDisabled") },
+              { value: "enabled", label: t("plannedCapability"), disabled: true }
             ]}
           />
         </SettingCard>
@@ -159,16 +159,16 @@ export function MemoryTab({
 
         <SettingCard title={t("graphRanking")} description={t("graphRankingDesc")}>
           <SelectionChips
-            value={memorySettings.graph_ranking_enabled ? "enabled" : "disabled"}
-            onChange={(value) =>
+            value="disabled"
+            onChange={() =>
               onMemorySettingsChange({
                 ...memorySettings,
-                graph_ranking_enabled: value === "enabled"
+                graph_ranking_enabled: false
               })
             }
             options={[
               { value: "disabled", label: t("graphRankingOff") },
-              { value: "enabled", label: t("graphRankingOn") }
+              { value: "enabled", label: t("graphRankingPlanned"), disabled: true }
             ]}
           />
         </SettingCard>

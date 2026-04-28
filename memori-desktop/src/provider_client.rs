@@ -29,7 +29,7 @@ pub(crate) async fn fetch_models_all_endpoints(
     let mut errors = Vec::new();
 
     match provider {
-        ModelProvider::OllamaLocal => {
+        ModelProvider::LlamaCppLocal => {
             let from_folder = models_root
                 .map(PathBuf::from)
                 .map(|root| scan_local_model_files_from_root(&root))
@@ -42,7 +42,7 @@ pub(crate) async fn fetch_models_all_endpoints(
 
             let mut from_service = Vec::new();
             for endpoint in [chat_endpoint, graph_endpoint, embed_endpoint] {
-                match list_ollama_models(endpoint).await {
+                match list_openai_compatible_models(endpoint, None).await {
                     Ok(models) => from_service.extend(models),
                     Err(err) => errors.push(err),
                 }
@@ -80,50 +80,6 @@ pub(crate) async fn fetch_models_all_endpoints(
     }
 }
 
-pub(crate) async fn list_ollama_models(
-    endpoint: &str,
-) -> Result<Vec<String>, ProviderModelFetchError> {
-    #[derive(Debug, Deserialize)]
-    struct OllamaTagResp {
-        models: Vec<OllamaTagItem>,
-    }
-    #[derive(Debug, Deserialize)]
-    struct OllamaTagItem {
-        name: String,
-    }
-
-    let url = format!("{}/api/tags", endpoint.trim_end_matches('/'));
-    let response = timeout(
-        Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS),
-        reqwest::Client::new().get(url).send(),
-    )
-    .await
-    .map_err(|_| ProviderModelFetchError {
-        code: "request_timeout".to_string(),
-        message: format!("连接 Ollama 超时({}s)", PROVIDER_HTTP_TIMEOUT_SECS),
-    })?
-    .map_err(|err| ProviderModelFetchError {
-        code: "endpoint_unreachable".to_string(),
-        message: format!("连接 Ollama 失败: {err}"),
-    })?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(ProviderModelFetchError {
-            code: "endpoint_unreachable".to_string(),
-            message: format!("Ollama 模型列表请求失败: status={}, body={body}", status),
-        });
-    }
-    let parsed: OllamaTagResp = response
-        .json()
-        .await
-        .map_err(|err| ProviderModelFetchError {
-            code: "endpoint_unreachable".to_string(),
-            message: format!("解析 Ollama 模型列表失败: {err}"),
-        })?;
-    Ok(parsed.models.into_iter().map(|m| m.name).collect())
-}
-
 pub(crate) async fn list_openai_compatible_models(
     endpoint: &str,
     api_key: Option<&str>,
@@ -149,11 +105,11 @@ pub(crate) async fn list_openai_compatible_models(
     .await
     .map_err(|_| ProviderModelFetchError {
         code: "request_timeout".to_string(),
-        message: format!("连接远程模型服务超时({}s)", PROVIDER_HTTP_TIMEOUT_SECS),
+        message: format!("连接模型服务超时({}s)", PROVIDER_HTTP_TIMEOUT_SECS),
     })?
     .map_err(|err| ProviderModelFetchError {
         code: "endpoint_unreachable".to_string(),
-        message: format!("连接远程模型服务失败: {err}"),
+        message: format!("连接模型服务失败: {err}"),
     })?;
     let status = response.status();
     if !status.is_success() {
@@ -174,7 +130,7 @@ pub(crate) async fn list_openai_compatible_models(
             .await
             .map_err(|err| ProviderModelFetchError {
                 code: "endpoint_unreachable".to_string(),
-                message: format!("解析远程模型列表失败: {err}"),
+                message: format!("解析模型列表响应失败: {err}"),
             })?;
     Ok(parsed.data.into_iter().map(|m| m.id).collect())
 }
@@ -281,7 +237,7 @@ pub(crate) fn collect_local_model_files_recursive(
         let path = entry.path();
         let metadata = entry
             .metadata()
-            .map_err(|err| format!("读取模型目录元数据失败({}): {err}", path.display()))?;
+            .map_err(|err| format!("读取模型文件元数据失败({}): {err}", path.display()))?;
         if metadata.is_dir() {
             collect_local_model_files_recursive(&path, set, depth + 1, max_depth)?;
             continue;
@@ -305,36 +261,12 @@ pub(crate) fn collect_local_model_files_recursive(
     Ok(())
 }
 
-pub(crate) async fn pull_ollama_model(
-    endpoint: &str,
-    model: &str,
+pub(crate) async fn pull_llama_cpp_model(
+    _endpoint: &str,
+    _model: &str,
     _api_key: Option<&str>,
 ) -> Result<(), String> {
-    #[derive(Debug, Serialize)]
-    struct PullBody<'a> {
-        name: &'a str,
-        stream: bool,
-    }
-    let url = format!("{}/api/pull", endpoint.trim_end_matches('/'));
-    let response = timeout(
-        Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS),
-        reqwest::Client::new()
-            .post(url)
-            .json(&PullBody {
-                name: model,
-                stream: false,
-            })
-            .send(),
-    )
-    .await
-    .map_err(|_| format!("拉取模型超时({}s)", PROVIDER_HTTP_TIMEOUT_SECS))?
-    .map_err(|err| format!("拉取模型失败: {err}"))?;
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("拉取模型失败: status={}, body={body}", status));
-    }
-    Ok(())
+    Err("llama.cpp 本地运行时不支持在线拉取模型。请把 GGUF 文件放到模型目录，或在设置页选择模型文件后启动 llama-server。".to_string())
 }
 
 pub(crate) fn model_exists(models: &[String], expected: &str) -> bool {

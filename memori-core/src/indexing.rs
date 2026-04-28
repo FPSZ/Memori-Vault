@@ -1,4 +1,5 @@
 use super::*;
+use memori_vault::is_supported_content_file;
 
 const EMBEDDING_CHUNK_TIMEOUT_SECS: u64 = 120;
 
@@ -233,14 +234,17 @@ pub(crate) async fn process_file_event(
     let mut embeddings = Vec::with_capacity(chunks.len());
     for (chunk_position, chunk) in chunks.iter().enumerate() {
         let chunk_number = chunk_position + 1;
-        debug!(
-            path = %event.path.display(),
-            chunk_index = chunk.chunk_index,
-            chunk_number = chunk_number,
-            chunk_count = chunks.len(),
-            char_len = chunk.content.chars().count(),
-            "embedding chunk started"
-        );
+        let is_milestone = chunk_number == 1 || chunk_number % 10 == 0 || chunk_number == chunks.len();
+        if is_milestone {
+            debug!(
+                path = %event.path.display(),
+                chunk_index = chunk.chunk_index,
+                chunk_number = chunk_number,
+                chunk_count = chunks.len(),
+                char_len = chunk.content.chars().count(),
+                "embedding chunk started"
+            );
+        }
 
         match tokio::time::timeout(
             Duration::from_secs(EMBEDDING_CHUNK_TIMEOUT_SECS),
@@ -249,14 +253,16 @@ pub(crate) async fn process_file_event(
         .await
         {
             Ok(Ok(embedding)) => {
-                debug!(
-                    path = %event.path.display(),
-                    chunk_index = chunk.chunk_index,
-                    chunk_number = chunk_number,
-                    chunk_count = chunks.len(),
-                    dim = embedding.len(),
-                    "embedding chunk finished"
-                );
+                if is_milestone {
+                    debug!(
+                        path = %event.path.display(),
+                        chunk_index = chunk.chunk_index,
+                        chunk_number = chunk_number,
+                        chunk_count = chunks.len(),
+                        dim = embedding.len(),
+                        "embedding chunk finished"
+                    );
+                }
                 embeddings.push(embedding);
             }
             Ok(Err(err)) => {
@@ -832,13 +838,7 @@ pub(crate) async fn collect_supported_text_files_recursively(root: PathBuf) -> V
 }
 
 pub(crate) fn is_supported_text_file(path: &std::path::Path) -> bool {
-    let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
-        return false;
-    };
-    matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "md" | "txt" | "docx" | "pdf"
-    )
+    is_supported_content_file(path)
 }
 
 /// Read document text. For binary formats (docx/pdf) delegates to memori-parser extraction.

@@ -49,7 +49,12 @@ export function SettingsModal({
   onSaveEnterprisePolicy,
   onProbeModelProvider,
   onRefreshProviderModels,
-  onPullModel,
+  localModelRuntimeStatuses,
+  localModelRuntimeBusyRole,
+  onRefreshLocalModelRuntimeStatus,
+  onStartLocalModel,
+  onStopLocalModel,
+  onRestartLocalModel,
   onPickLocalModelsRoot,
   onClearLocalModelsRoot,
   indexingMode,
@@ -316,7 +321,7 @@ export function SettingsModal({
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 140, opacity: 0 }}
       transition={{ type: "spring", damping: 26, stiffness: 300 }}
-      className="surface-lite-strong pointer-events-auto h-full w-[78%] overflow-hidden shadow-[-24px_0_44px_-26px_rgba(0,0,0,0.48),24px_0_44px_-26px_rgba(0,0,0,0.24)]"
+      className="settings-shell pointer-events-auto h-full w-[78%] overflow-hidden shadow-[-24px_0_44px_-26px_rgba(0,0,0,0.48),24px_0_44px_-26px_rgba(0,0,0,0.24)]"
       data-open={open}
       onClick={(event) => event.stopPropagation()}
     >
@@ -337,7 +342,7 @@ export function SettingsModal({
       </div>
 
       <div className="flex h-[calc(100%-44px)] min-h-0">
-        <aside className="surface-lite h-full w-[28%] p-3 shadow-[10px_0_18px_-16px_rgba(88,166,255,0.28)]">
+        <aside className="settings-rail h-full w-[28%] p-3 shadow-[10px_0_18px_-16px_rgba(88,166,255,0.28)]">
           <div className="mb-3 px-2 pt-1 text-xs tracking-[0.16em] text-[var(--text-secondary)] uppercase">
             {t("settings")}
           </div>
@@ -384,7 +389,7 @@ export function SettingsModal({
           )}
         </aside>
 
-        <section className="settings-scrollbar relative min-h-0 w-[72%] overflow-y-auto px-5 py-5">
+        <section className="settings-content settings-panel-solid settings-scrollbar relative min-h-0 w-[72%] overflow-y-auto px-5 py-5">
           <AnimatePresence mode="wait">
             {activeTab === "basic" ? (
               <BasicTab
@@ -417,6 +422,12 @@ export function SettingsModal({
                 onSaveModelSettings={onSaveModelSettings}
                 onProbeModelProvider={onProbeModelProvider}
                 onRefreshProviderModels={onRefreshProviderModels}
+                localModelRuntimeStatuses={localModelRuntimeStatuses}
+                localModelRuntimeBusyRole={localModelRuntimeBusyRole}
+                onRefreshLocalModelRuntimeStatus={onRefreshLocalModelRuntimeStatus}
+                onStartLocalModel={onStartLocalModel}
+                onStopLocalModel={onStopLocalModel}
+                onRestartLocalModel={onRestartLocalModel}
                 onPickLocalModelsRoot={onPickLocalModelsRoot}
                 onClearLocalModelsRoot={onClearLocalModelsRoot}
               />

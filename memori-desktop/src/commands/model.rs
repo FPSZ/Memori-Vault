@@ -17,7 +17,7 @@ pub(crate) async fn set_enterprise_policy(
     payload: EnterprisePolicyDto,
     state: State<'_, DesktopState>,
 ) -> Result<EnterprisePolicyDto, String> {
-    info!(egress_mode = ?payload.egress_mode, endpoints = ?payload.allowed_model_endpoints.len(), models = ?payload.allowed_models.len(), "[用户操作] 修改企业策略");
+    info!(egress_mode = ?payload.egress_mode, endpoints = ?payload.allowed_model_endpoints.len(), models = ?payload.allowed_models.len(), "set enterprise policy");
     let mut settings = load_app_settings()?;
     settings.enterprise_egress_mode = Some(
         match payload.egress_mode {
@@ -59,7 +59,7 @@ pub(crate) async fn set_model_settings(
     payload: ModelSettingsDto,
     state: State<'_, DesktopState>,
 ) -> Result<ModelSettingsDto, String> {
-    info!(provider = %payload.active_provider, "[用户操作] 修改模型设置");
+    info!(provider = %payload.active_provider, "set model settings");
     let mut settings = load_app_settings()?;
     let normalized = normalize_model_settings_payload(payload)?;
     let policy = resolve_enterprise_policy(&settings);
@@ -74,9 +74,13 @@ pub(crate) async fn set_model_settings(
     settings.local_embed_endpoint = Some(normalized.local_profile.embed_endpoint.clone());
     settings.local_endpoint = Some(normalized.local_profile.chat_endpoint.clone());
     settings.local_models_root = normalized.local_profile.models_root.clone();
+    settings.local_llama_server_path = normalized.local_profile.llama_server_path.clone();
     settings.local_chat_model = Some(normalized.local_profile.chat_model.clone());
     settings.local_graph_model = Some(normalized.local_profile.graph_model.clone());
     settings.local_embed_model = Some(normalized.local_profile.embed_model.clone());
+    settings.local_chat_model_path = normalized.local_profile.chat_model_path.clone();
+    settings.local_graph_model_path = normalized.local_profile.graph_model_path.clone();
+    settings.local_embed_model_path = normalized.local_profile.embed_model_path.clone();
     settings.remote_chat_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
     settings.remote_graph_endpoint = Some(normalized.remote_profile.graph_endpoint.clone());
     settings.remote_embed_endpoint = Some(normalized.remote_profile.embed_endpoint.clone());
@@ -121,7 +125,7 @@ pub(crate) async fn list_provider_models(
     apiKey: Option<String>,
     modelsRoot: Option<String>,
 ) -> Result<ProviderModelsDto, String> {
-    info!(provider = %provider, "[用户操作] 刷新模型列表");
+    info!(provider = %provider, "list provider models");
     let settings = load_app_settings()?;
     let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&provider);
@@ -157,7 +161,7 @@ pub(crate) async fn probe_model_provider(
     apiKey: Option<String>,
     modelsRoot: Option<String>,
 ) -> Result<ModelAvailabilityDto, String> {
-    info!(provider = %provider, "[用户操作] 探测模型服务");
+    info!(provider = %provider, "probe model provider");
     let settings = load_app_settings()?;
     let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&provider);
@@ -185,7 +189,7 @@ pub(crate) async fn probe_model_provider(
     let mut missing_roles = Vec::new();
 
     let (chat_model, graph_model, embed_model) = match provider {
-        ModelProvider::OllamaLocal => (
+        ModelProvider::LlamaCppLocal => (
             settings.local_chat_model.as_deref().unwrap_or(""),
             settings.local_graph_model.as_deref().unwrap_or(""),
             settings.local_embed_model.as_deref().unwrap_or(""),
@@ -309,43 +313,86 @@ pub(crate) async fn validate_model_setup() -> Result<ModelAvailabilityDto, Strin
 }
 
 #[tauri::command]
+pub(crate) async fn get_local_model_runtime_status(
+    state: State<'_, DesktopState>,
+) -> Result<LocalModelRuntimeStatusesDto, String> {
+    let settings = load_app_settings()?;
+    let profile = resolve_model_settings(&settings).local_profile;
+    local_runtime_statuses(&state, &profile).await
+}
+
+#[tauri::command]
+pub(crate) async fn start_local_model(
+    role: String,
+    state: State<'_, DesktopState>,
+) -> Result<LocalModelRuntimeStatusesDto, String> {
+    let role = normalize_local_model_role(&role)?;
+    let settings = load_app_settings()?;
+    let profile = resolve_model_settings(&settings).local_profile;
+    start_local_model_role(&role, &profile, &state).await?;
+    local_runtime_statuses(&state, &profile).await
+}
+
+#[tauri::command]
+pub(crate) async fn stop_local_model(
+    role: String,
+    state: State<'_, DesktopState>,
+) -> Result<LocalModelRuntimeStatusesDto, String> {
+    let role = normalize_local_model_role(&role)?;
+    stop_local_model_role(&role, &state).await?;
+    let settings = load_app_settings()?;
+    let profile = resolve_model_settings(&settings).local_profile;
+    local_runtime_statuses(&state, &profile).await
+}
+
+#[tauri::command]
+pub(crate) async fn restart_local_model(
+    role: String,
+    state: State<'_, DesktopState>,
+) -> Result<LocalModelRuntimeStatusesDto, String> {
+    let role = normalize_local_model_role(&role)?;
+    let settings = load_app_settings()?;
+    let profile = resolve_model_settings(&settings).local_profile;
+    stop_local_model_role(&role, &state).await?;
+    start_local_model_role(&role, &profile, &state).await?;
+    local_runtime_statuses(&state, &profile).await
+}
+
+#[tauri::command]
 pub(crate) async fn pull_model(
     model: String,
     provider: String,
     endpoint: String,
     api_key: Option<String>,
 ) -> Result<ModelAvailabilityDto, String> {
-    info!(model = %model, provider = %provider, "[用户操作] 拉取模型");
+    info!(model = %model, provider = %provider, "pull model requested");
     let model = model.trim().to_string();
     if model.is_empty() {
-        return Err("模型名不能为空".to_string());
+        return Err("model name cannot be empty".to_string());
     }
     let provider = ModelProvider::from_value(&provider);
-    if provider != ModelProvider::OllamaLocal {
-        return Err("仅本地 Ollama 模式支持拉取模型".to_string());
-    }
     let endpoint = normalize_endpoint(provider, &endpoint);
     let settings = load_app_settings()?;
     let policy = resolve_enterprise_policy(&settings);
     validate_provider_request(&to_model_policy(&policy), provider, &endpoint, &[])
         .map_err(|violation| violation.message)?;
     let api_key = normalize_optional_text(api_key);
-    pull_ollama_model(&endpoint, &model, api_key.as_deref()).await?;
+    pull_llama_cpp_model(&endpoint, &model, api_key.as_deref()).await?;
     validate_model_setup().await
 }
 
 #[tauri::command]
 pub(crate) async fn set_local_models_root(path: String) -> Result<ModelSettingsDto, String> {
-    info!(path = %path, "[用户操作] 设置本地模型目录");
+    info!(path = %path, "set local models root");
     let mut settings = load_app_settings()?;
     let root = normalize_optional_text(Some(path));
     if let Some(root_path) = root.as_deref() {
         let path = PathBuf::from(root_path);
         if !path.exists() {
-            return Err(format!("模型目录不存在: {}", path.display()));
+            return Err(format!("models root does not exist: {}", path.display()));
         }
         if !path.is_dir() {
-            return Err(format!("路径不是目录: {}", path.display()));
+            return Err(format!("path is not a directory: {}", path.display()));
         }
         settings.local_models_root = Some(
             path.canonicalize()
@@ -362,7 +409,7 @@ pub(crate) async fn set_local_models_root(path: String) -> Result<ModelSettingsD
 
 #[tauri::command]
 pub(crate) async fn scan_local_model_files(root: Option<String>) -> Result<Vec<String>, String> {
-    info!(root = ?root, "[用户操作] 扫描本地模型文件");
+    info!(root = ?root, "scan local model files");
     let root = normalize_optional_text(root);
     if let Some(root) = root {
         return scan_local_model_files_from_root(&PathBuf::from(root));
@@ -373,4 +420,294 @@ pub(crate) async fn scan_local_model_files(root: Option<String>) -> Result<Vec<S
         return Ok(Vec::new());
     };
     scan_local_model_files_from_root(&PathBuf::from(root))
+}
+
+fn normalize_local_model_role(role: &str) -> Result<String, String> {
+    let normalized = role.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "chat" | "graph" | "embed" => Ok(normalized),
+        _ => Err(format!("unsupported local model role: {role}")),
+    }
+}
+
+fn role_endpoint(profile: &LocalModelProfileDto, role: &str) -> String {
+    match role {
+        "chat" => profile.chat_endpoint.clone(),
+        "graph" => profile.graph_endpoint.clone(),
+        "embed" => profile.embed_endpoint.clone(),
+        _ => String::new(),
+    }
+}
+
+fn role_model(profile: &LocalModelProfileDto, role: &str) -> String {
+    match role {
+        "chat" => profile.chat_model.clone(),
+        "graph" => profile.graph_model.clone(),
+        "embed" => profile.embed_model.clone(),
+        _ => String::new(),
+    }
+}
+
+fn role_model_path(profile: &LocalModelProfileDto, role: &str) -> Option<String> {
+    match role {
+        "chat" => profile.chat_model_path.clone(),
+        "graph" => profile.graph_model_path.clone(),
+        "embed" => profile.embed_model_path.clone(),
+        _ => None,
+    }
+}
+
+fn role_context_length(profile: &LocalModelProfileDto, role: &str) -> Option<u32> {
+    match role {
+        "chat" => profile.chat_context_length,
+        "graph" => profile.graph_context_length,
+        "embed" => profile.embed_context_length,
+        _ => None,
+    }
+}
+
+fn role_concurrency(profile: &LocalModelProfileDto, role: &str) -> Option<u32> {
+    match role {
+        "chat" => profile.chat_concurrency,
+        "graph" => profile.graph_concurrency,
+        "embed" => profile.embed_concurrency,
+        _ => None,
+    }
+}
+
+fn endpoint_port(endpoint: &str) -> Result<u16, String> {
+    let parsed = reqwest::Url::parse(endpoint)
+        .map_err(|err| format!("invalid endpoint URL ({endpoint}): {err}"))?;
+    parsed
+        .port_or_known_default()
+        .ok_or_else(|| format!("endpoint has no usable port: {endpoint}"))
+}
+
+fn resolve_llama_server_path(profile: &LocalModelProfileDto) -> Result<PathBuf, String> {
+    if let Some(path) = normalize_optional_text(profile.llama_server_path.clone()) {
+        let p = PathBuf::from(path);
+        if !p.exists() {
+            return Err(format!("llama-server path does not exist: {}", p.display()));
+        }
+        if !p.is_file() {
+            return Err(format!("llama-server path is not a file: {}", p.display()));
+        }
+        return Ok(p);
+    }
+
+    find_executable_on_path("llama-server").ok_or_else(|| {
+        "llama-server executable was not found in PATH. Select the llama-server executable in Settings > Models.".to_string()
+    })
+}
+
+fn find_executable_on_path(name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    let candidates = if cfg!(windows) {
+        vec![format!("{name}.exe"), name.to_string()]
+    } else {
+        vec![name.to_string()]
+    };
+    for dir in std::env::split_paths(&path_var) {
+        for candidate in &candidates {
+            let path = dir.join(candidate);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn is_port_available(port: u16) -> bool {
+    TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+async fn local_runtime_statuses(
+    state: &State<'_, DesktopState>,
+    profile: &LocalModelProfileDto,
+) -> Result<LocalModelRuntimeStatusesDto, String> {
+    let mut guard = state.local_models.lock().await;
+    let roles = ["chat", "graph", "embed"];
+    let mut result = Vec::new();
+    for role in roles {
+        let endpoint = role_endpoint(profile, role);
+        let port = endpoint_port(&endpoint).ok();
+        let mut remove_dead = false;
+        let status = if let Some(process) = guard.get_mut(role) {
+            match process.child.try_wait() {
+                Ok(Some(status)) => {
+                    remove_dead = true;
+                    LocalModelRuntimeStatusDto {
+                        role: role.to_string(),
+                        endpoint,
+                        port,
+                        pid: None,
+                        state: "stopped".to_string(),
+                        message: Some(format!("llama-server exited with status {status}")),
+                    }
+                }
+                Ok(None) => LocalModelRuntimeStatusDto {
+                    role: role.to_string(),
+                    endpoint: process.endpoint.clone(),
+                    port: Some(process.port),
+                    pid: Some(process.child.id()),
+                    state: "running".to_string(),
+                    message: Some(format!("{} -> {}", process.model, process.model_path)),
+                },
+                Err(err) => {
+                    remove_dead = true;
+                    LocalModelRuntimeStatusDto {
+                        role: role.to_string(),
+                        endpoint,
+                        port,
+                        pid: None,
+                        state: "error".to_string(),
+                        message: Some(format!("failed to read process status: {err}")),
+                    }
+                }
+            }
+        } else {
+            LocalModelRuntimeStatusDto {
+                role: role.to_string(),
+                endpoint,
+                port,
+                pid: None,
+                state: "stopped".to_string(),
+                message: None,
+            }
+        };
+        if remove_dead {
+            guard.remove(role);
+        }
+        result.push(status);
+    }
+    Ok(LocalModelRuntimeStatusesDto { roles: result })
+}
+
+async fn start_local_model_role(
+    role: &str,
+    profile: &LocalModelProfileDto,
+    state: &State<'_, DesktopState>,
+) -> Result<(), String> {
+    let endpoint = role_endpoint(profile, role);
+    let port = endpoint_port(&endpoint)?;
+    let model = role_model(profile, role).trim().to_string();
+    if model.is_empty() {
+        return Err(format!("{role} model name is empty"));
+    }
+    let model_path = role_model_path(profile, role)
+        .and_then(|value| normalize_optional_text(Some(value)))
+        .ok_or_else(|| format!("select a GGUF model file for {role} before starting it"))?;
+    let model_path_buf = PathBuf::from(&model_path);
+    if !model_path_buf.exists() || !model_path_buf.is_file() {
+        return Err(format!(
+            "{role} model file does not exist: {}",
+            model_path_buf.display()
+        ));
+    }
+    let llama_server = resolve_llama_server_path(profile)?;
+
+    {
+        let mut guard = state.local_models.lock().await;
+        if let Some(existing) = guard.get_mut(role) {
+            if existing
+                .child
+                .try_wait()
+                .map_err(|err| err.to_string())?
+                .is_none()
+            {
+                return Ok(());
+            }
+            guard.remove(role);
+        }
+    }
+
+    if !is_port_available(port) {
+        let message = format!(
+            "port conflict: cannot start {role} model because 127.0.0.1:{port} is already in use"
+        );
+        error!(role = %role, port = port, endpoint = %endpoint, "local llama.cpp port conflict");
+        return Err(message);
+    }
+
+    let mut command = Command::new(&llama_server);
+    command
+        .arg("-m")
+        .arg(&model_path_buf)
+        .arg("--host")
+        .arg("127.0.0.1")
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--alias")
+        .arg(&model);
+    if role == "embed" {
+        command.arg("--embedding");
+    }
+    if let Some(ctx) = role_context_length(profile, role).filter(|value| *value > 0) {
+        command.arg("--ctx-size").arg(ctx.to_string());
+    }
+    if let Some(parallel) = role_concurrency(profile, role).filter(|value| *value > 0) {
+        command.arg("--parallel").arg(parallel.to_string());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let child = command.spawn().map_err(|err| {
+        format!(
+            "failed to start llama-server for {role} ({}): {err}",
+            llama_server.display()
+        )
+    })?;
+    let pid = child.id();
+    info!(
+        role = %role,
+        pid = pid,
+        port = port,
+        endpoint = %endpoint,
+        model = %model,
+        model_path = %model_path_buf.display(),
+        llama_server = %llama_server.display(),
+        "started local llama.cpp model"
+    );
+
+    let mut guard = state.local_models.lock().await;
+    guard.insert(
+        role.to_string(),
+        LocalModelProcess {
+            child,
+            endpoint,
+            port,
+            model_path: model_path_buf.to_string_lossy().to_string(),
+            model,
+        },
+    );
+    Ok(())
+}
+
+async fn stop_local_model_role(role: &str, state: &State<'_, DesktopState>) -> Result<(), String> {
+    let process = {
+        let mut guard = state.local_models.lock().await;
+        guard.remove(role)
+    };
+    let Some(mut process) = process else {
+        return Ok(());
+    };
+    let pid = process.child.id();
+    match process.child.kill() {
+        Ok(()) => {
+            let _ = process.child.wait();
+            info!(role = %role, pid = pid, port = process.port, "stopped local llama.cpp model");
+            Ok(())
+        }
+        Err(err) => {
+            error!(role = %role, pid = pid, error = %err, "failed to stop local llama.cpp model");
+            Err(format!(
+                "failed to stop {role} llama-server process {pid}: {err}"
+            ))
+        }
+    }
 }

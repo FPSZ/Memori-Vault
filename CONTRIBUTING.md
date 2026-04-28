@@ -29,7 +29,7 @@ English version: [CONTRIBUTING.en.md](./CONTRIBUTING.en.md)
 - Rust stable（建议 `1.85+`）
 - Node.js 20+
 - npm
-- Ollama（本地模型模式需要）
+- llama.cpp `llama-server` OpenAI-compatible endpoint（本地模型模式需要）
 
 ## 4. 必过质量门
 

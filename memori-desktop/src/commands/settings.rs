@@ -34,7 +34,9 @@ fn apply_memory_settings(settings: &mut AppSettings, payload: MemorySettingsDto)
     settings.conversation_memory_enabled = Some(payload.conversation_memory_enabled);
     settings.auto_memory_write = Some(normalize_auto_memory_write(&payload.auto_memory_write));
     settings.memory_write_requires_source = Some(payload.memory_write_requires_source);
-    settings.memory_markdown_export_enabled = Some(payload.memory_markdown_export_enabled);
+    // Markdown export is still a planned architecture capability. Keep the
+    // persisted flag false so the UI/API cannot imply that export is active.
+    settings.memory_markdown_export_enabled = Some(false);
     settings.default_context_budget = Some(normalize_context_budget(
         &payload.default_context_budget,
         "16k",
@@ -43,7 +45,9 @@ fn apply_memory_settings(settings: &mut AppSettings, payload: MemorySettingsDto)
         &payload.complex_context_budget,
         "32k",
     ));
-    settings.graph_ranking_enabled = Some(payload.graph_ranking_enabled);
+    // ADR-003/P1 keeps graph as explanation context only; it must not affect
+    // the main retrieval ranking until an explicit ranking experiment ships.
+    settings.graph_ranking_enabled = Some(false);
 }
 
 fn normalize_auto_memory_write(value: &str) -> String {

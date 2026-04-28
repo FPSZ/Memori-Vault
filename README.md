@@ -186,9 +186,9 @@ http://127.0.0.1:3757/mcp
 Memori-Vault 支持把不同任务交给不同本地模型。推荐三角色分工：
 
 ```bash
-MEMORI_CHAT_ENDPOINT=http://localhost:8001   # 主回答模型，例如 Qwen3 14B
-MEMORI_GRAPH_ENDPOINT=http://localhost:8002  # 图谱/摘要/设置检索模型，例如 Qwen3 8B
-MEMORI_EMBED_ENDPOINT=http://localhost:8003  # embedding 模型，例如 Qwen3-Embedding-4B
+MEMORI_CHAT_ENDPOINT=http://localhost:18001   # 主回答模型，例如 Qwen3 14B
+MEMORI_GRAPH_ENDPOINT=http://localhost:18002  # 图谱/摘要/设置检索模型，例如 Qwen3 8B
+MEMORI_EMBED_ENDPOINT=http://localhost:18003  # embedding 模型，例如 Qwen3-Embedding-4B
 ```
 
 普通问答不建议默认把所有内容塞进 64K 上下文。推荐由 Context Composer 压缩证据后再交给回答模型：

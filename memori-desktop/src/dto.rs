@@ -15,9 +15,13 @@ pub(crate) struct AppSettings {
     pub(crate) local_graph_endpoint: Option<String>,
     pub(crate) local_embed_endpoint: Option<String>,
     pub(crate) local_models_root: Option<String>,
+    pub(crate) local_llama_server_path: Option<String>,
     pub(crate) local_chat_model: Option<String>,
     pub(crate) local_graph_model: Option<String>,
     pub(crate) local_embed_model: Option<String>,
+    pub(crate) local_chat_model_path: Option<String>,
+    pub(crate) local_graph_model_path: Option<String>,
+    pub(crate) local_embed_model_path: Option<String>,
     pub(crate) local_chat_context_length: Option<u32>,
     pub(crate) local_graph_context_length: Option<u32>,
     pub(crate) local_embed_context_length: Option<u32>,
@@ -114,16 +118,14 @@ impl AppSettingsDto {
                 .auto_memory_write
                 .unwrap_or_else(|| "suggest".to_string()),
             memory_write_requires_source: settings.memory_write_requires_source.unwrap_or(true),
-            memory_markdown_export_enabled: settings
-                .memory_markdown_export_enabled
-                .unwrap_or(false),
+            memory_markdown_export_enabled: false,
             default_context_budget: settings
                 .default_context_budget
                 .unwrap_or_else(|| "16k".to_string()),
             complex_context_budget: settings
                 .complex_context_budget
                 .unwrap_or_else(|| "32k".to_string()),
-            graph_ranking_enabled: settings.graph_ranking_enabled.unwrap_or(false),
+            graph_ranking_enabled: false,
         }
     }
 }
@@ -142,9 +144,17 @@ pub(crate) struct LocalModelProfileDto {
     pub(crate) graph_endpoint: String,
     pub(crate) embed_endpoint: String,
     pub(crate) models_root: Option<String>,
+    #[serde(default)]
+    pub(crate) llama_server_path: Option<String>,
     pub(crate) chat_model: String,
     pub(crate) graph_model: String,
     pub(crate) embed_model: String,
+    #[serde(default)]
+    pub(crate) chat_model_path: Option<String>,
+    #[serde(default)]
+    pub(crate) graph_model_path: Option<String>,
+    #[serde(default)]
+    pub(crate) embed_model_path: Option<String>,
     #[serde(default)]
     pub(crate) chat_context_length: Option<u32>,
     #[serde(default)]
@@ -187,6 +197,21 @@ pub(crate) struct ModelSettingsDto {
     pub(crate) active_provider: String,
     pub(crate) local_profile: LocalModelProfileDto,
     pub(crate) remote_profile: RemoteModelProfileDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct LocalModelRuntimeStatusDto {
+    pub(crate) role: String,
+    pub(crate) endpoint: String,
+    pub(crate) port: Option<u16>,
+    pub(crate) pid: Option<u32>,
+    pub(crate) state: String,
+    pub(crate) message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct LocalModelRuntimeStatusesDto {
+    pub(crate) roles: Vec<LocalModelRuntimeStatusDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

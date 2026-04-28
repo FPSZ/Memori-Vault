@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Bot,
   ChevronDown,
@@ -8,15 +8,19 @@ import {
   LoaderCircle,
   MessageSquare,
   Network,
+  Play,
   RefreshCw,
   Save,
   Share2,
+  Square,
   Zap
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AnimatedPressButton } from "../../MotionKit";
 import type {
   LocalModelProfileDto,
+  LocalModelRuntimeStatusDto,
+  LocalModelRuntimeStatusesDto,
   ModelAvailabilityDto,
   ModelProvider,
   ModelSettingsDto,
@@ -26,10 +30,7 @@ import type {
 import { useI18n } from "../../../i18n";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
+type ModelRoleKey = "chat" | "graph" | "embed";
 
 function extractPort(endpoint: string): string {
   try {
@@ -59,76 +60,164 @@ function pickModelFile(): Promise<string | null> {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  ModelCard                                                          */
-/* ------------------------------------------------------------------ */
+function pickLlamaServerFile(): Promise<string | null> {
+  return open({
+    multiple: false,
+    filters: [{ name: "llama-server", extensions: ["exe", ""] }]
+  }).then((selected) =>
+    selected && typeof selected === "string" ? selected : null
+  );
+}
 
-type ModelRoleKey = "chat" | "graph" | "embed";
+function fileNameFromPath(path: string): string {
+  return path.split(/[/\\]/).pop() ?? path;
+}
+
+function dirNameFromPath(path: string): string {
+  const name = fileNameFromPath(path);
+  const index = path.lastIndexOf(name);
+  return index > 0 ? path.slice(0, index).replace(/[\\/]$/, "") : "";
+}
+
+function modelPathForRole(profile: LocalModelProfileDto, role: ModelRoleKey): string {
+  if (role === "chat") return profile.chat_model_path ?? "";
+  if (role === "graph") return profile.graph_model_path ?? "";
+  return profile.embed_model_path ?? "";
+}
+
+function runtimeStatusForRole(
+  statuses: LocalModelRuntimeStatusesDto | null,
+  role: ModelRoleKey
+): LocalModelRuntimeStatusDto | null {
+  return statuses?.roles.find((item) => item.role === role) ?? null;
+}
 
 const ROLE_META: Record<
   ModelRoleKey,
-  { label: string; icon: React.ElementType; color: string }
+  { label: string; icon: React.ElementType; color: string; defaultModel: string; defaultPort: string }
 > = {
-  chat: { label: "对话模型", icon: MessageSquare, color: "text-sky-400" },
-  graph: { label: "图谱模型", icon: Share2, color: "text-violet-400" },
-  embed: { label: "嵌入模型", icon: Network, color: "text-emerald-400" }
+  chat: {
+    label: "对话模型",
+    icon: MessageSquare,
+    color: "text-sky-400",
+    defaultModel: "qwen3-14b",
+    defaultPort: "18001"
+  },
+  graph: {
+    label: "图谱模型",
+    icon: Share2,
+    color: "text-violet-400",
+    defaultModel: "qwen3-8b",
+    defaultPort: "18002"
+  },
+  embed: {
+    label: "向量模型",
+    icon: Network,
+    color: "text-emerald-400",
+    defaultModel: "Qwen3-Embedding-4B",
+    defaultPort: "18003"
+  }
 };
 
 type ModelCardProps = {
   role: ModelRoleKey;
   endpoint: string;
   model: string;
+  modelPath?: string | null;
   contextLength?: number | null;
   concurrency?: number | null;
+  runtimeStatus?: LocalModelRuntimeStatusDto | null;
   isLocal: boolean;
   busy: boolean;
+  runtimeBusy: boolean;
   onEndpointChange: (v: string) => void;
   onModelChange: (v: string) => void;
   onContextLengthChange: (v: number | null) => void;
   onConcurrencyChange: (v: number | null) => void;
   onPickFile: () => void;
   onProbe: () => void;
+  onStart: () => void;
+  onStop: () => void;
+  onRestart: () => void;
 };
 
 function ModelCard({
   role,
   endpoint,
   model,
+  modelPath,
   contextLength,
   concurrency,
+  runtimeStatus,
   isLocal,
   busy,
+  runtimeBusy,
   onEndpointChange,
   onModelChange,
   onContextLengthChange,
   onConcurrencyChange,
   onPickFile,
-  onProbe
+  onProbe,
+  onStart,
+  onStop,
+  onRestart
 }: ModelCardProps) {
   const [expanded, setExpanded] = useState(false);
   const meta = ROLE_META[role];
   const Icon = meta.icon;
   const port = extractPort(endpoint);
+  const running = runtimeStatus?.state === "running";
+  const stateLabel =
+    runtimeStatus?.state === "running"
+      ? "运行中"
+      : runtimeStatus?.state === "error"
+        ? "异常"
+        : "未启动";
 
   return (
-    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] overflow-hidden">
-      {/* Header — always visible */}
+    <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)]">
       <div className="flex items-center gap-3 px-4 py-3">
         <div className={`flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--bg-surface-2)] ${meta.color}`}>
           <Icon className="h-4 w-4" />
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-[var(--text-primary)]">{meta.label}</span>
-            {model && (
-              <span className="truncate text-xs text-[var(--text-secondary)]">{model}</span>
-            )}
+            {model ? <span className="truncate text-xs text-[var(--text-secondary)]">{model}</span> : null}
           </div>
-          {port && (
-            <div className="text-[11px] text-[var(--text-muted)] font-mono">端口 {port}</div>
-          )}
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
+            {port ? <span className="font-mono">端口 {port}</span> : null}
+            {isLocal ? (
+              <span className={running ? "text-emerald-400" : runtimeStatus?.state === "error" ? "text-red-400" : ""}>
+                {stateLabel}{runtimeStatus?.pid ? ` · PID ${runtimeStatus.pid}` : ""}
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className="flex items-center gap-1.5">
+          {isLocal ? (
+            running ? (
+              <button
+                type="button"
+                onClick={onStop}
+                disabled={runtimeBusy}
+                className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-400 transition hover:opacity-80 disabled:opacity-50"
+              >
+                {runtimeBusy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+                停止
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onStart}
+                disabled={runtimeBusy}
+                className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400 transition hover:opacity-80 disabled:opacity-50"
+              >
+                {runtimeBusy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                启动
+              </button>
+            )
+          ) : null}
           <button
             type="button"
             onClick={onProbe}
@@ -148,9 +237,8 @@ function ModelCard({
         </div>
       </div>
 
-      {/* Expanded detail */}
       <AnimatePresence>
-        {expanded && (
+        {expanded ? (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
@@ -158,19 +246,29 @@ function ModelCard({
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <div className="border-t border-[var(--border-subtle)] px-4 py-3 space-y-3">
-              {/* Model name */}
+            <div className="space-y-3 border-t border-[var(--border-subtle)] px-4 py-3">
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-[var(--text-muted)]">模型名称</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={model}
-                    onChange={(e) => onModelChange(e.target.value)}
-                    className="flex-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                    placeholder={role === "chat" ? "qwen3-14b" : role === "graph" ? "qwen3-8b" : "Qwen3-Embedding-4B"}
-                  />
-                  {isLocal && (
+                <input
+                  type="text"
+                  value={model}
+                  onChange={(e) => onModelChange(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                  placeholder={meta.defaultModel}
+                />
+              </div>
+
+              {isLocal ? (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-[var(--text-muted)]">GGUF 文件</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={modelPath ?? ""}
+                      readOnly
+                      className="min-w-0 flex-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 font-mono text-xs text-[var(--text-primary)] outline-none"
+                      placeholder="选择 .gguf 模型文件"
+                    />
                     <button
                       type="button"
                       onClick={onPickFile}
@@ -179,23 +277,21 @@ function ModelCard({
                       <FolderOpen className="h-3.5 w-3.5" />
                       浏览
                     </button>
-                  )}
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
-              {/* Endpoint port */}
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-[var(--text-muted)]">端口号</label>
                 <input
                   type="text"
                   value={port}
                   onChange={(e) => onEndpointChange(replacePort(endpoint, e.target.value))}
-                  className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)] font-mono"
-                  placeholder="18001"
+                  className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 font-mono text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                  placeholder={meta.defaultPort}
                 />
               </div>
 
-              {/* Context length & Concurrency */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-[var(--text-muted)]">上下文长度</label>
@@ -224,17 +320,31 @@ function ModelCard({
                   />
                 </div>
               </div>
+
+              {isLocal && runtimeStatus?.message ? (
+                <div className="rounded-lg bg-[var(--bg-surface-2)] px-3 py-2 text-[11px] text-[var(--text-muted)]">
+                  {runtimeStatus.message}
+                </div>
+              ) : null}
+
+              {isLocal && running ? (
+                <button
+                  type="button"
+                  onClick={onRestart}
+                  disabled={runtimeBusy}
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-surface-1)] hover:text-[var(--text-primary)] disabled:opacity-50"
+                >
+                  {runtimeBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  重启当前模型服务
+                </button>
+              ) : null}
             </div>
           </motion.div>
-        )}
+        ) : null}
       </AnimatePresence>
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/*  ModelsTab                                                          */
-/* ------------------------------------------------------------------ */
 
 type ModelsTabProps = {
   t: TranslateFn;
@@ -242,11 +352,17 @@ type ModelsTabProps = {
   modelAvailability: ModelAvailabilityDto | null;
   providerModels: ProviderModelsDto;
   modelBusy: boolean;
+  localModelRuntimeStatuses: LocalModelRuntimeStatusesDto | null;
+  localModelRuntimeBusyRole: string | null;
   onProviderSwitch: (provider: ModelProvider) => void;
   onModelSettingsChange: (next: ModelSettingsDto) => void;
   onSaveModelSettings: () => Promise<void>;
   onProbeModelProvider: () => Promise<void>;
   onRefreshProviderModels: () => Promise<void>;
+  onRefreshLocalModelRuntimeStatus: () => Promise<void>;
+  onStartLocalModel: (role: ModelRoleKey) => Promise<void>;
+  onStopLocalModel: (role: ModelRoleKey) => Promise<void>;
+  onRestartLocalModel: (role: ModelRoleKey) => Promise<void>;
   onPickLocalModelsRoot: () => Promise<void>;
   onClearLocalModelsRoot: () => void;
 };
@@ -257,16 +373,22 @@ export function ModelsTab({
   modelAvailability,
   providerModels,
   modelBusy,
+  localModelRuntimeStatuses,
+  localModelRuntimeBusyRole,
   onProviderSwitch,
   onModelSettingsChange,
   onSaveModelSettings,
   onProbeModelProvider,
   onRefreshProviderModels,
+  onRefreshLocalModelRuntimeStatus,
+  onStartLocalModel,
+  onStopLocalModel,
+  onRestartLocalModel,
   onPickLocalModelsRoot,
   onClearLocalModelsRoot
 }: ModelsTabProps) {
   const activeProvider = modelSettings.active_provider;
-  const isLocal = activeProvider === "ollama_local";
+  const isLocal = activeProvider === "llama_cpp_local";
   const profile = isLocal ? modelSettings.local_profile : modelSettings.remote_profile;
 
   const updateProfile = (patch: Partial<LocalModelProfileDto & RemoteModelProfileDto>) => {
@@ -283,23 +405,35 @@ export function ModelsTab({
     }
   };
 
+  const handlePickLlamaServer = async () => {
+    const path = await pickLlamaServerFile();
+    if (path) {
+      updateProfile({ llama_server_path: path });
+    }
+  };
+
   const handlePickFile = async (role: ModelRoleKey) => {
     const path = await pickModelFile();
     if (!path) return;
-    const fileName = path.split(/[/\\]/).pop() ?? path;
-    const dirPath = path.substring(0, path.lastIndexOf(fileName) - 1);
+    const fileName = fileNameFromPath(path);
+    const stem = fileName.replace(/\.gguf$/i, "");
+    const dirPath = dirNameFromPath(path);
     const patch: Partial<LocalModelProfileDto> = {};
-    if (role === "chat") patch.chat_model = fileName;
-    else if (role === "graph") patch.graph_model = fileName;
-    else patch.embed_model = fileName;
-    // Auto-update models_root if the selected file is outside current root
+    if (role === "chat") {
+      patch.chat_model = stem;
+      patch.chat_model_path = path;
+    } else if (role === "graph") {
+      patch.graph_model = stem;
+      patch.graph_model_path = path;
+    } else {
+      patch.embed_model = stem;
+      patch.embed_model_path = path;
+    }
     const currentRoot = modelSettings.local_profile.models_root;
     if (dirPath && (!currentRoot || !path.startsWith(currentRoot))) {
       patch.models_root = dirPath;
     }
-    if (Object.keys(patch).length > 0) {
-      updateProfile(patch);
-    }
+    updateProfile(patch);
   };
 
   const statusOk = modelAvailability?.reachable && modelAvailability?.missing_roles?.length === 0;
@@ -318,7 +452,6 @@ export function ModelsTab({
       </h3>
 
       <div className="space-y-4 pb-2">
-        {/* Provider switch */}
         <div className="flex items-center justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3">
           <div className="flex items-center gap-2">
             <Bot className="h-4 w-4 text-[var(--accent)]" />
@@ -327,14 +460,14 @@ export function ModelsTab({
           <div className="flex rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] p-0.5">
             <button
               type="button"
-              onClick={() => onProviderSwitch("ollama_local")}
+              onClick={() => onProviderSwitch("llama_cpp_local")}
               className={`rounded-md px-3 py-1 text-xs font-medium transition ${
                 isLocal
                   ? "bg-[var(--accent-soft)] text-[var(--accent)]"
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}
             >
-              本地 (llama.cpp)
+              本地 llama.cpp
             </button>
             <button
               type="button"
@@ -345,50 +478,75 @@ export function ModelsTab({
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}
             >
-              远程 (OpenAI)
+              远程 OpenAI-compatible
             </button>
           </div>
         </div>
 
-        {/* Local models root */}
-        {isLocal && (
-          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-[var(--text-secondary)]">模型根目录</span>
-              <div className="flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => void onPickLocalModelsRoot()}
-                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-surface-1)] hover:text-[var(--text-primary)]"
-                >
-                  <FolderOpen className="h-3 w-3" />
-                  选择目录
-                </button>
-                {modelSettings.local_profile.models_root && (
+        {isLocal ? (
+          <div className="space-y-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-[var(--text-secondary)]">llama-server 可执行文件</span>
+                <div className="flex gap-1.5">
                   <button
                     type="button"
-                    onClick={onClearLocalModelsRoot}
-                    className="rounded-md px-2 py-1 text-[11px] text-[var(--text-muted)] transition hover:text-red-400"
+                    onClick={() => void handlePickLlamaServer()}
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-surface-1)] hover:text-[var(--text-primary)]"
                   >
-                    清除
+                    <FolderOpen className="h-3 w-3" />
+                    选择文件
                   </button>
-                )}
+                  {modelSettings.local_profile.llama_server_path ? (
+                    <button
+                      type="button"
+                      onClick={() => updateProfile({ llama_server_path: "" })}
+                      className="rounded-md px-2 py-1 text-[11px] text-[var(--text-muted)] transition hover:text-red-400"
+                    >
+                      清除
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <div className="truncate font-mono text-[11px] text-[var(--text-muted)]">
+                {modelSettings.local_profile.llama_server_path || "未设置时会尝试从 PATH 查找 llama-server"}
               </div>
             </div>
-            {modelSettings.local_profile.models_root ? (
-              <div className="font-mono text-[11px] text-[var(--text-muted)] truncate">
-                {modelSettings.local_profile.models_root}
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-[var(--text-secondary)]">模型根目录</span>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void onPickLocalModelsRoot()}
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-surface-1)] hover:text-[var(--text-primary)]"
+                  >
+                    <FolderOpen className="h-3 w-3" />
+                    选择目录
+                  </button>
+                  {modelSettings.local_profile.models_root ? (
+                    <button
+                      type="button"
+                      onClick={onClearLocalModelsRoot}
+                      className="rounded-md px-2 py-1 text-[11px] text-[var(--text-muted)] transition hover:text-red-400"
+                    >
+                      清除
+                    </button>
+                  ) : null}
+                </div>
               </div>
-            ) : (
-              <div className="text-[11px] text-[var(--text-muted)]">未设置</div>
-            )}
-            {/* Model candidates summary */}
+              <div className="truncate font-mono text-[11px] text-[var(--text-muted)]">
+                {modelSettings.local_profile.models_root || "未设置"}
+              </div>
+            </div>
+
             <div className="flex gap-3 pt-1">
               <div className="text-[11px] text-[var(--text-muted)]">
-                本地文件 <span className="text-[var(--text-primary)] font-medium">{providerModels.from_folder.length}</span>
+                本地文件 <span className="font-medium text-[var(--text-primary)]">{providerModels.from_folder.length}</span>
               </div>
               <div className="text-[11px] text-[var(--text-muted)]">
-                服务发现 <span className="text-[var(--text-primary)] font-medium">{providerModels.from_service.length}</span>
+                服务发现 <span className="font-medium text-[var(--text-primary)]">{providerModels.from_service.length}</span>
               </div>
               <button
                 type="button"
@@ -397,15 +555,23 @@ export function ModelsTab({
                 className="ml-auto inline-flex items-center gap-1 text-[11px] text-[var(--accent)] transition hover:opacity-80 disabled:opacity-50"
               >
                 <RefreshCw className={`h-3 w-3 ${modelBusy ? "animate-spin" : ""}`} />
-                刷新
+                刷新模型
+              </button>
+              <button
+                type="button"
+                onClick={() => void onRefreshLocalModelRuntimeStatus()}
+                disabled={Boolean(localModelRuntimeBusyRole)}
+                className="inline-flex items-center gap-1 text-[11px] text-[var(--accent)] transition hover:opacity-80 disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3 w-3 ${localModelRuntimeBusyRole ? "animate-spin" : ""}`} />
+                刷新运行状态
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
-        {/* Remote API Key */}
-        {!isLocal && (
-          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3 space-y-2">
+        {!isLocal ? (
+          <div className="space-y-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3">
             <label className="text-xs font-medium text-[var(--text-secondary)]">API Key</label>
             <input
               type="password"
@@ -420,69 +586,46 @@ export function ModelsTab({
               placeholder="sk-..."
             />
           </div>
-        )}
+        ) : null}
 
-        {/* Three model cards */}
-        <ModelCard
-          role="chat"
-          endpoint={profile.chat_endpoint}
-          model={profile.chat_model}
-          contextLength={profile.chat_context_length}
-          concurrency={profile.chat_concurrency}
-          isLocal={isLocal}
-          busy={modelBusy}
-          onEndpointChange={(v) => updateProfile({ chat_endpoint: v })}
-          onModelChange={(v) => updateProfile({ chat_model: v })}
-          onContextLengthChange={(v) => updateProfile({ chat_context_length: v })}
-          onConcurrencyChange={(v) => updateProfile({ chat_concurrency: v })}
-          onPickFile={() => void handlePickFile("chat")}
-          onProbe={() => void onProbeModelProvider()}
-        />
-        <ModelCard
-          role="graph"
-          endpoint={profile.graph_endpoint}
-          model={profile.graph_model}
-          contextLength={profile.graph_context_length}
-          concurrency={profile.graph_concurrency}
-          isLocal={isLocal}
-          busy={modelBusy}
-          onEndpointChange={(v) => updateProfile({ graph_endpoint: v })}
-          onModelChange={(v) => updateProfile({ graph_model: v })}
-          onContextLengthChange={(v) => updateProfile({ graph_context_length: v })}
-          onConcurrencyChange={(v) => updateProfile({ graph_concurrency: v })}
-          onPickFile={() => void handlePickFile("graph")}
-          onProbe={() => void onProbeModelProvider()}
-        />
-        <ModelCard
-          role="embed"
-          endpoint={profile.embed_endpoint}
-          model={profile.embed_model}
-          contextLength={profile.embed_context_length}
-          concurrency={profile.embed_concurrency}
-          isLocal={isLocal}
-          busy={modelBusy}
-          onEndpointChange={(v) => updateProfile({ embed_endpoint: v })}
-          onModelChange={(v) => updateProfile({ embed_model: v })}
-          onContextLengthChange={(v) => updateProfile({ embed_context_length: v })}
-          onConcurrencyChange={(v) => updateProfile({ embed_concurrency: v })}
-          onPickFile={() => void handlePickFile("embed")}
-          onProbe={() => void onProbeModelProvider()}
-        />
+        {(["chat", "graph", "embed"] as const).map((role) => (
+          <ModelCard
+            key={role}
+            role={role}
+            endpoint={profile[`${role}_endpoint` as keyof typeof profile] as string}
+            model={profile[`${role}_model` as keyof typeof profile] as string}
+            modelPath={isLocal ? modelPathForRole(modelSettings.local_profile, role) : ""}
+            contextLength={profile[`${role}_context_length` as keyof typeof profile] as number | null | undefined}
+            concurrency={profile[`${role}_concurrency` as keyof typeof profile] as number | null | undefined}
+            runtimeStatus={runtimeStatusForRole(localModelRuntimeStatuses, role)}
+            isLocal={isLocal}
+            busy={modelBusy}
+            runtimeBusy={localModelRuntimeBusyRole === role}
+            onEndpointChange={(v) => updateProfile({ [`${role}_endpoint`]: v })}
+            onModelChange={(v) => updateProfile({ [`${role}_model`]: v })}
+            onContextLengthChange={(v) => updateProfile({ [`${role}_context_length`]: v })}
+            onConcurrencyChange={(v) => updateProfile({ [`${role}_concurrency`]: v })}
+            onPickFile={() => void handlePickFile(role)}
+            onProbe={() => void onProbeModelProvider()}
+            onStart={() => void onStartLocalModel(role)}
+            onStop={() => void onStopLocalModel(role)}
+            onRestart={() => void onRestartLocalModel(role)}
+          />
+        ))}
 
-        {/* Status bar */}
-        {modelAvailability && (
+        {modelAvailability ? (
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3">
             <div className="flex items-center gap-2 text-xs">
               <span className={`h-2 w-2 rounded-full ${statusOk ? "bg-emerald-400" : modelAvailability.reachable ? "bg-amber-400" : "bg-red-400"}`} />
               <span className="text-[var(--text-secondary)]">
                 {statusOk
-                  ? "所有模型就绪"
+                  ? "所有模型已就绪"
                   : modelAvailability.reachable
-                    ? `部分就绪（缺少 ${modelAvailability.missing_roles.join(", ")}）`
+                    ? `部分就绪，缺少 ${modelAvailability.missing_roles.join(", ")}`
                     : "连接失败"}
               </span>
             </div>
-            {modelAvailability.errors.length > 0 && (
+            {modelAvailability.errors.length > 0 ? (
               <div className="mt-2 space-y-1">
                 {modelAvailability.errors.map((err, i) => (
                   <div key={i} className="text-[11px] text-red-400">
@@ -490,11 +633,10 @@ export function ModelsTab({
                   </div>
                 ))}
               </div>
-            )}
+            ) : null}
           </div>
-        )}
+        ) : null}
 
-        {/* Save button */}
         <div className="flex justify-end pt-2">
           <AnimatedPressButton
             type="button"

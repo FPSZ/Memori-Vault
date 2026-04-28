@@ -181,7 +181,7 @@ pub(crate) fn provider_to_string(provider: ModelProvider) -> String {
     if provider == ModelProvider::OpenAiCompatible {
         "openai_compatible".to_string()
     } else {
-        "ollama_local".to_string()
+        "llama_cpp_local".to_string()
     }
 }
 
@@ -273,7 +273,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                     .provider
                     .as_deref()
                     .unwrap_or(fallback_provider.as_str()),
-            ) == ModelProvider::OllamaLocal
+            ) == ModelProvider::LlamaCppLocal
             {
                 settings.chat_model.clone()
             } else {
@@ -281,7 +281,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             }
         })
         .or_else(|| {
-            if env_provider == ModelProvider::OllamaLocal {
+            if env_provider == ModelProvider::LlamaCppLocal {
                 std::env::var(MEMORI_CHAT_MODEL_ENV).ok()
             } else {
                 None
@@ -298,7 +298,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                     .provider
                     .as_deref()
                     .unwrap_or(fallback_provider.as_str()),
-            ) == ModelProvider::OllamaLocal
+            ) == ModelProvider::LlamaCppLocal
             {
                 settings.graph_model.clone()
             } else {
@@ -306,7 +306,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             }
         })
         .or_else(|| {
-            if env_provider == ModelProvider::OllamaLocal {
+            if env_provider == ModelProvider::LlamaCppLocal {
                 std::env::var(MEMORI_GRAPH_MODEL_ENV).ok()
             } else {
                 None
@@ -323,7 +323,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                     .provider
                     .as_deref()
                     .unwrap_or(fallback_provider.as_str()),
-            ) == ModelProvider::OllamaLocal
+            ) == ModelProvider::LlamaCppLocal
             {
                 settings.embed_model.clone()
             } else {
@@ -331,7 +331,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             }
         })
         .or_else(|| {
-            if env_provider == ModelProvider::OllamaLocal {
+            if env_provider == ModelProvider::LlamaCppLocal {
                 std::env::var(MEMORI_EMBED_MODEL_ENV).ok()
             } else {
                 None
@@ -442,13 +442,17 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
     ModelSettingsDto {
         active_provider: provider_to_string(active_provider),
         local_profile: LocalModelProfileDto {
-            chat_endpoint: normalize_endpoint(ModelProvider::OllamaLocal, &local_chat_endpoint),
-            graph_endpoint: normalize_endpoint(ModelProvider::OllamaLocal, &local_graph_endpoint),
-            embed_endpoint: normalize_endpoint(ModelProvider::OllamaLocal, &local_embed_endpoint),
+            chat_endpoint: normalize_endpoint(ModelProvider::LlamaCppLocal, &local_chat_endpoint),
+            graph_endpoint: normalize_endpoint(ModelProvider::LlamaCppLocal, &local_graph_endpoint),
+            embed_endpoint: normalize_endpoint(ModelProvider::LlamaCppLocal, &local_embed_endpoint),
             models_root: normalize_optional_text(settings.local_models_root.clone()),
+            llama_server_path: normalize_optional_text(settings.local_llama_server_path.clone()),
             chat_model: local_chat_model,
             graph_model: local_graph_model,
             embed_model: local_embed_model,
+            chat_model_path: normalize_optional_text(settings.local_chat_model_path.clone()),
+            graph_model_path: normalize_optional_text(settings.local_graph_model_path.clone()),
+            embed_model_path: normalize_optional_text(settings.local_embed_model_path.clone()),
             chat_context_length: settings.local_chat_context_length,
             graph_context_length: settings.local_graph_context_length,
             embed_context_length: settings.local_embed_context_length,
@@ -488,15 +492,15 @@ pub(crate) fn normalize_model_settings_payload(
 ) -> Result<ModelSettingsDto, String> {
     let active_provider = ModelProvider::from_value(&payload.active_provider);
     let local_chat_endpoint = normalize_endpoint(
-        ModelProvider::OllamaLocal,
+        ModelProvider::LlamaCppLocal,
         &payload.local_profile.chat_endpoint,
     );
     let local_graph_endpoint = normalize_endpoint(
-        ModelProvider::OllamaLocal,
+        ModelProvider::LlamaCppLocal,
         &payload.local_profile.graph_endpoint,
     );
     let local_embed_endpoint = normalize_endpoint(
-        ModelProvider::OllamaLocal,
+        ModelProvider::LlamaCppLocal,
         &payload.local_profile.embed_endpoint,
     );
     let remote_chat_endpoint = normalize_endpoint(
@@ -534,6 +538,14 @@ pub(crate) fn normalize_model_settings_payload(
             let p = PathBuf::from(&path);
             p.canonicalize().unwrap_or(p).to_string_lossy().to_string()
         });
+    let local_llama_server_path =
+        normalize_optional_existing_file(payload.local_profile.llama_server_path, "llama-server")?;
+    let local_chat_model_path =
+        normalize_optional_existing_file(payload.local_profile.chat_model_path, "chat model")?;
+    let local_graph_model_path =
+        normalize_optional_existing_file(payload.local_profile.graph_model_path, "graph model")?;
+    let local_embed_model_path =
+        normalize_optional_existing_file(payload.local_profile.embed_model_path, "embed model")?;
 
     Ok(ModelSettingsDto {
         active_provider: provider_to_string(active_provider),
@@ -542,9 +554,13 @@ pub(crate) fn normalize_model_settings_payload(
             graph_endpoint: local_graph_endpoint,
             embed_endpoint: local_embed_endpoint,
             models_root: local_models_root,
+            llama_server_path: local_llama_server_path,
             chat_model: local_chat_model,
             graph_model: local_graph_model,
             embed_model: local_embed_model,
+            chat_model_path: local_chat_model_path,
+            graph_model_path: local_graph_model_path,
+            embed_model_path: local_embed_model_path,
             chat_context_length: payload.local_profile.chat_context_length,
             graph_context_length: payload.local_profile.graph_context_length,
             embed_context_length: payload.local_profile.embed_context_length,
@@ -584,7 +600,7 @@ pub(crate) fn resolve_active_runtime_settings(
             )
         } else {
             normalize_endpoint(
-                ModelProvider::OllamaLocal,
+                ModelProvider::LlamaCppLocal,
                 &settings.local_profile.chat_endpoint,
             )
         },
@@ -595,7 +611,7 @@ pub(crate) fn resolve_active_runtime_settings(
             )
         } else {
             normalize_endpoint(
-                ModelProvider::OllamaLocal,
+                ModelProvider::LlamaCppLocal,
                 &settings.local_profile.graph_endpoint,
             )
         },
@@ -606,7 +622,7 @@ pub(crate) fn resolve_active_runtime_settings(
             )
         } else {
             normalize_endpoint(
-                ModelProvider::OllamaLocal,
+                ModelProvider::LlamaCppLocal,
                 &settings.local_profile.embed_endpoint,
             )
         },
@@ -615,7 +631,7 @@ pub(crate) fn resolve_active_runtime_settings(
         } else {
             None
         },
-        models_root: if active_provider == ModelProvider::OllamaLocal {
+        models_root: if active_provider == ModelProvider::LlamaCppLocal {
             normalize_optional_text(settings.local_profile.models_root.clone())
         } else {
             None
@@ -728,6 +744,9 @@ pub(crate) fn default_indexing_status(settings: &AppSettings) -> IndexingStatus 
         indexed_chunks: 0,
         graphed_chunks: 0,
         graph_backlog: 0,
+        total_docs: 0,
+        total_chunks: 0,
+        progress_percent: 0,
         last_scan_at: None,
         last_error: None,
         paused: false,
@@ -751,6 +770,25 @@ pub(crate) fn normalize_optional_text(value: Option<String>) -> Option<String> {
     })
 }
 
+pub(crate) fn normalize_optional_existing_file(
+    value: Option<String>,
+    label: &str,
+) -> Result<Option<String>, String> {
+    let Some(path) = normalize_optional_text(value) else {
+        return Ok(None);
+    };
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err(format!("{label} path does not exist: {}", p.display()));
+    }
+    if !p.is_file() {
+        return Err(format!("{label} path is not a file: {}", p.display()));
+    }
+    Ok(Some(
+        p.canonicalize().unwrap_or(p).to_string_lossy().to_string(),
+    ))
+}
+
 pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> String {
     let trimmed = endpoint.trim();
     if !trimmed.is_empty() {
@@ -759,7 +797,7 @@ pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> Str
     if provider == ModelProvider::OpenAiCompatible {
         memori_core::DEFAULT_MODEL_ENDPOINT_OPENAI.to_string()
     } else {
-        DEFAULT_MODEL_ENDPOINT_OLLAMA.to_string()
+        DEFAULT_CHAT_ENDPOINT.to_string()
     }
 }
 

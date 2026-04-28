@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::fs;
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -8,13 +9,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use memori_core::{
     AskResponseStructured, AskStatus, DEFAULT_CHAT_ENDPOINT, DEFAULT_CHAT_MODEL,
     DEFAULT_EMBED_ENDPOINT, DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_GRAPH_ENDPOINT, DEFAULT_GRAPH_MODEL,
-    DEFAULT_MODEL_ENDPOINT_OLLAMA, DEFAULT_MODEL_PROVIDER, EgressMode, EngineError,
-    EnterpriseModelPolicy, IndexingConfig, IndexingMode, IndexingStatus, MEMORI_CHAT_ENDPOINT_ENV,
-    MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_ENDPOINT_ENV, MEMORI_EMBED_MODEL_ENV,
-    MEMORI_GRAPH_ENDPOINT_ENV, MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV,
-    MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV, MemoriEngine, ModelProvider,
-    ResourceBudget, RuntimeModelConfig, ScheduleWindow, VaultStats, normalize_policy_endpoint,
-    validate_provider_request, validate_runtime_model_settings,
+    DEFAULT_MODEL_PROVIDER, EgressMode, EngineError, EnterpriseModelPolicy, IndexingConfig,
+    IndexingMode, IndexingStatus, MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV,
+    MEMORI_EMBED_ENDPOINT_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV,
+    MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV,
+    MEMORI_MODEL_PROVIDER_ENV, MemoriEngine, ModelProvider, ResourceBudget, RuntimeModelConfig,
+    ScheduleWindow, VaultStats, normalize_policy_endpoint, validate_provider_request,
+    validate_runtime_model_settings,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State, WindowEvent};
@@ -77,6 +78,7 @@ pub fn run() {
     let daemon_engine = Arc::clone(&shared_engine);
     let init_error = Arc::new(Mutex::new(None));
     let init_error_worker = Arc::clone(&init_error);
+    let local_models = Arc::new(Mutex::new(std::collections::HashMap::new()));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -118,6 +120,7 @@ pub fn run() {
             app.manage(DesktopState {
                 engine: Arc::clone(&shared_engine),
                 init_error: Arc::clone(&init_error),
+                local_models: Arc::clone(&local_models),
             });
             Ok(())
         })
@@ -126,6 +129,13 @@ pub fn run() {
                 return;
             }
             match event {
+                WindowEvent::CloseRequested { .. } => {
+                    if let Some(state) = window.try_state::<DesktopState>() {
+                        tauri::async_runtime::block_on(async {
+                            state.stop_all_local_models().await;
+                        });
+                    }
+                }
                 WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
                     if let Err(err) = persist_main_window_state(window) {
                         warn!(error = %err, "持久化窗口状态失败");
@@ -152,6 +162,10 @@ pub fn run() {
             list_provider_models,
             probe_model_provider,
             validate_model_setup,
+            get_local_model_runtime_status,
+            start_local_model,
+            stop_local_model,
+            restart_local_model,
             pull_model,
             set_local_models_root,
             scan_local_model_files,

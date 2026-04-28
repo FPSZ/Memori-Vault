@@ -254,7 +254,7 @@ pub fn list_tools() -> ListToolsResult {
             ),
             tool(
                 TOOL_PULL_MODEL,
-                "Pull a local Ollama model; may be long-running.",
+                "Report that llama.cpp local runtime does not support model pulling.",
                 schema(&["model", "provider", "endpoint"]),
             ),
             tool(
@@ -710,15 +710,10 @@ async fn probe_model_provider(args: Option<JsonValue>) -> Result<JsonValue, Json
 
 async fn pull_model(args: Option<JsonValue>) -> Result<JsonValue, JsonRpcError> {
     let payload = parse_params::<PullModelRequest>(args)?;
-    if ModelProvider::from_value(&payload.provider) != ModelProvider::OllamaLocal {
-        return Err(JsonRpcError::invalid_params(
-            "pull_model only supports ollama_local",
-        ));
-    }
-    let endpoint = normalize_endpoint(ModelProvider::OllamaLocal, &payload.endpoint);
-    pull_ollama_model(&endpoint, &payload.model, None)
+    let endpoint = normalize_endpoint(ModelProvider::LlamaCppLocal, &payload.endpoint);
+    pull_llama_cpp_model(&endpoint, &payload.model, None)
         .await
-        .map_err(JsonRpcError::internal_error)?;
+        .map_err(JsonRpcError::invalid_params)?;
     Ok(json!({ "ok": true, "model": payload.model }))
 }
 
@@ -1020,7 +1015,7 @@ fn schema(required: &[&str]) -> JsonValue {
             }
             "model" => json!({ "type": "string", "description": "Model name to pull" }),
             "provider" => {
-                json!({ "type": "string", "enum": ["ollama_local", "openai_compatible"], "description": "Model provider" })
+                json!({ "type": "string", "enum": ["llama_cpp_local", "openai_compatible"], "description": "Model provider" })
             }
             "endpoint" => json!({ "type": "string", "description": "Provider endpoint URL" }),
             "api_key" => json!({ "type": "string", "description": "API key for remote provider" }),
@@ -1037,7 +1032,7 @@ fn schema(required: &[&str]) -> JsonValue {
                 json!({ "type": "string", "description": "Schedule end time (HH:MM)" })
             }
             "active_provider" => {
-                json!({ "type": "string", "enum": ["ollama_local", "openai_compatible"], "description": "Active provider" })
+                json!({ "type": "string", "enum": ["llama_cpp_local", "openai_compatible"], "description": "Active provider" })
             }
             "local_profile" => json!({ "type": "object", "description": "Local provider profile" }),
             "remote_profile" => {

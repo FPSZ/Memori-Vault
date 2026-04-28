@@ -29,7 +29,7 @@ When in doubt, prioritize correctness, observability, and first-answer speed.
 - Rust stable (`1.85+` recommended)
 - Node.js 20+
 - npm
-- Ollama (for local model mode)
+- llama.cpp `llama-server` with OpenAI-compatible endpoints (for local model mode)
 
 ## 4. Quality Gates (Required)
 

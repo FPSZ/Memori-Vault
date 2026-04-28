@@ -46,7 +46,7 @@ export function SelectionChips<T extends string>({
 }: {
   value: T;
   onChange: (value: T) => void;
-  options: Array<{ value: T; label: string }>;
+  options: Array<{ value: T; label: string; disabled?: boolean }>;
 }) {
   return (
     <div className="inline-flex flex-wrap items-center gap-2">
@@ -54,11 +54,14 @@ export function SelectionChips<T extends string>({
         <AnimatedPressButton
           key={option.value}
           type="button"
+          disabled={option.disabled}
           onClick={() => onChange(option.value)}
           className={`rounded-md px-3 py-1.5 text-sm transition ${
             value === option.value
               ? "bg-transparent text-[var(--accent)]"
-              : "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+              : option.disabled
+                ? "cursor-not-allowed bg-transparent text-[var(--text-secondary)] opacity-45"
+                : "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
           }`}
         >
           {option.label}

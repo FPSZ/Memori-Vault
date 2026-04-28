@@ -28,7 +28,7 @@ pub use memori_storage::{
 use memori_storage::{RebuildState, SqliteStore, StorageError};
 use memori_vault::{
     MemoriVaultConfig, MemoriVaultError, MemoriVaultHandle, WatchEvent, WatchEventKind,
-    create_event_channel, spawn_memori_vault,
+    create_event_channel, is_supported_content_file, spawn_memori_vault,
 };
 use thiserror::Error;
 use tokio::sync::{RwLock, mpsc};
@@ -36,10 +36,9 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
-pub const DEFAULT_MODEL_PROVIDER: &str = "ollama_local";
-pub const DEFAULT_MODEL_ENDPOINT_OLLAMA: &str = "http://localhost:11434";
+pub const DEFAULT_MODEL_PROVIDER: &str = "llama_cpp_local";
 pub const DEFAULT_MODEL_ENDPOINT_OPENAI: &str = "https://api.openai.com";
-pub const DEFAULT_OLLAMA_EMBED_MODEL: &str = "nomic-embed-text:latest";
+pub const DEFAULT_LOCAL_EMBED_MODEL: &str = "Qwen3-Embedding-4B";
 pub const DEFAULT_CHAT_MODEL: &str = "qwen2.5:7b";
 pub const DEFAULT_GRAPH_MODEL: &str = "qwen2.5:7b";
 
@@ -69,15 +68,7 @@ const DEFAULT_FINAL_ANSWER_K: usize = 6;
 const RRF_K: f64 = 60.0;
 
 fn is_supported_index_file(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|s| s.to_str())
-        .map(|ext| {
-            matches!(
-                ext.to_ascii_lowercase().as_str(),
-                "md" | "txt" | "docx" | "pdf"
-            )
-        })
-        .unwrap_or(false)
+    is_supported_content_file(path)
 }
 
 fn is_likely_directory_path(path: &std::path::Path) -> bool {
@@ -183,6 +174,9 @@ pub struct IndexingStatus {
     pub indexed_chunks: u64,
     pub graphed_chunks: u64,
     pub graph_backlog: u64,
+    pub total_docs: u64,
+    pub total_chunks: u64,
+    pub progress_percent: u32,
     pub last_scan_at: Option<i64>,
     pub last_error: Option<String>,
     pub paused: bool,
@@ -493,12 +487,12 @@ struct IndexingRuntimeState {
 }
 
 /// 全局共享状态。
-/// 当前持有 parser 占位、SQLite 持久化存储与本地 Ollama 客户端。
+/// 当前持有 parser 占位、SQLite 持久化存储与本地 llama.cpp 客户端。
 #[derive(Debug)]
 pub struct AppState {
     pub parser: ParserStub,
     pub vector_store: Arc<SqliteStore>,
-    pub embedding_client: OllamaEmbeddingClient,
+    pub embedding_client: LocalEmbeddingClient,
     db_path: PathBuf,
     query_embedding_cache: Arc<RwLock<HashMap<String, EmbeddingCacheItem>>>,
     indexing_runtime: Arc<RwLock<IndexingRuntimeState>>,
@@ -511,7 +505,7 @@ impl AppState {
         Ok(Self {
             parser: ParserStub,
             vector_store,
-            embedding_client: OllamaEmbeddingClient::default(),
+            embedding_client: LocalEmbeddingClient::default(),
             db_path,
             query_embedding_cache: Arc::new(RwLock::new(HashMap::new())),
             indexing_runtime: Arc::new(RwLock::new(IndexingRuntimeState {
@@ -527,13 +521,13 @@ impl AppState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelProvider {
-    OllamaLocal,
+    LlamaCppLocal,
     OpenAiCompatible,
 }
 
 impl ModelProvider {
     pub fn from_value(text: &str) -> Self {
-        text.parse().unwrap_or(Self::OllamaLocal)
+        text.parse().unwrap_or(Self::LlamaCppLocal)
     }
 }
 
@@ -542,7 +536,9 @@ impl FromStr for ModelProvider {
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         match text.trim().to_ascii_lowercase().as_str() {
-            "ollama_local" => Ok(Self::OllamaLocal),
+            "llama_cpp_local" | "llamacpp_local" | "llama.cpp_local" | "ollama_local" => {
+                Ok(Self::LlamaCppLocal)
+            }
             "openai_compatible" => Ok(Self::OpenAiCompatible),
             _ => Err("unknown model provider"),
         }
@@ -600,13 +596,7 @@ pub struct RuntimeModelConfig {
 pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
     let provider = std::env::var(MEMORI_MODEL_PROVIDER_ENV)
         .map(|v| ModelProvider::from_value(&v))
-        .unwrap_or(ModelProvider::OllamaLocal);
-
-    let _endpoint_default: &'static str = match provider {
-        ModelProvider::OllamaLocal => DEFAULT_MODEL_ENDPOINT_OLLAMA,
-        ModelProvider::OpenAiCompatible => DEFAULT_MODEL_ENDPOINT_OPENAI,
-    };
-    let _ = _endpoint_default;
+        .unwrap_or(ModelProvider::LlamaCppLocal);
     // 优先使用独立端点环境变量，其次使用常驻默认。
     // 不再回退 MEMORI_MODEL_ENDPOINT_ENV：前端设置只有一个 endpoint 输入框，
     // 回退到 legacy 变量会把三个独立端点全部覆盖为同一个值。
@@ -697,7 +687,7 @@ pub fn validate_provider_request(
     endpoint: &str,
     models: &[String],
 ) -> Result<(), PolicyViolation> {
-    if provider == ModelProvider::OllamaLocal {
+    if provider == ModelProvider::LlamaCppLocal {
         return Ok(());
     }
 
@@ -784,14 +774,14 @@ pub fn validate_runtime_model_settings(
 
 /// 统一 Embedding 客户端（兼容 llama-server / vLLM / OpenAI 的 /v1/embeddings）。
 #[derive(Debug, Clone)]
-pub struct OllamaEmbeddingClient {
+pub struct LocalEmbeddingClient {
     http: reqwest::Client,
     base_url: String,
     api_key: Option<String>,
     model: String,
 }
 
-impl Default for OllamaEmbeddingClient {
+impl Default for LocalEmbeddingClient {
     fn default() -> Self {
         let runtime = resolve_runtime_model_config_from_env();
         Self {
@@ -806,7 +796,7 @@ impl Default for OllamaEmbeddingClient {
     }
 }
 
-impl OllamaEmbeddingClient {
+impl LocalEmbeddingClient {
     pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             http: reqwest::Client::builder()
@@ -823,7 +813,7 @@ impl OllamaEmbeddingClient {
         &self.model
     }
 
-    pub async fn embed_text(&self, prompt: &str) -> Result<Vec<f32>, OllamaClientError> {
+    pub async fn embed_text(&self, prompt: &str) -> Result<Vec<f32>, LocalModelClientError> {
         let url = format!("{}/v1/embeddings", self.base_url.trim_end_matches('/'));
         let mut request = self.http.post(url).json(&OpenAiEmbeddingRequest {
             model: &self.model,
@@ -833,7 +823,10 @@ impl OllamaEmbeddingClient {
             request = request.bearer_auth(key);
         }
 
-        let response = request.send().await.map_err(OllamaClientError::Request)?;
+        let response = request
+            .send()
+            .await
+            .map_err(LocalModelClientError::Request)?;
         let status = response.status();
         if !status.is_success() {
             let body = match response.text().await {
@@ -841,14 +834,16 @@ impl OllamaEmbeddingClient {
                 Err(err) => format!("<读取响应体失败: {err}>"),
             };
 
-            return Err(OllamaClientError::HttpStatus {
+            return Err(LocalModelClientError::HttpStatus {
                 status: status.as_u16(),
                 body,
             });
         }
 
-        let parsed: OpenAiEmbeddingResponse =
-            response.json().await.map_err(OllamaClientError::Request)?;
+        let parsed: OpenAiEmbeddingResponse = response
+            .json()
+            .await
+            .map_err(LocalModelClientError::Request)?;
 
         let embedding = parsed
             .data
@@ -857,7 +852,7 @@ impl OllamaEmbeddingClient {
             .map(|item| item.embedding)
             .unwrap_or_default();
         if embedding.is_empty() {
-            return Err(OllamaClientError::EmptyEmbedding);
+            return Err(LocalModelClientError::EmptyEmbedding);
         }
         Ok(embedding)
     }
@@ -880,14 +875,14 @@ struct OpenAiEmbeddingItem {
 }
 
 #[derive(Debug, Error)]
-pub enum OllamaClientError {
+pub enum LocalModelClientError {
     #[error("Embedding 请求失败: {0}")]
     Request(#[source] reqwest::Error),
 
-    #[error("Ollama 返回非成功状态: {status}, body: {body}")]
+    #[error("本地模型服务返回非成功状态: {status}, body: {body}")]
     HttpStatus { status: u16, body: String },
 
-    #[error("Ollama 返回空向量")]
+    #[error("本地模型服务返回空向量")]
     EmptyEmbedding,
 }
 
@@ -901,7 +896,7 @@ pub enum EngineError {
     Storage(#[from] StorageError),
 
     #[error("本地大模型请求错误: {0}")]
-    Ollama(#[from] OllamaClientError),
+    LocalModel(#[from] LocalModelClientError),
 
     #[error("图谱抽取请求失败: {0}")]
     GraphExtractRequest(#[source] reqwest::Error),
@@ -1678,8 +1673,8 @@ mod tests {
             &analysis,
             Vec::new(),
             vec![memori_storage::DocumentSignalMatch {
-                file_path: "docs/enterprise.md".to_string(),
-                relative_path: "docs/enterprise.md".to_string(),
+                file_path: "docs/guides/enterprise.md".to_string(),
+                relative_path: "docs/guides/enterprise.md".to_string(),
                 file_name: "enterprise.md".to_string(),
                 matched_fields: vec!["docs_phrase".to_string()],
                 score: 180,
@@ -1697,7 +1692,7 @@ mod tests {
             }],
         );
 
-        assert_eq!(merged[0].relative_path, "docs/enterprise.md");
+        assert_eq!(merged[0].relative_path, "docs/guides/enterprise.md");
         assert_eq!(merged[0].document_reason, "docs_phrase");
     }
 
