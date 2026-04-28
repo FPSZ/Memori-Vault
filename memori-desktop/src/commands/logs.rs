@@ -58,9 +58,7 @@ pub(crate) async fn get_logs(
             match parse_log_line(line) {
                 Ok(log_entry) => {
                     if let Some(ref f) = filter {
-                        let level_order = level_rank(&log_entry.level);
-                        let filter_order = level_rank(f);
-                        if level_order < filter_order {
+                        if log_entry.level.to_ascii_uppercase() != *f {
                             continue;
                         }
                     }
@@ -142,13 +140,4 @@ fn parse_log_line(line: &str) -> Result<LogEntry, serde_json::Error> {
     })
 }
 
-fn level_rank(level: &str) -> u8 {
-    match level.to_ascii_uppercase().as_str() {
-        "TRACE" => 0,
-        "DEBUG" => 1,
-        "INFO" => 2,
-        "WARN" => 3,
-        "ERROR" => 4,
-        _ => 2,
-    }
-}
+

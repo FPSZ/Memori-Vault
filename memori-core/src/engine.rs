@@ -705,9 +705,13 @@ impl MemoriEngine {
         let total_docs = self.state.vector_store.count_catalog_entries().await.unwrap_or(0);
         let total_chunks = indexed_chunks.max(1);
         let progress_percent = match runtime.phase.as_str() {
-            "scanning" => ((indexed_docs as f64 / total_docs.max(1) as f64) * 100.0) as u32,
-            "embedding" => ((indexed_chunks as f64 / total_chunks as f64) * 100.0) as u32,
-            "graphing" => ((graphed_chunks as f64 / total_chunks as f64) * 100.0) as u32,
+            "scanning" => ((indexed_docs as f64 / total_docs.max(1) as f64) * 33.0) as u32,
+            "embedding" => {
+                33 + ((indexed_chunks as f64 / total_chunks.max(1) as f64) * 33.0) as u32
+            }
+            "graphing" => {
+                66 + ((graphed_chunks as f64 / total_chunks.max(1) as f64) * 34.0) as u32
+            }
             _ if metadata.rebuild_state == memori_storage::RebuildState::Ready => 100,
             _ => 0,
         }

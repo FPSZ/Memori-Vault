@@ -126,25 +126,58 @@ export function AdvancedTab({
           {/* Progress bar */}
           {indexingStatus && indexingStatus.phase !== "idle" ? (
             <div className="mb-3">
-              <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)] mb-1">
-                <span>{indexingPhaseLabel}</span>
-                <span className="font-mono">{indexingStatus.progress_percent}%</span>
+              <div className="flex items-center justify-between text-[11px] mb-1">
+                <span className={`font-medium ${
+                  indexingStatus.progress_percent < 33
+                    ? "text-red-400"
+                    : indexingStatus.progress_percent < 66
+                      ? "text-amber-400"
+                      : indexingStatus.progress_percent < 100
+                        ? "text-emerald-400"
+                        : "text-sky-400"
+                }`}>
+                  {indexingStatus.progress_percent < 33
+                    ? "扫描文档中…（暂不可用）"
+                    : indexingStatus.progress_percent < 66
+                      ? "建立向量索引中…（即将可用）"
+                      : indexingStatus.progress_percent < 100
+                        ? "构建知识图谱中…（已可使用）"
+                        : "索引完全就绪"}
+                </span>
+                <span className="font-mono text-[var(--text-muted)]">{indexingStatus.progress_percent}%</span>
               </div>
-              <div className="h-1.5 w-full rounded-full bg-[var(--bg-surface-2)] overflow-hidden">
+              {/* Segmented progress bar with milestone markers */}
+              <div className="relative h-2 w-full">
+                {/* Background track with segments */}
+                <div className="absolute inset-0 flex rounded-full overflow-hidden">
+                  <div className="w-[33%] h-full bg-red-500/15 border-r border-[var(--bg-surface-1)]" />
+                  <div className="w-[33%] h-full bg-amber-500/15 border-r border-[var(--bg-surface-1)]" />
+                  <div className="w-[34%] h-full bg-emerald-500/15" />
+                </div>
+                {/* Fill bar */}
                 <motion.div
-                  className={`h-full rounded-full ${
-                    indexingStatus.phase === "scanning"
-                      ? "bg-sky-400"
-                      : indexingStatus.phase === "embedding"
-                        ? "bg-emerald-400"
-                        : indexingStatus.phase === "graphing"
-                          ? "bg-violet-400"
-                          : "bg-[var(--accent)]"
+                  className={`absolute top-0 left-0 h-full rounded-full ${
+                    indexingStatus.progress_percent < 33
+                      ? "bg-red-400"
+                      : indexingStatus.progress_percent < 66
+                        ? "bg-amber-400"
+                        : indexingStatus.progress_percent < 100
+                          ? "bg-emerald-400"
+                          : "bg-sky-400"
                   }`}
                   initial={{ width: 0 }}
                   animate={{ width: `${indexingStatus.progress_percent}%` }}
                   transition={{ duration: 0.5, ease: "easeOut" }}
                 />
+                {/* Milestone markers */}
+                <div className="absolute top-0 left-[33%] h-full w-px bg-[var(--bg-surface-1)]" />
+                <div className="absolute top-0 left-[66%] h-full w-px bg-[var(--bg-surface-1)]" />
+              </div>
+              {/* Milestone labels */}
+              <div className="mt-1 flex justify-between text-[9px] text-[var(--text-muted)]">
+                <span className={indexingStatus.progress_percent >= 33 ? "text-amber-400 font-medium" : ""}>可用</span>
+                <span className={indexingStatus.progress_percent >= 66 ? "text-emerald-400 font-medium" : ""}>搜索</span>
+                <span className={indexingStatus.progress_percent >= 100 ? "text-sky-400 font-medium" : ""}>优化</span>
               </div>
               <div className="mt-1 flex gap-3 text-[10px] text-[var(--text-muted)]">
                 <span>文档 {indexingStatus.indexed_docs}/{indexingStatus.total_docs}</span>

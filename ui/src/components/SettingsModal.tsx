@@ -285,19 +285,30 @@ export function SettingsModal({
   }, [indexingStatus?.last_scan_at, t, uiLang]);
 
   const etaLabel = useMemo(() => {
-    const backlog = Math.max(0, indexingStatus?.graph_backlog ?? 0);
-    if (backlog === 0) {
-      return uiLang === "zh-CN" ? "≈ 0 分钟" : "~0 min";
+    const phase = indexingStatus?.phase ?? "idle";
+    if (phase === "idle" || phase === "ready") {
+      return uiLang === "zh-CN" ? "已完成" : "Done";
     }
-    const perChunkSec =
-      resourceBudget === "fast" ? 0.35 : resourceBudget === "balanced" ? 0.8 : 1.4;
-    const totalSec = Math.ceil(backlog * perChunkSec);
+    const perDocSec = resourceBudget === "fast" ? 0.3 : resourceBudget === "balanced" ? 0.6 : 1.0;
+    const perChunkEmbedSec = resourceBudget === "fast" ? 0.5 : resourceBudget === "balanced" ? 1.0 : 2.0;
+    const perChunkGraphSec = resourceBudget === "fast" ? 0.35 : resourceBudget === "balanced" ? 0.8 : 1.4;
+    let totalSec = 0;
+    if (phase === "scanning") {
+      const remaining = Math.max(0, (indexingStatus?.total_docs ?? 0) - (indexingStatus?.indexed_docs ?? 0));
+      totalSec = remaining * perDocSec;
+    } else if (phase === "embedding") {
+      const remaining = Math.max(0, (indexingStatus?.total_chunks ?? 0) - (indexingStatus?.indexed_chunks ?? 0));
+      totalSec = remaining * perChunkEmbedSec;
+    } else if (phase === "graphing") {
+      const backlog = Math.max(0, indexingStatus?.graph_backlog ?? 0);
+      totalSec = backlog * perChunkGraphSec;
+    }
     if (totalSec < 60) {
-      return uiLang === "zh-CN" ? `≈ ${totalSec} 秒` : `~${totalSec}s`;
+      return uiLang === "zh-CN" ? `≈ ${Math.ceil(totalSec)} 秒` : `~${Math.ceil(totalSec)}s`;
     }
     const minutes = Math.ceil(totalSec / 60);
     return uiLang === "zh-CN" ? `≈ ${minutes} 分钟` : `~${minutes} min`;
-  }, [indexingStatus?.graph_backlog, resourceBudget, uiLang]);
+  }, [indexingStatus, resourceBudget, uiLang]);
 
   const indexingButtonClass = (key: IndexingActionKey) => {
     if (indexingAction.key !== key) {
