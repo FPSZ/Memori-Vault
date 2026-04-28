@@ -143,19 +143,20 @@ pub(crate) async fn read_file_content(path: String) -> Result<String, String> {
         return Err(format!("路径不是文件: {}", target.display()));
     }
 
-    // Only allow reading text files for safety
+    // Only allow previewing supported document/text files for safety.
     let ext = target
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let allowed_exts = [
+    let plain_text_exts = [
         "md", "txt", "rs", "py", "js", "ts", "jsx", "tsx", "json", "yaml", "yml", "toml", "html",
         "css", "c", "cpp", "h", "hpp", "go", "java", "kt", "swift", "rb", "php", "sh", "bat",
         "ps1", "log",
     ];
-    if !allowed_exts.contains(&ext.as_str()) {
-        return Err(format!("不支持的文件类型: .{ext}"));
+    let extracted_text_exts = ["docx", "pdf"];
+    if !plain_text_exts.contains(&ext.as_str()) && !extracted_text_exts.contains(&ext.as_str()) {
+        return Err(format!("不支持预览的文件类型: .{ext}"));
     }
 
     // Read with size limit (5MB)
@@ -164,6 +165,11 @@ pub(crate) async fn read_file_content(path: String) -> Result<String, String> {
         return Err("文件过大（超过 5MB）".to_string());
     }
 
-    let content = std::fs::read_to_string(&target).map_err(|e| format!("读取文件失败: {e}"))?;
+    let content = if extracted_text_exts.contains(&ext.as_str()) {
+        memori_parser::extract_document_text(&target)
+            .ok_or_else(|| format!("无法从 .{ext} 文件提取可预览文本"))?
+    } else {
+        std::fs::read_to_string(&target).map_err(|e| format!("读取文件失败: {e}"))?
+    };
     Ok(content)
 }

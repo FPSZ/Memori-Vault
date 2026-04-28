@@ -22,6 +22,7 @@ import type {
   EnterprisePolicyDto,
   FontPreset,
   FontScale,
+  IndexFilterConfigDto,
   IndexingMode,
   IndexingStatusDto,
   McpSettingsDto,
@@ -40,6 +41,7 @@ import type { Language } from "./i18n";
 import {
   getAppSettings,
   getEnterprisePolicy,
+  getIndexFilter,
   getIndexingStatus,
   getMcpSettings,
   getMcpStatus,
@@ -54,6 +56,7 @@ import {
   restartLocalModel,
   resumeIndexing,
   setEnterprisePolicy as saveEnterprisePolicyRemote,
+  setIndexFilter as saveIndexFilterRemote,
   setIndexingMode as saveIndexingModeRemote,
   setMcpSettings as saveMcpSettingsRemote,
   setMemorySettings as saveMemorySettingsRemote,
@@ -159,6 +162,18 @@ const DEFAULT_MEMORY_SETTINGS: MemorySettingsDto = {
   default_context_budget: "16k",
   complex_context_budget: "32k",
   graph_ranking_enabled: false
+};
+
+const DEFAULT_FILTER_CONFIG: IndexFilterConfigDto = {
+  enabled: false,
+  include_extensions: [],
+  exclude_extensions: [],
+  exclude_paths: [],
+  include_paths: [],
+  min_mtime: null,
+  max_mtime: null,
+  min_size: null,
+  max_size: null
 };
 
 function detectDefaultLanguage(): Language {
@@ -367,6 +382,19 @@ export default function App() {
   const [memorySettings, setMemorySettings] = useState<MemorySettingsDto>(DEFAULT_MEMORY_SETTINGS);
   const [memoryBusy, setMemoryBusy] = useState(false);
   const [memoryMessage, setMemoryMessage] = useState<string | null>(null);
+  const [filterConfig, setFilterConfig] = useState<IndexFilterConfigDto>({
+    enabled: false,
+    include_extensions: [],
+    exclude_extensions: [],
+    exclude_paths: [],
+    include_paths: [],
+    min_mtime: null,
+    max_mtime: null,
+    min_size: null,
+    max_size: null,
+  });
+  const [filterBusy, setFilterBusy] = useState(false);
+  const [filterMessage, setFilterMessage] = useState<string | null>(null);
   const [modelAvailability, setModelAvailability] = useState<ModelAvailabilityDto | null>(null);
   const [localModelRuntimeStatuses, setLocalModelRuntimeStatuses] =
     useState<LocalModelRuntimeStatusesDto | null>(null);
@@ -588,6 +616,15 @@ export default function App() {
           setScheduleStart(settings.schedule_start || "00:00");
           setScheduleEnd(settings.schedule_end || "06:00");
           setMemorySettings(settingsToMemorySettings(settings));
+          // 加载索引筛选配置
+          try {
+            const filter = await getIndexFilter();
+            if (active && filter) {
+              setFilterConfig(filter);
+            }
+          } catch {
+            // 忽略筛选配置加载失败
+          }
           if (!window.localStorage.getItem(AI_LANG_STORAGE_KEY) && settings.language) {
             const normalized = settings.language.toLowerCase();
             if (normalized.startsWith("zh")) {
@@ -613,6 +650,19 @@ export default function App() {
             mode: normalizeIndexingMode(status.mode),
             resource_budget: normalizeResourceBudget(status.resource_budget)
           });
+        }
+      } catch (error) {
+        if (active) {
+          setError(toUiErrorMessage(error));
+        }
+      }
+    };
+
+    const loadIndexFilter = async () => {
+      try {
+        const config = await getIndexFilter();
+        if (active) {
+          setFilterConfig(config ?? DEFAULT_FILTER_CONFIG);
         }
       } catch (error) {
         if (active) {
@@ -736,6 +786,7 @@ export default function App() {
     void loadStats();
     void loadSettings();
     void loadIndexingStatus();
+    void loadIndexFilter();
     void loadEnterprisePolicy();
     void loadMcpSettings();
     void loadModelSettings().then(() => {
@@ -1339,6 +1390,27 @@ export default function App() {
     }
   };
 
+  const onSaveFilterConfig = async () => {
+    setFilterBusy(true);
+    setFilterMessage(null);
+    try {
+      await withTimeout(
+        saveIndexFilterRemote(filterConfig),
+        INDEXING_ACTION_TIMEOUT_MS,
+        uiLang === "zh-CN" ? "保存索引筛选配置超时，请重试。" : "Saving index filter timed out."
+      );
+      setFilterMessage(uiLang === "zh-CN" ? "索引筛选配置已保存，重新索引后生效。" : "Index filter saved. Reindex to apply it.");
+      await refreshIndexingStatus();
+    } catch (err) {
+      const message = toUiErrorMessage(err);
+      setError(message);
+      setFilterMessage(message);
+      throw err;
+    } finally {
+      setFilterBusy(false);
+    }
+  };
+
   const updateActiveOnboardingProfile = (
     patch: Partial<{
       chat_endpoint: string;
@@ -1734,6 +1806,11 @@ export default function App() {
                 memoryMessage={memoryMessage}
                 onMemorySettingsChange={setMemorySettings}
                 onSaveMemorySettings={onSaveMemorySettings}
+                filterConfig={filterConfig}
+                filterBusy={filterBusy}
+                filterMessage={filterMessage}
+                onFilterConfigChange={setFilterConfig}
+                onSaveFilterConfig={onSaveFilterConfig}
               />
             </motion.div>
           )}
@@ -1771,7 +1848,5 @@ export default function App() {
     </div>
   );
 }
-
-
 
 

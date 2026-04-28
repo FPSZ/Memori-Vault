@@ -702,16 +702,19 @@ impl MemoriEngine {
         let indexed_chunks = self.state.vector_store.count_chunks().await?;
         let graphed_chunks = self.state.vector_store.count_graphed_chunks().await?;
         let graph_backlog = self.state.vector_store.count_graph_backlog().await?;
-        let total_docs = self.state.vector_store.count_catalog_entries().await.unwrap_or(0);
+        let total_docs = self
+            .state
+            .vector_store
+            .count_catalog_entries()
+            .await
+            .unwrap_or(0);
         let total_chunks = indexed_chunks.max(1);
         let progress_percent = match runtime.phase.as_str() {
             "scanning" => ((indexed_docs as f64 / total_docs.max(1) as f64) * 33.0) as u32,
             "embedding" => {
                 33 + ((indexed_chunks as f64 / total_chunks.max(1) as f64) * 33.0) as u32
             }
-            "graphing" => {
-                66 + ((graphed_chunks as f64 / total_chunks.max(1) as f64) * 34.0) as u32
-            }
+            "graphing" => 66 + ((graphed_chunks as f64 / total_chunks.max(1) as f64) * 34.0) as u32,
             _ if metadata.rebuild_state == memori_storage::RebuildState::Ready => 100,
             _ => 0,
         }
@@ -768,6 +771,11 @@ impl MemoriEngine {
     pub async fn set_indexing_config(&self, config: IndexingConfig) {
         let mut runtime = self.state.indexing_runtime.write().await;
         runtime.config = config;
+    }
+
+    pub async fn set_index_filter_config(&self, filter: Option<crate::IndexFilterConfig>) {
+        let mut runtime = self.state.indexing_runtime.write().await;
+        runtime.filter_config = filter;
     }
 
     pub async fn pause_indexing(&self) {
@@ -833,7 +841,17 @@ impl MemoriEngine {
             runtime.last_error = None;
         }
 
-        let existing_files = collect_supported_text_files_recursively(root.clone()).await;
+        let filter = {
+            self.state
+                .indexing_runtime
+                .read()
+                .await
+                .filter_config
+                .clone()
+        };
+        let existing_files =
+            collect_supported_text_files_recursively(root.clone(), filter.as_ref(), Some(&root))
+                .await;
         for path in existing_files {
             let event = WatchEvent {
                 kind: WatchEventKind::Modified,
@@ -933,8 +951,13 @@ impl MemoriEngine {
                         runtime.last_error = None;
                     }
 
-                    let existing_files =
-                        collect_supported_text_files_recursively(root.clone()).await;
+                    let filter = { state.indexing_runtime.read().await.filter_config.clone() };
+                    let existing_files = collect_supported_text_files_recursively(
+                        root.clone(),
+                        filter.as_ref(),
+                        Some(&root),
+                    )
+                    .await;
                     info!(
                         root = %root.display(),
                         file_count = existing_files.len(),

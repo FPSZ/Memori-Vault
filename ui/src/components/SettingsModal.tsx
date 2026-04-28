@@ -1,11 +1,11 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Brain, Cpu, Database, Network, Palette, ScrollText, Search, Settings } from "lucide-react";
+import { ArrowRight, Brain, Cpu, Database, Filter, Network, Palette, ScrollText, Search, Settings } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { Language } from "../i18n";
 import { useI18n } from "../i18n";
 import { AnimatedPressButton } from "./MotionKit";
 import { rankSettingsQuery } from "../app/api/desktop";
-import { AdvancedTab, BasicTab, LogsTab, McpTab, MemoryTab, ModelsTab, PersonalizationTab } from "./settings/tabs";
+import { AdvancedTab, BasicTab, FilterTab, LogsTab, McpTab, MemoryTab, ModelsTab, PersonalizationTab } from "./settings/tabs";
 import type {
   FontPreset,
   FontScale,
@@ -17,7 +17,7 @@ import type {
 } from "./settings/types";
 import type { IndexingActionKey } from "./settings/tabs/AdvancedTab";
 
-type TabKey = "basic" | "models" | "memory" | "mcp" | "advanced" | "personalization" | "logs";
+type TabKey = "basic" | "models" | "memory" | "mcp" | "advanced" | "filter" | "personalization" | "logs";
 
 export function SettingsModal({
   open,
@@ -82,7 +82,12 @@ export function SettingsModal({
   memoryBusy,
   memoryMessage,
   onMemorySettingsChange,
-  onSaveMemorySettings
+  onSaveMemorySettings,
+  filterConfig,
+  filterBusy,
+  filterMessage,
+  onFilterConfigChange,
+  onSaveFilterConfig,
 }: SettingsModalProps) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabKey>("basic");
@@ -146,6 +151,22 @@ export function SettingsModal({
           t("triggerReindex"),
           t("pauseIndexing"),
           t("resumeIndexing")
+        ]
+      },
+      {
+        key: "filter" as const,
+        label: t("filter"),
+        icon: Filter,
+        keywords: [
+          t("fileFilter"),
+          t("includeExtensions"),
+          t("excludeExtensions"),
+          t("excludePaths"),
+          t("includePaths"),
+          t("minDate"),
+          t("maxDate"),
+          t("minSize"),
+          t("maxSize"),
         ]
       },
       {
@@ -507,6 +528,16 @@ export function SettingsModal({
                 onThemeModeChange={onThemeModeChange}
                 fontPresetOptions={fontPresetOptions}
                 fontScaleOptions={fontScaleOptions}
+              />
+            ) : null}
+
+            {activeTab === "filter" ? (
+              <FilterTab
+                filterConfig={filterConfig}
+                filterBusy={filterBusy}
+                filterMessage={filterMessage}
+                onFilterConfigChange={onFilterConfigChange}
+                onSaveFilterConfig={onSaveFilterConfig}
               />
             ) : null}
 

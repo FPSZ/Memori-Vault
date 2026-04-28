@@ -92,6 +92,80 @@ function runtimeStatusForRole(
   return statuses?.roles.find((item) => item.role === role) ?? null;
 }
 
+type RoleErrorMap = Partial<Record<ModelRoleKey, string>>;
+
+function roleEndpoint(profile: LocalModelProfileDto, role: ModelRoleKey): string {
+  if (role === "chat") return profile.chat_endpoint;
+  if (role === "graph") return profile.graph_endpoint;
+  return profile.embed_endpoint;
+}
+
+function roleModel(profile: LocalModelProfileDto, role: ModelRoleKey): string {
+  if (role === "chat") return profile.chat_model;
+  if (role === "graph") return profile.graph_model;
+  return profile.embed_model;
+}
+
+function endpointHasUsablePort(endpoint: string): boolean {
+  try {
+    const url = new URL(endpoint);
+    return Boolean(url.port || url.protocol === "http:" || url.protocol === "https:");
+  } catch {
+    return false;
+  }
+}
+
+function validateLocalRoles(
+  profile: LocalModelProfileDto,
+  roles: readonly ModelRoleKey[]
+): { ok: boolean; roleErrors: RoleErrorMap; generalErrors: string[]; firstRole: ModelRoleKey | null } {
+  const roleErrors: RoleErrorMap = {};
+  const generalErrors: string[] = [];
+
+  if (!profile.llama_server_path?.trim()) {
+    generalErrors.push("未选择 llama-server 可执行文件。可以继续尝试从 PATH 查找；如果启动失败，请先选择 llama-server.exe。");
+  }
+
+  for (const role of roles) {
+    const label = ROLE_META[role].label;
+    const modelPath = modelPathForRole(profile, role).trim();
+    const modelName = roleModel(profile, role).trim();
+    const endpoint = roleEndpoint(profile, role).trim();
+    if (!modelPath) {
+      roleErrors[role] = `${label}缺少 GGUF 文件路径，请展开卡片并点击“浏览”选择模型文件。`;
+      continue;
+    }
+    if (!modelName) {
+      roleErrors[role] = `${label}缺少模型名称。`;
+      continue;
+    }
+    if (!endpoint || !endpointHasUsablePort(endpoint)) {
+      roleErrors[role] = `${label}端口/endpoint 无效，请检查端口号。`;
+    }
+  }
+
+  const firstRole = roles.find((role) => Boolean(roleErrors[role])) ?? null;
+  return {
+    ok: Object.keys(roleErrors).length === 0,
+    roleErrors,
+    generalErrors,
+    firstRole
+  };
+}
+
+function describeAvailabilityError(
+  code: string,
+  message: string,
+  localProfile: LocalModelProfileDto | null
+): string {
+  if (!localProfile) return `${code}: ${message}`;
+  const role = (["chat", "graph", "embed"] as const).find((candidate) => {
+    const endpoint = roleEndpoint(localProfile, candidate);
+    return endpoint && message.includes(endpoint);
+  });
+  return role ? `${ROLE_META[role].label}: ${code}: ${message}` : `${code}: ${message}`;
+}
+
 const ROLE_META: Record<
   ModelRoleKey,
   { label: string; icon: React.ElementType; color: string; defaultModel: string; defaultPort: string }
@@ -130,6 +204,8 @@ type ModelCardProps = {
   isLocal: boolean;
   busy: boolean;
   runtimeBusy: boolean;
+  expanded: boolean;
+  validationMessage?: string | null;
   onEndpointChange: (v: string) => void;
   onModelChange: (v: string) => void;
   onContextLengthChange: (v: number | null) => void;
@@ -139,6 +215,7 @@ type ModelCardProps = {
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
+  onExpandedChange: (expanded: boolean) => void;
 };
 
 function ModelCard({
@@ -152,6 +229,8 @@ function ModelCard({
   isLocal,
   busy,
   runtimeBusy,
+  expanded,
+  validationMessage,
   onEndpointChange,
   onModelChange,
   onContextLengthChange,
@@ -160,9 +239,9 @@ function ModelCard({
   onProbe,
   onStart,
   onStop,
-  onRestart
+  onRestart,
+  onExpandedChange
 }: ModelCardProps) {
-  const [expanded, setExpanded] = useState(false);
   const meta = ROLE_META[role];
   const Icon = meta.icon;
   const port = extractPort(endpoint);
@@ -175,7 +254,7 @@ function ModelCard({
         : "未启动";
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)]">
+    <div className={`overflow-hidden rounded-xl border bg-[var(--bg-surface-1)] ${validationMessage ? "border-red-400/60" : "border-[var(--border-subtle)]"}`}>
       <div className="flex items-center gap-3 px-4 py-3">
         <div className={`flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--bg-surface-2)] ${meta.color}`}>
           <Icon className="h-4 w-4" />
@@ -229,7 +308,7 @@ function ModelCard({
           </button>
           <button
             type="button"
-            onClick={() => setExpanded((p) => !p)}
+            onClick={() => onExpandedChange(!expanded)}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--bg-surface-2)] hover:text-[var(--text-primary)]"
           >
             {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -247,6 +326,12 @@ function ModelCard({
             className="overflow-hidden"
           >
             <div className="space-y-3 border-t border-[var(--border-subtle)] px-4 py-3">
+              {validationMessage ? (
+                <div className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+                  {validationMessage}
+                </div>
+              ) : null}
+
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-[var(--text-muted)]">模型名称</label>
                 <input
@@ -390,6 +475,54 @@ export function ModelsTab({
   const activeProvider = modelSettings.active_provider;
   const isLocal = activeProvider === "llama_cpp_local";
   const profile = isLocal ? modelSettings.local_profile : modelSettings.remote_profile;
+  const [expandedRoles, setExpandedRoles] = useState<Record<ModelRoleKey, boolean>>({
+    chat: false,
+    graph: false,
+    embed: false
+  });
+  const [localRoleErrors, setLocalRoleErrors] = useState<RoleErrorMap>({});
+  const [localConfigMessages, setLocalConfigMessages] = useState<string[]>([]);
+
+  const setRoleExpanded = (role: ModelRoleKey, expanded: boolean) => {
+    setExpandedRoles((prev) => ({ ...prev, [role]: expanded }));
+  };
+
+  const expandRoles = (roles: readonly ModelRoleKey[]) => {
+    setExpandedRoles((prev) => {
+      const next = { ...prev };
+      for (const role of roles) {
+        next[role] = true;
+      }
+      return next;
+    });
+  };
+
+  const showLocalValidation = (
+    check: ReturnType<typeof validateLocalRoles>,
+    fallbackMessage: string
+  ) => {
+    setLocalRoleErrors(check.roleErrors);
+    const messages = [
+      ...Object.values(check.roleErrors),
+      ...check.generalErrors
+    ].filter((message): message is string => Boolean(message));
+    setLocalConfigMessages(messages.length > 0 ? messages : [fallbackMessage]);
+    const rolesWithError = (["chat", "graph", "embed"] as const).filter((role) => check.roleErrors[role]);
+    if (rolesWithError.length > 0) {
+      expandRoles(rolesWithError);
+    } else if (check.firstRole) {
+      setRoleExpanded(check.firstRole, true);
+    }
+  };
+
+  const clearLocalValidationForRole = (role: ModelRoleKey) => {
+    setLocalRoleErrors((prev) => {
+      if (!prev[role]) return prev;
+      const next = { ...prev };
+      delete next[role];
+      return next;
+    });
+  };
 
   const updateProfile = (patch: Partial<LocalModelProfileDto & RemoteModelProfileDto>) => {
     if (isLocal) {
@@ -409,6 +542,9 @@ export function ModelsTab({
     const path = await pickLlamaServerFile();
     if (path) {
       updateProfile({ llama_server_path: path });
+      setLocalConfigMessages((prev) =>
+        prev.filter((message) => !message.includes("llama-server"))
+      );
     }
   };
 
@@ -434,9 +570,82 @@ export function ModelsTab({
       patch.models_root = dirPath;
     }
     updateProfile(patch);
+    clearLocalValidationForRole(role);
+    setRoleExpanded(role, true);
   };
 
   const statusOk = modelAvailability?.reachable && modelAvailability?.missing_roles?.length === 0;
+
+  const handleStartLocalModel = async (role: ModelRoleKey) => {
+    if (isLocal) {
+      const check = validateLocalRoles(modelSettings.local_profile, [role]);
+      if (!check.ok) {
+        showLocalValidation(check, `${ROLE_META[role].label}配置不完整，无法启动。`);
+        setRoleExpanded(role, true);
+        return;
+      }
+      setLocalRoleErrors((prev) => {
+        const next = { ...prev };
+        delete next[role];
+        return next;
+      });
+    }
+    try {
+      await onStartLocalModel(role);
+      setLocalConfigMessages([]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLocalRoleErrors((prev) => ({ ...prev, [role]: message }));
+      setLocalConfigMessages([`${ROLE_META[role].label}启动失败：${message}`]);
+      setRoleExpanded(role, true);
+    }
+  };
+
+  const handleProbe = async () => {
+    if (isLocal) {
+      const check = validateLocalRoles(modelSettings.local_profile, ["chat", "graph", "embed"]);
+      if (!check.ok) {
+        showLocalValidation(check, "本地模型配置不完整，无法探测。");
+        return;
+      }
+      setLocalRoleErrors({});
+      setLocalConfigMessages(check.generalErrors);
+    }
+    try {
+      await onProbeModelProvider();
+    } catch {
+      if (isLocal) {
+        setLocalConfigMessages((prev) =>
+          prev.length > 0
+            ? prev
+            : ["探测失败：配置已完整，但模型服务未连通。请确认三个模型已经启动，或检查端口是否被占用。"]
+        );
+      }
+    }
+  };
+
+  const handleRefreshProviderModels = async () => {
+    if (isLocal) {
+      const check = validateLocalRoles(modelSettings.local_profile, ["chat", "graph", "embed"]);
+      if (!check.ok) {
+        showLocalValidation(check, "本地模型配置不完整，无法刷新模型列表。");
+        return;
+      }
+      setLocalRoleErrors({});
+      setLocalConfigMessages(check.generalErrors);
+    }
+    try {
+      await onRefreshProviderModels();
+    } catch {
+      if (isLocal) {
+        setLocalConfigMessages((prev) =>
+          prev.length > 0
+            ? prev
+            : ["刷新模型列表失败：请确认模型服务已经启动，或检查端口配置。"]
+        );
+      }
+    }
+  };
 
   return (
     <motion.div
@@ -485,6 +694,14 @@ export function ModelsTab({
 
         {isLocal ? (
           <div className="space-y-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3">
+            {localConfigMessages.length > 0 ? (
+              <div className="space-y-1 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
+                {localConfigMessages.map((message, index) => (
+                  <div key={index}>{message}</div>
+                ))}
+              </div>
+            ) : null}
+
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-[var(--text-secondary)]">llama-server 可执行文件</span>
@@ -550,7 +767,7 @@ export function ModelsTab({
               </div>
               <button
                 type="button"
-                onClick={() => void onRefreshProviderModels()}
+                onClick={() => void handleRefreshProviderModels()}
                 disabled={modelBusy}
                 className="ml-auto inline-flex items-center gap-1 text-[11px] text-[var(--accent)] transition hover:opacity-80 disabled:opacity-50"
               >
@@ -601,15 +818,18 @@ export function ModelsTab({
             isLocal={isLocal}
             busy={modelBusy}
             runtimeBusy={localModelRuntimeBusyRole === role}
+            expanded={expandedRoles[role]}
+            validationMessage={localRoleErrors[role] ?? null}
             onEndpointChange={(v) => updateProfile({ [`${role}_endpoint`]: v })}
             onModelChange={(v) => updateProfile({ [`${role}_model`]: v })}
             onContextLengthChange={(v) => updateProfile({ [`${role}_context_length`]: v })}
             onConcurrencyChange={(v) => updateProfile({ [`${role}_concurrency`]: v })}
             onPickFile={() => void handlePickFile(role)}
-            onProbe={() => void onProbeModelProvider()}
-            onStart={() => void onStartLocalModel(role)}
+            onProbe={() => void handleProbe()}
+            onStart={() => void handleStartLocalModel(role)}
             onStop={() => void onStopLocalModel(role)}
             onRestart={() => void onRestartLocalModel(role)}
+            onExpandedChange={(expanded) => setRoleExpanded(role, expanded)}
           />
         ))}
 
@@ -629,7 +849,11 @@ export function ModelsTab({
               <div className="mt-2 space-y-1">
                 {modelAvailability.errors.map((err, i) => (
                   <div key={i} className="text-[11px] text-red-400">
-                    {err.code}: {err.message}
+                    {describeAvailabilityError(
+                      err.code,
+                      err.message,
+                      isLocal ? modelSettings.local_profile : null
+                    )}
                   </div>
                 ))}
               </div>

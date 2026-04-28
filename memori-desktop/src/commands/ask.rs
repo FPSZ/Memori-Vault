@@ -81,23 +81,64 @@ pub(crate) async fn get_vault_stats(state: State<'_, DesktopState>) -> Result<Va
     let init_error_guard = state.init_error.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
         if let Some(message) = init_error_guard.as_ref() {
-            if is_model_not_configured_message(message) {
-                return Ok(VaultStats {
-                    document_count: 0,
-                    chunk_count: 0,
-                    graph_node_count: 0,
-                });
-            }
-            return Err(format!("引擎初始化失败: {message}"));
+            warn!(
+                error = %message,
+                "engine 尚未就绪，Vault 统计回退为直接读取 SQLite"
+            );
+            return get_vault_stats_from_sqlite();
         }
-        return Ok(VaultStats {
-            document_count: 0,
-            chunk_count: 0,
-            graph_node_count: 0,
-        });
+        return get_vault_stats_from_sqlite();
     };
     engine
         .get_vault_stats()
         .await
         .map_err(|err| err.to_string())
+}
+
+fn get_vault_stats_from_sqlite() -> Result<VaultStats, String> {
+    let db_path = resolve_desktop_db_path()?;
+    if !db_path.exists() {
+        return Ok(VaultStats {
+            document_count: 0,
+            chunk_count: 0,
+            graph_node_count: 0,
+        });
+    }
+
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|err| format!("读取统计数据库失败({}): {err}", db_path.display()))?;
+
+    Ok(VaultStats {
+        document_count: count_table_rows(&conn, "documents")?,
+        chunk_count: count_table_rows(&conn, "chunks")?,
+        graph_node_count: count_table_rows(&conn, "nodes")?,
+    })
+}
+
+fn resolve_desktop_db_path() -> Result<PathBuf, String> {
+    if let Ok(path) = std::env::var(memori_core::MEMORI_DB_PATH_ENV) {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+    if let Some(data_dir) = dirs::data_dir() {
+        return Ok(data_dir.join("Memori-Vault").join(".memori.db"));
+    }
+    Ok(std::env::current_dir()
+        .map_err(|err| format!("获取当前工作目录失败: {err}"))?
+        .join(".memori.db"))
+}
+
+fn count_table_rows(conn: &rusqlite::Connection, table: &str) -> Result<u64, String> {
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    let count: i64 = conn
+        .query_row(&sql, [], |row| row.get(0))
+        .map_err(|err| format!("读取 {table} 统计失败: {err}"))?;
+    u64::try_from(count).map_err(|_| format!("{table} 统计值异常: {count}"))
 }

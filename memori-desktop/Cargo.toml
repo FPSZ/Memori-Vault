@@ -27,5 +27,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 memori-core = { path = "../memori-core" }
+memori-parser = { path = "../memori-parser" }
 dirs = "6.0.0"
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.37.0", features = ["bundled"] }

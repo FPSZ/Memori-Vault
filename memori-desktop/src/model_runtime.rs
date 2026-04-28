@@ -58,6 +58,25 @@ pub(crate) async fn replace_engine(
         new_engine
             .set_indexing_config(resolve_indexing_config(&settings))
             .await;
+        // 加载索引筛选配置
+        if let Some(ref filter) = settings.index_filter {
+            let core_filter = if filter.enabled {
+                Some(memori_core::IndexFilterConfig {
+                    enabled: filter.enabled,
+                    include_extensions: filter.include_extensions.clone(),
+                    exclude_extensions: filter.exclude_extensions.clone(),
+                    exclude_paths: filter.exclude_paths.clone(),
+                    include_paths: filter.include_paths.clone(),
+                    min_mtime: filter.min_mtime.clone(),
+                    max_mtime: filter.max_mtime.clone(),
+                    min_size: filter.min_size,
+                    max_size: filter.max_size,
+                })
+            } else {
+                None
+            };
+            new_engine.set_index_filter_config(core_filter).await;
+        }
         new_engine.start_daemon().map_err(|err| err.to_string())?;
 
         {

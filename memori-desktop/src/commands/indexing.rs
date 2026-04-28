@@ -128,3 +128,54 @@ pub(crate) async fn resume_indexing(state: State<'_, DesktopState>) -> Result<()
     engine.resume_indexing().await;
     Ok(())
 }
+
+#[tauri::command]
+pub(crate) async fn get_index_filter() -> Result<Option<IndexFilterConfig>, String> {
+    let settings = load_app_settings()?;
+    Ok(settings.index_filter)
+}
+
+#[tauri::command]
+pub(crate) async fn set_index_filter(
+    payload: IndexFilterConfig,
+    state: State<'_, DesktopState>,
+) -> Result<AppSettingsDto, String> {
+    info!(enabled = payload.enabled, "[用户操作] 修改索引筛选配置");
+    let mut settings = load_app_settings()?;
+    settings.index_filter = Some(payload.clone());
+    save_app_settings(&settings)?;
+
+    let engine_guard = state.engine.lock().await;
+    let init_error_guard = state.init_error.lock().await;
+    let Some(engine) = engine_guard.as_ref() else {
+        if let Some(message) = init_error_guard.as_ref() {
+            return Err(format!("引擎初始化失败: {message}"));
+        }
+        return Err("引擎尚在初始化中，请稍后重试。".to_string());
+    };
+
+    let core_filter = if payload.enabled {
+        Some(memori_core::IndexFilterConfig {
+            enabled: payload.enabled,
+            include_extensions: payload.include_extensions,
+            exclude_extensions: payload.exclude_extensions,
+            exclude_paths: payload.exclude_paths,
+            include_paths: payload.include_paths,
+            min_mtime: payload.min_mtime,
+            max_mtime: payload.max_mtime,
+            min_size: payload.min_size,
+            max_size: payload.max_size,
+        })
+    } else {
+        None
+    };
+    engine.set_index_filter_config(core_filter).await;
+
+    let watch_root = resolve_watch_root_from_settings(&settings)?;
+    let indexing = resolve_indexing_config(&settings);
+    Ok(AppSettingsDto::from_settings(
+        settings,
+        watch_root.to_string_lossy().to_string(),
+        indexing,
+    ))
+}

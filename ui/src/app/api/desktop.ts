@@ -8,6 +8,7 @@ import type {
 } from "../types";
 import type {
   EnterprisePolicyDto,
+  IndexFilterConfigDto,
   IndexingStatusDto,
   McpSettingsDto,
   McpStatusDto,
@@ -76,6 +77,14 @@ export function pauseIndexing() {
 
 export function resumeIndexing() {
   return invoke("resume_indexing");
+}
+
+export function getIndexFilter() {
+  return invoke<IndexFilterConfigDto | null>("get_index_filter");
+}
+
+export function setIndexFilter(payload: IndexFilterConfigDto) {
+  return invoke<AppSettingsDto>("set_index_filter", { payload });
 }
 
 export function getModelSettings() {

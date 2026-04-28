@@ -1,4 +1,5 @@
 mod engine;
+mod filter;
 mod graph_extractor;
 mod indexing;
 mod llm_generator;
@@ -15,6 +16,7 @@ use std::time::Instant;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, hash::Hash, hash::Hasher};
 
+pub use filter::IndexFilterConfig;
 pub use graph_extractor::GraphData;
 use graph_extractor::extract_entities;
 use llm_generator::generate_answer as generate_llm_answer;
@@ -484,6 +486,7 @@ struct IndexingRuntimeState {
     last_error: Option<String>,
     paused: bool,
     config: IndexingConfig,
+    filter_config: Option<filter::IndexFilterConfig>,
 }
 
 /// 全局共享状态。
@@ -514,6 +517,7 @@ impl AppState {
                 last_error: None,
                 paused: false,
                 config: IndexingConfig::default(),
+                filter_config: None,
             })),
         })
     }

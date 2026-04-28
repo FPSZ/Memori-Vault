@@ -139,5 +139,3 @@ fn parse_log_line(line: &str) -> Result<LogEntry, serde_json::Error> {
             .map(|s| s.to_string()),
     })
 }
-
-

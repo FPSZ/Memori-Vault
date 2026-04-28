@@ -77,6 +77,25 @@ pub(crate) async fn process_file_event(
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .and_then(|d| i64::try_from(d.as_secs()).ok())
         .unwrap_or(0);
+
+    // 应用筛选规则
+    {
+        let runtime = state.indexing_runtime.read().await;
+        if let Some(ref filter) = runtime.filter_config {
+            if !crate::filter::should_index_file(
+                &event.path,
+                Some(filter),
+                watch_root,
+                Some(metadata.len()),
+                Some(mtime_secs),
+            ) {
+                debug!(path = %event.path.display(), "文件被筛选规则排除，跳过索引");
+                set_runtime_idle(state, None).await;
+                return;
+            }
+        }
+    }
+
     if let Err(err) = state
         .vector_store
         .upsert_catalog_entry(&event.path, watch_root, file_size, mtime_secs)
@@ -234,7 +253,8 @@ pub(crate) async fn process_file_event(
     let mut embeddings = Vec::with_capacity(chunks.len());
     for (chunk_position, chunk) in chunks.iter().enumerate() {
         let chunk_number = chunk_position + 1;
-        let is_milestone = chunk_number == 1 || chunk_number % 10 == 0 || chunk_number == chunks.len();
+        let is_milestone =
+            chunk_number == 1 || chunk_number % 10 == 0 || chunk_number == chunks.len();
         if is_milestone {
             debug!(
                 path = %event.path.display(),
@@ -715,7 +735,13 @@ pub(crate) async fn run_full_rebuild(
         state.vector_store.begin_full_rebuild(reason).await?;
         state.vector_store.purge_all_index_data().await?;
 
-        let existing_files = collect_supported_text_files_recursively(root.to_path_buf()).await;
+        let filter = { state.indexing_runtime.read().await.filter_config.clone() };
+        let existing_files = collect_supported_text_files_recursively(
+            root.to_path_buf(),
+            filter.as_ref(),
+            Some(root),
+        )
+        .await;
         info!(
             root = %root.display(),
             reason = reason,
@@ -777,7 +803,11 @@ pub(crate) async fn run_full_rebuild(
     }
 }
 
-pub(crate) async fn collect_supported_text_files_recursively(root: PathBuf) -> Vec<PathBuf> {
+pub(crate) async fn collect_supported_text_files_recursively(
+    root: PathBuf,
+    filter: Option<&crate::IndexFilterConfig>,
+    watch_root: Option<&std::path::Path>,
+) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut stack = vec![root];
 
@@ -814,10 +844,17 @@ pub(crate) async fn collect_supported_text_files_recursively(root: PathBuf) -> V
             let path = entry.path();
             match entry.file_type().await {
                 Ok(file_type) if file_type.is_dir() => {
-                    stack.push(path);
+                    // 目录也应用排除规则，避免递归进入被排除的目录
+                    if crate::filter::should_index_file(&path, filter, watch_root, None, None) {
+                        stack.push(path);
+                    } else {
+                        debug!(path = %path.display(), "目录被筛选规则排除，跳过递归");
+                    }
                 }
                 Ok(file_type) if file_type.is_file() => {
-                    if is_supported_text_file(&path) {
+                    if is_supported_text_file(&path)
+                        && crate::filter::should_index_file(&path, filter, watch_root, None, None)
+                    {
                         files.push(path);
                     }
                 }

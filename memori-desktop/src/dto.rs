@@ -2,6 +2,31 @@ use memori_core::EgressMode;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub(crate) struct IndexFilterConfig {
+    pub(crate) enabled: bool,
+    /// 白名单扩展名（如 ["md", "txt"]），空表示全部支持类型
+    #[serde(default)]
+    pub(crate) include_extensions: Vec<String>,
+    /// 黑名单扩展名
+    #[serde(default)]
+    pub(crate) exclude_extensions: Vec<String>,
+    /// 排除路径模式（glob，相对于 watch_root）
+    #[serde(default)]
+    pub(crate) exclude_paths: Vec<String>,
+    /// 手动包含路径（glob，优先级最高，可覆盖排除规则）
+    #[serde(default)]
+    pub(crate) include_paths: Vec<String>,
+    /// 最小修改日期 (YYYY-MM-DD)
+    pub(crate) min_mtime: Option<String>,
+    /// 最大修改日期 (YYYY-MM-DD)
+    pub(crate) max_mtime: Option<String>,
+    /// 最小文件大小（字节）
+    pub(crate) min_size: Option<u64>,
+    /// 最大文件大小（字节）
+    pub(crate) max_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct AppSettings {
     pub(crate) watch_root: Option<String>,
     pub(crate) language: Option<String>,
@@ -63,6 +88,8 @@ pub(crate) struct AppSettings {
     pub(crate) default_context_budget: Option<String>,
     pub(crate) complex_context_budget: Option<String>,
     pub(crate) graph_ranking_enabled: Option<bool>,
+    #[serde(default)]
+    pub(crate) index_filter: Option<IndexFilterConfig>,
     // legacy fields for backwards compatibility
     pub(crate) provider: Option<String>,
     pub(crate) endpoint: Option<String>,

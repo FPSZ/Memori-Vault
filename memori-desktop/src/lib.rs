@@ -153,6 +153,8 @@ pub fn run() {
             trigger_reindex,
             pause_indexing,
             resume_indexing,
+            get_index_filter,
+            set_index_filter,
             get_app_settings,
             set_memory_settings,
             get_model_settings,
@@ -299,7 +301,7 @@ fn collect_search_scopes_recursive(
             continue;
         }
 
-        if metadata.is_file() && is_supported_text_file(&path) {
+        if metadata.is_file() && is_supported_document_file(&path) {
             result.push(SearchScopeItem {
                 path: path.to_string_lossy().to_string(),
                 name,
@@ -311,11 +313,14 @@ fn collect_search_scopes_recursive(
     }
 }
 
-fn is_supported_text_file(path: &std::path::Path) -> bool {
+fn is_supported_document_file(path: &std::path::Path) -> bool {
     let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
         return false;
     };
-    ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("txt")
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "md" | "txt" | "docx" | "pdf"
+    )
 }
 
 fn format_legacy_answer(response: &AskResponseStructured) -> String {
@@ -358,4 +363,26 @@ fn format_legacy_references(response: &AskResponseStructured) -> String {
         ));
     }
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_supported_document_file;
+    use std::path::Path;
+
+    #[test]
+    fn search_scope_accepts_all_indexable_document_formats() {
+        for ext in ["md", "txt", "docx", "pdf", "MD", "PDF"] {
+            let name = format!("sample.{ext}");
+            assert!(is_supported_document_file(Path::new(&name)));
+        }
+    }
+
+    #[test]
+    fn search_scope_rejects_non_document_formats() {
+        for ext in ["json", "png", "py", "tmp"] {
+            let name = format!("sample.{ext}");
+            assert!(!is_supported_document_file(Path::new(&name)));
+        }
+    }
 }

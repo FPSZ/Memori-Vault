@@ -10,6 +10,18 @@ export type ModelRole = "chat_model" | "graph_model" | "embed_model";
 export type McpTransport = "stdio" | "http";
 export type McpTransportMode = "stdio" | "http" | "both";
 
+export type IndexFilterConfigDto = {
+  enabled: boolean;
+  include_extensions: string[];
+  exclude_extensions: string[];
+  exclude_paths: string[];
+  include_paths: string[];
+  min_mtime: string | null;
+  max_mtime: string | null;
+  min_size: number | null;
+  max_size: number | null;
+};
+
 export type LocalModelProfileDto = {
   chat_endpoint: string;
   graph_endpoint: string;
@@ -201,4 +213,9 @@ export type SettingsModalProps = {
   memoryMessage: string | null;
   onMemorySettingsChange: (next: MemorySettingsDto) => void;
   onSaveMemorySettings: () => Promise<void>;
+  filterConfig: IndexFilterConfigDto;
+  filterBusy: boolean;
+  filterMessage: string | null;
+  onFilterConfigChange: (next: IndexFilterConfigDto) => void;
+  onSaveFilterConfig: () => Promise<void>;
 };
