@@ -95,6 +95,15 @@ pub(crate) async fn set_model_settings(
     settings.local_chat_concurrency = normalized.local_profile.chat_concurrency;
     settings.local_graph_concurrency = normalized.local_profile.graph_concurrency;
     settings.local_embed_concurrency = normalized.local_profile.embed_concurrency;
+    settings.local_performance_preset = normalized.local_profile.performance_preset.clone();
+    settings.local_n_gpu_layers = normalized.local_profile.n_gpu_layers;
+    settings.local_batch_size = normalized.local_profile.batch_size;
+    settings.local_ubatch_size = normalized.local_profile.ubatch_size;
+    settings.local_threads = normalized.local_profile.threads;
+    settings.local_threads_batch = normalized.local_profile.threads_batch;
+    settings.local_flash_attn = normalized.local_profile.flash_attn;
+    settings.local_cache_type_k = normalized.local_profile.cache_type_k.clone();
+    settings.local_cache_type_v = normalized.local_profile.cache_type_v.clone();
     settings.remote_chat_context_length = normalized.remote_profile.chat_context_length;
     settings.remote_graph_context_length = normalized.remote_profile.graph_context_length;
     settings.remote_embed_context_length = normalized.remote_profile.embed_context_length;
@@ -330,6 +339,9 @@ pub(crate) async fn start_local_model(
     let settings = load_app_settings()?;
     let profile = resolve_model_settings(&settings).local_profile;
     start_local_model_role(&role, &profile, &state).await?;
+    if role == "embed" {
+        resume_engine_indexing_if_ready(&state).await;
+    }
     local_runtime_statuses(&state, &profile).await
 }
 
@@ -355,7 +367,17 @@ pub(crate) async fn restart_local_model(
     let profile = resolve_model_settings(&settings).local_profile;
     stop_local_model_role(&role, &state).await?;
     start_local_model_role(&role, &profile, &state).await?;
+    if role == "embed" {
+        resume_engine_indexing_if_ready(&state).await;
+    }
     local_runtime_statuses(&state, &profile).await
+}
+
+async fn resume_engine_indexing_if_ready(state: &State<'_, DesktopState>) {
+    let engine_guard = state.engine.lock().await;
+    if let Some(engine) = engine_guard.as_ref() {
+        engine.resume_indexing().await;
+    }
 }
 
 #[tauri::command]
@@ -472,6 +494,113 @@ fn role_concurrency(profile: &LocalModelProfileDto, role: &str) -> Option<u32> {
         "graph" => profile.graph_concurrency,
         "embed" => profile.embed_concurrency,
         _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct LlamaRuntimeArgs {
+    n_gpu_layers: Option<i32>,
+    batch_size: Option<u32>,
+    ubatch_size: Option<u32>,
+    threads: Option<u32>,
+    threads_batch: Option<u32>,
+    flash_attn: bool,
+    cache_type_k: Option<String>,
+    cache_type_v: Option<String>,
+}
+
+fn resolved_llama_runtime_args(profile: &LocalModelProfileDto) -> LlamaRuntimeArgs {
+    let preset = profile
+        .performance_preset
+        .as_deref()
+        .unwrap_or("compat")
+        .to_ascii_lowercase();
+    let mut args = match preset.as_str() {
+        "gpu" => LlamaRuntimeArgs {
+            n_gpu_layers: Some(-1),
+            batch_size: Some(1024),
+            ubatch_size: Some(512),
+            flash_attn: true,
+            ..Default::default()
+        },
+        "low_vram" | "low-vram" => LlamaRuntimeArgs {
+            n_gpu_layers: Some(24),
+            batch_size: Some(256),
+            ubatch_size: Some(128),
+            cache_type_k: Some("q8_0".to_string()),
+            cache_type_v: Some("q8_0".to_string()),
+            ..Default::default()
+        },
+        "throughput" => LlamaRuntimeArgs {
+            n_gpu_layers: Some(-1),
+            batch_size: Some(2048),
+            ubatch_size: Some(512),
+            flash_attn: true,
+            ..Default::default()
+        },
+        _ => LlamaRuntimeArgs::default(),
+    };
+
+    if profile.n_gpu_layers.is_some() {
+        args.n_gpu_layers = profile.n_gpu_layers;
+    }
+    if profile.batch_size.is_some() {
+        args.batch_size = profile.batch_size;
+    }
+    if profile.ubatch_size.is_some() {
+        args.ubatch_size = profile.ubatch_size;
+    }
+    if profile.threads.is_some() {
+        args.threads = profile.threads;
+    }
+    if profile.threads_batch.is_some() {
+        args.threads_batch = profile.threads_batch;
+    }
+    if let Some(flash_attn) = profile.flash_attn {
+        args.flash_attn = flash_attn;
+    }
+    if let Some(cache_type_k) = normalize_optional_text(profile.cache_type_k.clone()) {
+        args.cache_type_k = Some(cache_type_k);
+    }
+    if let Some(cache_type_v) = normalize_optional_text(profile.cache_type_v.clone()) {
+        args.cache_type_v = Some(cache_type_v);
+    }
+
+    args
+}
+
+fn append_llama_runtime_args(command: &mut Command, args: &LlamaRuntimeArgs) {
+    if let Some(value) = args.n_gpu_layers {
+        command.arg("--n-gpu-layers").arg(value.to_string());
+    }
+    if let Some(value) = args.batch_size.filter(|value| *value > 0) {
+        command.arg("--batch-size").arg(value.to_string());
+    }
+    if let Some(value) = args.ubatch_size.filter(|value| *value > 0) {
+        command.arg("--ubatch-size").arg(value.to_string());
+    }
+    if let Some(value) = args.threads.filter(|value| *value > 0) {
+        command.arg("--threads").arg(value.to_string());
+    }
+    if let Some(value) = args.threads_batch.filter(|value| *value > 0) {
+        command.arg("--threads-batch").arg(value.to_string());
+    }
+    if args.flash_attn {
+        command.arg("--flash-attn");
+    }
+    if let Some(value) = args
+        .cache_type_k
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        command.arg("--cache-type-k").arg(value);
+    }
+    if let Some(value) = args
+        .cache_type_v
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        command.arg("--cache-type-v").arg(value);
     }
 }
 
@@ -626,7 +755,7 @@ async fn start_local_model_role(
         let message = format!(
             "port conflict: cannot start {role} model because 127.0.0.1:{port} is already in use"
         );
-        error!(role = %role, port = port, endpoint = %endpoint, "local llama.cpp port conflict");
+        error!(role = %role, port = port, endpoint = %endpoint, error = %message, "local llama.cpp port conflict");
         return Err(message);
     }
 
@@ -649,6 +778,8 @@ async fn start_local_model_role(
     if let Some(parallel) = role_concurrency(profile, role).filter(|value| *value > 0) {
         command.arg("--parallel").arg(parallel.to_string());
     }
+    let runtime_args = resolved_llama_runtime_args(profile);
+    append_llama_runtime_args(&mut command, &runtime_args);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -657,10 +788,13 @@ async fn start_local_model_role(
     }
 
     let child = command.spawn().map_err(|err| {
-        format!(
-            "failed to start llama-server for {role} ({}): {err}",
-            llama_server.display()
-        )
+        let message = format!(
+            "failed to start llama-server for {role}; executable={}; model={}; port={port}; reason={err}",
+            llama_server.display(),
+            model_path_buf.display()
+        );
+        error!(role = %role, port = port, model = %model, path = %model_path_buf.display(), error = %err, "local model start failed");
+        message
     })?;
     let pid = child.id();
     info!(

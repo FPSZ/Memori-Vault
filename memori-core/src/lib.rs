@@ -818,10 +818,62 @@ impl LocalEmbeddingClient {
     }
 
     pub async fn embed_text(&self, prompt: &str) -> Result<Vec<f32>, LocalModelClientError> {
+        let mut embeddings = self.embed_batch(&[prompt.to_string()]).await?;
+        Ok(embeddings.pop().unwrap_or_default())
+    }
+
+    pub async fn embed_batch(
+        &self,
+        prompts: &[String],
+    ) -> Result<Vec<Vec<f32>>, LocalModelClientError> {
+        if prompts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let input = if prompts.len() == 1 {
+            serde_json::Value::String(prompts[0].clone())
+        } else {
+            serde_json::Value::Array(
+                prompts
+                    .iter()
+                    .map(|item| serde_json::Value::String(item.clone()))
+                    .collect(),
+            )
+        };
+
+        match self.embed_request(input, prompts.len()).await {
+            Ok(embeddings) => Ok(embeddings),
+            Err(err) if prompts.len() > 1 && should_retry_embeddings_individually(&err) => {
+                warn!(
+                    error = %err,
+                    batch_size = prompts.len(),
+                    "batch embedding failed; falling back to single-item requests"
+                );
+                let mut embeddings = Vec::with_capacity(prompts.len());
+                for prompt in prompts {
+                    embeddings.push(
+                        self.embed_request(serde_json::Value::String(prompt.clone()), 1)
+                            .await?
+                            .into_iter()
+                            .next()
+                            .unwrap_or_default(),
+                    );
+                }
+                Ok(embeddings)
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn embed_request(
+        &self,
+        input: serde_json::Value,
+        expected_count: usize,
+    ) -> Result<Vec<Vec<f32>>, LocalModelClientError> {
         let url = format!("{}/v1/embeddings", self.base_url.trim_end_matches('/'));
         let mut request = self.http.post(url).json(&OpenAiEmbeddingRequest {
             model: &self.model,
-            input: prompt,
+            input,
         });
         if let Some(key) = self.api_key.as_ref() {
             request = request.bearer_auth(key);
@@ -835,7 +887,7 @@ impl LocalEmbeddingClient {
         if !status.is_success() {
             let body = match response.text().await {
                 Ok(text) => text,
-                Err(err) => format!("<读取响应体失败: {err}>"),
+                Err(err) => format!("<璇诲彇鍝嶅簲浣撳け璐? {err}>"),
             };
 
             return Err(LocalModelClientError::HttpStatus {
@@ -849,23 +901,41 @@ impl LocalEmbeddingClient {
             .await
             .map_err(LocalModelClientError::Request)?;
 
-        let embedding = parsed
-            .data
+        let mut data = parsed.data;
+        if data.iter().all(|item| item.index.is_some()) {
+            data.sort_by_key(|item| item.index.unwrap_or(usize::MAX));
+        }
+        let embeddings = data
             .into_iter()
-            .next()
             .map(|item| item.embedding)
-            .unwrap_or_default();
-        if embedding.is_empty() {
+            .collect::<Vec<_>>();
+        if embeddings.len() != expected_count {
+            return Err(LocalModelClientError::EmbeddingCountMismatch {
+                expected: expected_count,
+                actual: embeddings.len(),
+            });
+        }
+        if embeddings.iter().any(|embedding| embedding.is_empty()) {
             return Err(LocalModelClientError::EmptyEmbedding);
         }
-        Ok(embedding)
+        Ok(embeddings)
+    }
+}
+
+fn should_retry_embeddings_individually(err: &LocalModelClientError) -> bool {
+    match err {
+        LocalModelClientError::HttpStatus { status, .. } => {
+            matches!(*status, 400 | 404 | 405 | 422 | 500)
+        }
+        LocalModelClientError::EmbeddingCountMismatch { .. } => true,
+        LocalModelClientError::Request(_) | LocalModelClientError::EmptyEmbedding => false,
     }
 }
 
 #[derive(Debug, serde::Serialize)]
 struct OpenAiEmbeddingRequest<'a> {
     model: &'a str,
-    input: &'a str,
+    input: serde_json::Value,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -875,19 +945,23 @@ struct OpenAiEmbeddingResponse {
 
 #[derive(Debug, serde::Deserialize)]
 struct OpenAiEmbeddingItem {
+    index: Option<usize>,
     embedding: Vec<f32>,
 }
 
 #[derive(Debug, Error)]
 pub enum LocalModelClientError {
-    #[error("Embedding 请求失败: {0}")]
+    #[error("Embedding request failed: {0}")]
     Request(#[source] reqwest::Error),
 
-    #[error("本地模型服务返回非成功状态: {status}, body: {body}")]
+    #[error("Embedding service returned HTTP {status}, body: {body}")]
     HttpStatus { status: u16, body: String },
 
-    #[error("本地模型服务返回空向量")]
+    #[error("Embedding service returned an empty embedding")]
     EmptyEmbedding,
+
+    #[error("Embedding response count mismatch: expected={expected}, actual={actual}")]
+    EmbeddingCountMismatch { expected: usize, actual: usize },
 }
 
 /// memori-core 统一错误定义。
@@ -939,7 +1013,7 @@ pub enum EngineError {
     #[error("事件接收通道不可用")]
     EventChannelUnavailable,
 
-    #[error("索引不可用：检测到旧索引已失效，需完成全量重建后才能继续检索")]
+    #[error("index is not ready: {reason:?}")]
     IndexUnavailable { reason: Option<String> },
 
     #[error("索引升级中：全量重建完成前暂不可检索")]

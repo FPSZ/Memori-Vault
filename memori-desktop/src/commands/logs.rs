@@ -15,12 +15,9 @@ pub struct LogEntry {
 fn log_dir() -> Result<PathBuf, String> {
     dirs::config_dir()
         .map(|p| p.join("Memori-Vault").join("logs"))
-        .ok_or_else(|| "无法获取配置目录".to_string())
+        .ok_or_else(|| "无法获取日志目录".to_string())
 }
 
-/// 读取最近的日志条目。
-/// `limit`: 最多返回条数（默认 500）
-/// `level_filter`: 可选级别过滤（"TRACE"/"DEBUG"/"INFO"/"WARN"/"ERROR"）
 #[tauri::command]
 pub(crate) async fn get_logs(
     limit: Option<usize>,
@@ -33,8 +30,6 @@ pub(crate) async fn get_logs(
 
     let max = limit.unwrap_or(500);
     let filter = level_filter.map(|s| s.to_ascii_uppercase());
-
-    // 收集并按修改时间倒序
     let mut files: Vec<_> = std::fs::read_dir(&log_dir)
         .map_err(|e| format!("读取日志目录失败: {e}"))?
         .filter_map(|e| e.ok())
@@ -45,32 +40,26 @@ pub(crate) async fn get_logs(
     files.reverse();
 
     let mut entries = Vec::new();
-
     for entry in files {
         let path = entry.path();
-        let content =
-            std::fs::read_to_string(&path).map_err(|e| format!("读取日志文件失败: {e}"))?;
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("读取日志文件失败({}): {e}", path.display()))?;
 
         for line in content.lines().rev() {
             if line.trim().is_empty() {
                 continue;
             }
-            match parse_log_line(line) {
-                Ok(log_entry) => {
-                    if let Some(ref f) = filter {
-                        if log_entry.level.to_ascii_uppercase() != *f {
-                            continue;
-                        }
-                    }
-                    entries.push(log_entry);
-                    if entries.len() >= max {
-                        break;
-                    }
-                }
-                Err(_) => {
-                    // 解析失败的行（可能是非 JSON 的尾部）跳过
+            let Ok(log_entry) = parse_log_line(line) else {
+                continue;
+            };
+            if let Some(ref f) = filter {
+                if log_entry.level.to_ascii_uppercase() != *f {
                     continue;
                 }
+            }
+            entries.push(log_entry);
+            if entries.len() >= max {
+                break;
             }
         }
         if entries.len() >= max {
@@ -78,12 +67,10 @@ pub(crate) async fn get_logs(
         }
     }
 
-    // 按时间正序返回（旧的在前面）
     entries.reverse();
     Ok(entries)
 }
 
-/// 获取日志目录路径（供前端显示）
 #[tauri::command]
 pub(crate) async fn get_log_dir() -> Result<String, String> {
     let dir = log_dir()?;
@@ -92,24 +79,14 @@ pub(crate) async fn get_log_dir() -> Result<String, String> {
 
 fn parse_log_line(line: &str) -> Result<LogEntry, serde_json::Error> {
     let value: serde_json::Value = serde_json::from_str(line)?;
-
     let fields = value.get("fields").and_then(|v| v.as_object());
-
-    // 尝试从 fields 拼接 message：优先用 fields.message，否则把所有字段拼起来
-    let message = fields
-        .and_then(|f| f.get("message"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            fields
-                .map(|f| {
-                    f.iter()
-                        .map(|(k, v)| format!("{k}={v}"))
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                })
-                .unwrap_or_default()
-        });
+    let message = fields.map(format_log_message).unwrap_or_else(|| {
+        value
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    });
 
     Ok(LogEntry {
         timestamp: value
@@ -138,4 +115,82 @@ fn parse_log_line(line: &str) -> Result<LogEntry, serde_json::Error> {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
     })
+}
+
+fn format_log_message(fields: &serde_json::Map<String, serde_json::Value>) -> String {
+    let base = fields
+        .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("日志事件");
+    let mut parts = vec![humanize_message(base).to_string()];
+
+    for key in [
+        "role",
+        "status",
+        "reason",
+        "error",
+        "path",
+        "model",
+        "port",
+        "endpoint",
+        "pid",
+        "doc_count",
+        "chunk_count",
+        "evidence_count",
+        "ms",
+    ] {
+        if let Some(value) = fields.get(key).and_then(simple_json_value) {
+            parts.push(format!("{}={}", humanize_key(key), value));
+        }
+    }
+
+    parts.join(" | ")
+}
+
+fn simple_json_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        serde_json::Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
+}
+
+fn humanize_key(key: &str) -> String {
+    match key {
+        "role" => "角色".to_string(),
+        "status" => "状态".to_string(),
+        "reason" => "原因".to_string(),
+        "error" => "错误".to_string(),
+        "path" => "路径".to_string(),
+        "model" => "模型".to_string(),
+        "port" => "端口".to_string(),
+        "endpoint" => "地址".to_string(),
+        "pid" => "进程".to_string(),
+        "doc_count" => "文档数".to_string(),
+        "chunk_count" => "分块数".to_string(),
+        "evidence_count" => "证据数".to_string(),
+        "ms" => "耗时ms".to_string(),
+        _ => key.to_string(),
+    }
+}
+
+fn humanize_message(message: &str) -> &str {
+    match message {
+        "started local llama.cpp model" => "本地模型已启动",
+        "stopped local llama.cpp model" => "本地模型已停止",
+        "failed to stop local llama.cpp model" => "停止本地模型失败",
+        "local llama.cpp port conflict" => "端口被占用，模型启动失败",
+        "search started" => "开始搜索",
+        "search completed" => "搜索完成",
+        "search failed" => "搜索失败",
+        "indexing embedding started" => "开始构建索引",
+        "indexing embedding finished" => "索引向量构建完成",
+        "embedding batch failed" => "索引向量生成失败",
+        "embedding batch timed out" => "索引向量生成超时",
+        "document index write failed" => "索引写入数据库失败",
+        "chunk searches completed" => "检索完成",
+        "gating blocked answer as insufficient evidence" => "证据不足，已拒答",
+        _ => message,
+    }
 }

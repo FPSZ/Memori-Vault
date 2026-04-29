@@ -85,14 +85,18 @@ export function LogsTab() {
   }, [autoRefresh, levelFilter]);
 
   const filtered = useMemo(() => {
-    if (!compactMode) return entries;
+    const levelFiltered =
+      levelFilter === "ALL"
+        ? entries
+        : entries.filter((entry) => entry.level.toUpperCase() === levelFilter);
+    if (!compactMode) return levelFiltered;
     // Compact mode: deduplicate rapid per-file logs by keeping only
     // the first and last of consecutive logs with the same target + similar message prefix
     const result: LogEntry[] = [];
     let lastKey = "";
     let lastIdx = -1;
-    for (let i = 0; i < entries.length; i++) {
-      const e = entries[i];
+    for (let i = 0; i < levelFiltered.length; i++) {
+      const e = levelFiltered[i];
       const msgPrefix = e.message.split("chunk")[0].slice(0, 40);
       const key = `${e.target}|${msgPrefix}`;
       if (key === lastKey && lastIdx >= 0) {
@@ -105,7 +109,7 @@ export function LogsTab() {
       }
     }
     return result;
-  }, [entries, compactMode]);
+  }, [entries, compactMode, levelFilter]);
 
   const levels = ["ALL", "TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
 

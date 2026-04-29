@@ -9,7 +9,7 @@ pub(crate) async fn ask_vault_structured(
     state: State<'_, DesktopState>,
 ) -> Result<AskResponseStructured, String> {
     let query = query.trim().to_string();
-    info!(query = %query, lang = ?lang, top_k = ?top_k, scope_count = ?scope_paths.as_ref().map(|v| v.len()), "[用户操作] 发起搜索");
+    info!(query = %query, top_k = ?top_k, scope_count = ?scope_paths.as_ref().map(|v| v.len()), "search started");
     if query.is_empty() {
         return Ok(AskResponseStructured {
             status: AskStatus::InsufficientEvidence,
@@ -55,9 +55,9 @@ pub(crate) async fn ask_vault_structured(
         .map_err(describe_engine_error);
     match &result {
         Ok(resp) => {
-            info!(status = ?resp.status, evidence_count = resp.evidence.len(), "[用户操作] 搜索完成")
+            info!(status = ?resp.status, evidence_count = resp.evidence.len(), "search completed")
         }
-        Err(e) => error!(error = %e, "[用户操作] 搜索失败"),
+        Err(e) => error!(error = %e, "search failed"),
     }
     result
 }
@@ -76,14 +76,13 @@ pub(crate) async fn ask_vault(
 
 #[tauri::command]
 pub(crate) async fn get_vault_stats(state: State<'_, DesktopState>) -> Result<VaultStats, String> {
-    info!("[用户操作] 获取 Vault 统计");
     let engine_guard = state.engine.lock().await;
     let init_error_guard = state.init_error.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
         if let Some(message) = init_error_guard.as_ref() {
             warn!(
                 error = %message,
-                "engine 尚未就绪，Vault 统计回退为直接读取 SQLite"
+                "engine unavailable; reading vault stats from sqlite"
             );
             return get_vault_stats_from_sqlite();
         }

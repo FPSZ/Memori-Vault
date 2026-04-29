@@ -128,6 +128,28 @@ impl SqliteStore {
             .map_err(map_sqlite_error)
     }
 
+    pub async fn list_active_catalog_file_paths(&self) -> Result<Vec<PathBuf>, StorageError> {
+        let conn_guard = self.lock_conn()?;
+        let mut stmt = conn_guard
+            .prepare(
+                "SELECT file_path
+                 FROM file_catalog
+                 WHERE removed_at IS NULL
+                 ORDER BY file_path ASC",
+            )
+            .map_err(map_sqlite_error)?;
+
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(map_sqlite_error)?;
+
+        let mut paths = Vec::new();
+        for row in rows {
+            paths.push(PathBuf::from(row.map_err(map_sqlite_error)?));
+        }
+        Ok(paths)
+    }
+
     pub async fn mark_catalog_removed(&self, file_path: &Path) -> Result<(), StorageError> {
         let file_path_text = normalize_storage_file_path_text(file_path);
         let removed_at = current_unix_timestamp_secs()?;
@@ -801,6 +823,30 @@ impl SqliteStore {
             .optional()
             .map_err(map_sqlite_error)?;
         Ok(row)
+    }
+
+    pub async fn list_retryable_file_index_paths(&self) -> Result<Vec<PathBuf>, StorageError> {
+        let conn_guard = self.lock_conn()?;
+        let mut stmt = conn_guard
+            .prepare(
+                "SELECT fis.file_path
+                 FROM file_index_state fis
+                 INNER JOIN file_catalog fc ON fc.file_path = fis.file_path
+                 WHERE fis.index_status IN ('pending', 'failed')
+                   AND fc.removed_at IS NULL
+                 ORDER BY fis.indexed_at ASC, fis.file_path ASC",
+            )
+            .map_err(map_sqlite_error)?;
+
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(map_sqlite_error)?;
+
+        let mut paths = Vec::new();
+        for row in rows {
+            paths.push(PathBuf::from(row.map_err(map_sqlite_error)?));
+        }
+        Ok(paths)
     }
 
     pub async fn upsert_file_index_state(

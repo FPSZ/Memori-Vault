@@ -490,8 +490,11 @@ impl SqliteStore {
                 })
                 .collect();
 
+            if scored.len() > top_k {
+                scored.select_nth_unstable_by(top_k, |a, b| b.1.total_cmp(&a.1));
+                scored.truncate(top_k);
+            }
             scored.sort_by(|a, b| b.1.total_cmp(&a.1));
-            scored.truncate(top_k);
             scored
         };
 

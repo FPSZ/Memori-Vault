@@ -381,6 +381,17 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             chat_concurrency: settings.local_chat_concurrency,
             graph_concurrency: settings.local_graph_concurrency,
             embed_concurrency: settings.local_embed_concurrency,
+            performance_preset: normalize_performance_preset(
+                settings.local_performance_preset.clone(),
+            ),
+            n_gpu_layers: settings.local_n_gpu_layers,
+            batch_size: settings.local_batch_size,
+            ubatch_size: settings.local_ubatch_size,
+            threads: settings.local_threads,
+            threads_batch: settings.local_threads_batch,
+            flash_attn: settings.local_flash_attn,
+            cache_type_k: normalize_optional_text(settings.local_cache_type_k.clone()),
+            cache_type_v: normalize_optional_text(settings.local_cache_type_v.clone()),
         },
         remote_profile: RemoteModelProfileDto {
             endpoint: normalize_endpoint(ModelProvider::OpenAiCompatible, &remote_endpoint),
@@ -433,6 +444,10 @@ pub(crate) fn normalize_model_settings_payload(
             let p = PathBuf::from(&path);
             p.canonicalize().unwrap_or(p).to_string_lossy().to_string()
         });
+    let local_performance_preset =
+        normalize_performance_preset(payload.local_profile.performance_preset);
+    let local_cache_type_k = normalize_optional_text(payload.local_profile.cache_type_k);
+    let local_cache_type_v = normalize_optional_text(payload.local_profile.cache_type_v);
 
     Ok(ModelSettingsDto {
         active_provider: provider_to_string(active_provider),
@@ -448,6 +463,15 @@ pub(crate) fn normalize_model_settings_payload(
             chat_concurrency: payload.local_profile.chat_concurrency,
             graph_concurrency: payload.local_profile.graph_concurrency,
             embed_concurrency: payload.local_profile.embed_concurrency,
+            performance_preset: local_performance_preset,
+            n_gpu_layers: payload.local_profile.n_gpu_layers,
+            batch_size: payload.local_profile.batch_size,
+            ubatch_size: payload.local_profile.ubatch_size,
+            threads: payload.local_profile.threads,
+            threads_batch: payload.local_profile.threads_batch,
+            flash_attn: payload.local_profile.flash_attn,
+            cache_type_k: local_cache_type_k,
+            cache_type_v: local_cache_type_v,
         },
         remote_profile: RemoteModelProfileDto {
             endpoint: remote_endpoint,
@@ -474,6 +498,19 @@ pub(crate) fn normalize_optional_text(value: Option<String>) -> Option<String> {
             Some(trimmed)
         }
     })
+}
+
+pub(crate) fn normalize_performance_preset(value: Option<String>) -> Option<String> {
+    match normalize_optional_text(value)
+        .unwrap_or_else(|| "compat".to_string())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "gpu" => Some("gpu".to_string()),
+        "low_vram" | "low-vram" => Some("low_vram".to_string()),
+        "throughput" => Some("throughput".to_string()),
+        _ => Some("compat".to_string()),
+    }
 }
 
 pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> String {

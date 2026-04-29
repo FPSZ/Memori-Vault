@@ -2,6 +2,30 @@ use super::*;
 use memori_vault::is_supported_content_file;
 
 const EMBEDDING_CHUNK_TIMEOUT_SECS: u64 = 120;
+const EMBEDDING_BATCH_SIZE: usize = 16;
+
+fn retryable_rebuild_reason(retryable_count: usize, last_error: Option<&str>) -> String {
+    let clean_error = last_error
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+        .map(|message| message.replace(['\r', '\n'], " "));
+
+    match clean_error {
+        Some(message) => format!("retryable_files_remaining:{retryable_count}; last_error:{message}"),
+        None => format!("retryable_files_remaining:{retryable_count}"),
+    }
+}
+
+fn is_retryable_rebuild_reason(reason: &str) -> bool {
+    reason.contains("retryable_files_remaining")
+}
+
+fn retryable_last_error(reason: &str) -> Option<String> {
+    reason
+        .split_once("last_error:")
+        .map(|(_, message)| message.trim().to_string())
+        .filter(|message| !message.is_empty())
+}
 
 pub(crate) async fn process_file_event(
     state: &Arc<AppState>,
@@ -246,53 +270,51 @@ pub(crate) async fn process_file_event(
         path = %event.path.display(),
         chunk_count = chunks.len(),
         model = state.embedding_client.model_name(),
-        timeout_secs = EMBEDDING_CHUNK_TIMEOUT_SECS,
         "indexing embedding started"
     );
 
     let mut embeddings = Vec::with_capacity(chunks.len());
-    for (chunk_position, chunk) in chunks.iter().enumerate() {
-        let chunk_number = chunk_position + 1;
-        let is_milestone =
-            chunk_number == 1 || chunk_number % 10 == 0 || chunk_number == chunks.len();
-        if is_milestone {
-            debug!(
-                path = %event.path.display(),
-                chunk_index = chunk.chunk_index,
-                chunk_number = chunk_number,
-                chunk_count = chunks.len(),
-                char_len = chunk.content.chars().count(),
-                "embedding chunk started"
-            );
-        }
+    for (batch_index, batch) in chunks.chunks(EMBEDDING_BATCH_SIZE).enumerate() {
+        let batch_start = batch_index * EMBEDDING_BATCH_SIZE;
+        let batch_end = batch_start + batch.len();
+        debug!(
+            path = %event.path.display(),
+            batch_start = batch_start + 1,
+            batch_end = batch_end,
+            chunk_count = chunks.len(),
+            batch_size = batch.len(),
+            "embedding batch started"
+        );
+        let prompts = batch
+            .iter()
+            .map(|chunk| chunk.content.clone())
+            .collect::<Vec<_>>();
 
         match tokio::time::timeout(
             Duration::from_secs(EMBEDDING_CHUNK_TIMEOUT_SECS),
-            state.embedding_client.embed_text(&chunk.content),
+            state.embedding_client.embed_batch(&prompts),
         )
         .await
         {
-            Ok(Ok(embedding)) => {
-                if is_milestone {
-                    debug!(
-                        path = %event.path.display(),
-                        chunk_index = chunk.chunk_index,
-                        chunk_number = chunk_number,
-                        chunk_count = chunks.len(),
-                        dim = embedding.len(),
-                        "embedding chunk finished"
-                    );
-                }
-                embeddings.push(embedding);
+            Ok(Ok(mut batch_embeddings)) => {
+                debug!(
+                    path = %event.path.display(),
+                    batch_start = batch_start + 1,
+                    batch_end = batch_end,
+                    batch_size = batch_embeddings.len(),
+                    dim = batch_embeddings.first().map(|item| item.len()).unwrap_or_default(),
+                    "embedding batch finished"
+                );
+                embeddings.append(&mut batch_embeddings);
             }
             Ok(Err(err)) => {
                 error!(
                     path = %event.path.display(),
-                    chunk_index = chunk.chunk_index,
-                    chunk_number = chunk_number,
+                    batch_start = batch_start + 1,
+                    batch_end = batch_end,
                     chunk_count = chunks.len(),
                     error = %err,
-                    "embedding chunk failed"
+                    "embedding batch failed"
                 );
                 let _ = state
                     .vector_store
@@ -311,14 +333,13 @@ pub(crate) async fn process_file_event(
             }
             Err(_) => {
                 let err =
-                    format!("embedding chunk timed out after {EMBEDDING_CHUNK_TIMEOUT_SECS}s");
+                    format!("embedding batch timed out after {EMBEDDING_CHUNK_TIMEOUT_SECS}s");
                 error!(
                     path = %event.path.display(),
-                    chunk_index = chunk.chunk_index,
-                    chunk_number = chunk_number,
+                    batch_start = batch_start + 1,
+                    batch_end = batch_end,
                     chunk_count = chunks.len(),
-                    timeout_secs = EMBEDDING_CHUNK_TIMEOUT_SECS,
-                    "embedding chunk timed out"
+                    "embedding batch timed out"
                 );
                 let _ = state
                     .vector_store
@@ -502,9 +523,9 @@ pub(crate) async fn run_graph_worker(
 
         // 一次收集一批任务，并行处理以减少 LLM 等待时间。
         // 注意：llama-server --parallel 参数决定并发槽位数，需与其保持一致。
-        const GRAPH_BATCH_SIZE: usize = 2;
-        let mut tasks = Vec::with_capacity(GRAPH_BATCH_SIZE);
-        while tasks.len() < GRAPH_BATCH_SIZE {
+        let graph_batch_size = graph_worker_batch_size();
+        let mut tasks = Vec::with_capacity(graph_batch_size);
+        while tasks.len() < graph_batch_size {
             match state.vector_store.fetch_next_graph_task().await? {
                 Some(task) => tasks.push(task),
                 None => break,
@@ -665,6 +686,15 @@ pub(crate) fn graph_worker_idle_delay(budget: ResourceBudget) -> Duration {
     }
 }
 
+fn graph_worker_batch_size() -> usize {
+    std::env::var("MEMORI_GRAPH_CONCURRENCY")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .map(|value| value.min(8))
+        .unwrap_or(2)
+}
+
 pub(crate) fn is_within_schedule_window(config: &IndexingConfig) -> bool {
     if config.mode != IndexingMode::Scheduled {
         return true;
@@ -733,15 +763,19 @@ pub(crate) async fn run_full_rebuild(
 
     let rebuild_result = async {
         state.vector_store.begin_full_rebuild(reason).await?;
-        state.vector_store.purge_all_index_data().await?;
+        let is_resume = reason.starts_with("resume_") || reason.contains("resume");
 
         let filter = { state.indexing_runtime.read().await.filter_config.clone() };
-        let existing_files = collect_supported_text_files_recursively(
-            root.to_path_buf(),
-            filter.as_ref(),
-            Some(root),
-        )
-        .await;
+        let existing_files = if is_resume {
+            state.vector_store.list_retryable_file_index_paths().await?
+        } else {
+            collect_supported_text_files_recursively(
+                root.to_path_buf(),
+                filter.as_ref(),
+                Some(root),
+            )
+            .await
+        };
         info!(
             root = %root.display(),
             reason = reason,
@@ -749,10 +783,11 @@ pub(crate) async fn run_full_rebuild(
             "开始执行全量重建"
         );
 
-        for path in existing_files {
+        let mut last_retryable_error: Option<String> = None;
+        for path in &existing_files {
             let event = WatchEvent {
                 kind: WatchEventKind::Modified,
-                path,
+                path: path.clone(),
                 old_path: None,
                 observed_at: SystemTime::now(),
             };
@@ -760,13 +795,44 @@ pub(crate) async fn run_full_rebuild(
 
             let runtime = state.indexing_runtime.read().await.clone();
             if let Some(message) = runtime.last_error.filter(|msg| !msg.trim().is_empty()) {
-                return Err(EngineError::IndexUnavailable {
-                    reason: Some(format!("rebuild_file_failed:{message}")),
-                });
+                last_retryable_error = Some(message.clone());
+                warn!(
+                    path = %event.path.display(),
+                    error = %message,
+                    "index file failed; preserving progress and continuing rebuild"
+                );
             }
         }
 
-        state.vector_store.finish_full_rebuild().await?;
+        let retryable_left = state.vector_store.list_retryable_file_index_paths().await?;
+        if retryable_left.is_empty() {
+            if !is_resume {
+                let discovered: std::collections::HashSet<PathBuf> =
+                    existing_files.iter().cloned().collect();
+                let stale_paths = state.vector_store.list_active_catalog_file_paths().await?;
+                for stale_path in stale_paths {
+                    if !discovered.contains(&stale_path) {
+                        remove_indexed_file(
+                            state,
+                            &stale_path,
+                            "file was not discovered during rebuild; clearing stale index",
+                        )
+                        .await;
+                    }
+                }
+            }
+            state.vector_store.finish_full_rebuild().await?;
+        } else {
+            let reason =
+                retryable_rebuild_reason(retryable_left.len(), last_retryable_error.as_deref());
+            state
+                .vector_store
+                .mark_rebuild_required(reason.clone())
+                .await?;
+            return Err(EngineError::IndexUnavailable {
+                reason: Some(reason),
+            });
+        }
         Ok::<(), EngineError>(())
     }
     .await;
@@ -786,7 +852,15 @@ pub(crate) async fn run_full_rebuild(
             Ok(())
         }
         Err(err) => {
-            let failure_reason = format!("rebuild_failed:{err}");
+            let retryable_reason = match &err {
+                EngineError::IndexUnavailable {
+                    reason: Some(reason),
+                } if is_retryable_rebuild_reason(reason) => Some(reason.clone()),
+                _ => None,
+            };
+            let failure_reason = retryable_reason
+                .clone()
+                .unwrap_or_else(|| format!("rebuild_failed:{err}"));
             if let Err(mark_err) = state
                 .vector_store
                 .mark_rebuild_required(failure_reason.clone())
@@ -797,7 +871,11 @@ pub(crate) async fn run_full_rebuild(
                     "全量重建失败后写回 required 状态也失败"
                 );
             }
-            set_runtime_idle(state, Some(err.to_string())).await;
+            let last_error = retryable_reason
+                .as_deref()
+                .and_then(retryable_last_error)
+                .unwrap_or_else(|| err.to_string());
+            set_runtime_idle(state, Some(last_error)).await;
             Err(err)
         }
     }

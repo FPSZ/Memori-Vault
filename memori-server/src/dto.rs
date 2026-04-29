@@ -24,6 +24,15 @@ pub(crate) struct AppSettings {
     pub(crate) local_chat_concurrency: Option<u32>,
     pub(crate) local_graph_concurrency: Option<u32>,
     pub(crate) local_embed_concurrency: Option<u32>,
+    pub(crate) local_performance_preset: Option<String>,
+    pub(crate) local_n_gpu_layers: Option<i32>,
+    pub(crate) local_batch_size: Option<u32>,
+    pub(crate) local_ubatch_size: Option<u32>,
+    pub(crate) local_threads: Option<u32>,
+    pub(crate) local_threads_batch: Option<u32>,
+    pub(crate) local_flash_attn: Option<bool>,
+    pub(crate) local_cache_type_k: Option<String>,
+    pub(crate) local_cache_type_v: Option<String>,
     pub(crate) remote_endpoint: Option<String>,
     pub(crate) remote_api_key: Option<String>,
     pub(crate) remote_chat_model: Option<String>,
@@ -214,6 +223,24 @@ pub(crate) struct LocalModelProfileDto {
     pub(crate) graph_concurrency: Option<u32>,
     #[serde(default)]
     pub(crate) embed_concurrency: Option<u32>,
+    #[serde(default)]
+    pub(crate) performance_preset: Option<String>,
+    #[serde(default)]
+    pub(crate) n_gpu_layers: Option<i32>,
+    #[serde(default)]
+    pub(crate) batch_size: Option<u32>,
+    #[serde(default)]
+    pub(crate) ubatch_size: Option<u32>,
+    #[serde(default)]
+    pub(crate) threads: Option<u32>,
+    #[serde(default)]
+    pub(crate) threads_batch: Option<u32>,
+    #[serde(default)]
+    pub(crate) flash_attn: Option<bool>,
+    #[serde(default)]
+    pub(crate) cache_type_k: Option<String>,
+    #[serde(default)]
+    pub(crate) cache_type_v: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

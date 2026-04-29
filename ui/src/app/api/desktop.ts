@@ -186,7 +186,10 @@ export type LogEntry = {
 };
 
 export function getLogs(payload: { limit?: number; level_filter?: string | null }) {
-  return invoke<LogEntry[]>("get_logs", payload);
+  return invoke<LogEntry[]>("get_logs", {
+    limit: payload.limit,
+    levelFilter: payload.level_filter ?? null
+  });
 }
 
 export function getLogDir() {

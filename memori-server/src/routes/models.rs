@@ -45,6 +45,15 @@ pub(crate) async fn set_model_settings_handler(
     settings.local_chat_concurrency = normalized.local_profile.chat_concurrency;
     settings.local_graph_concurrency = normalized.local_profile.graph_concurrency;
     settings.local_embed_concurrency = normalized.local_profile.embed_concurrency;
+    settings.local_performance_preset = normalized.local_profile.performance_preset.clone();
+    settings.local_n_gpu_layers = normalized.local_profile.n_gpu_layers;
+    settings.local_batch_size = normalized.local_profile.batch_size;
+    settings.local_ubatch_size = normalized.local_profile.ubatch_size;
+    settings.local_threads = normalized.local_profile.threads;
+    settings.local_threads_batch = normalized.local_profile.threads_batch;
+    settings.local_flash_attn = normalized.local_profile.flash_attn;
+    settings.local_cache_type_k = normalized.local_profile.cache_type_k.clone();
+    settings.local_cache_type_v = normalized.local_profile.cache_type_v.clone();
     settings.remote_endpoint = Some(normalized.remote_profile.endpoint.clone());
     settings.remote_api_key = normalized.remote_profile.api_key.clone();
     settings.remote_chat_model = Some(normalized.remote_profile.chat_model.clone());

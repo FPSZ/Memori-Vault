@@ -187,7 +187,7 @@ impl MemoriEngine {
         scope_paths: Option<&[PathBuf]>,
         final_answer_k: Option<usize>,
     ) -> Result<RetrievalInspection, EngineError> {
-        info!(query = %query, scope_count = ?scope_paths.map(|s| s.len()), "retrieval pipeline started");
+        debug!(query = %query, scope_count = ?scope_paths.map(|s| s.len()), "retrieval started");
         if query.trim().is_empty() {
             return self
                 .retrieve_structured_with_embedding(query, Vec::new(), scope_paths, final_answer_k)
@@ -241,7 +241,7 @@ impl MemoriEngine {
             mut analysis,
             mut metrics,
         } = prepare_query_for_retrieval(&question);
-        info!(intent = %analysis.query_intent.as_str(), family = %analysis.query_family.as_str(), flags = ?metrics.query_flags, "query analysis completed");
+        debug!(intent = %analysis.query_intent.as_str(), family = %analysis.query_family.as_str(), flags = ?metrics.query_flags, "query analyzed");
         let memory_context = self.retrieve_memory_context(&analysis, 6).await?;
 
         let doc_started_at = Instant::now();
@@ -250,14 +250,14 @@ impl MemoriEngine {
             .await?;
         metrics.doc_recall_ms = elapsed_ms_u64(doc_started_at);
         metrics.doc_candidate_count = candidate_docs.len();
-        info!(
+        debug!(
             doc_count = candidate_docs.len(),
             doc_recall_ms = metrics.doc_recall_ms,
-            "document recall completed"
+            "document recall done"
         );
 
         if candidate_docs.is_empty() {
-            info!("no candidate documents; returning insufficient evidence");
+            info!(reason = "no_candidate_documents", "证据不足，已拒答");
             if should_mark_missing_file_lookup_intent(&analysis) {
                 analysis.query_intent = QueryIntent::MissingFileLookup;
                 metrics
@@ -299,55 +299,38 @@ impl MemoriEngine {
             .iter()
             .map(|doc| PathBuf::from(&doc.file_path))
             .collect::<Vec<_>>();
+        let chunk_query = query_string_for_terms(&analysis.chunk_terms, &analysis.normalized_query);
         let strict_lexical_started_at = Instant::now();
-        let strict_lexical_matches = self
-            .state
-            .vector_store
-            .search_chunks_fts_strict(
-                &query_string_for_terms(&analysis.chunk_terms, &analysis.normalized_query),
-                DEFAULT_CHUNK_CANDIDATE_K,
-                &candidate_scope_paths,
-            )
-            .await?;
-        metrics.chunk_strict_lexical_ms = elapsed_ms_u64(strict_lexical_started_at);
-        info!(
-            count = strict_lexical_matches.len(),
-            ms = metrics.chunk_strict_lexical_ms,
-            "strict lexical chunk search completed"
-        );
-
         let lexical_started_at = Instant::now();
-        let lexical_matches = self
-            .state
-            .vector_store
-            .search_chunks_fts(
-                &query_string_for_terms(&analysis.chunk_terms, &analysis.normalized_query),
-                DEFAULT_CHUNK_CANDIDATE_K,
-                &candidate_scope_paths,
-            )
-            .await?;
-        metrics.chunk_lexical_ms = elapsed_ms_u64(lexical_started_at);
-        info!(
-            count = lexical_matches.len(),
-            ms = metrics.chunk_lexical_ms,
-            "broad lexical chunk search completed"
-        );
-
         let dense_started_at = Instant::now();
-        let dense_matches = self
-            .state
-            .vector_store
-            .search_similar_scoped(
-                query_embedding,
-                DEFAULT_CHUNK_CANDIDATE_K,
-                &candidate_scope_paths,
-            )
-            .await?;
+        let strict_future = self.state.vector_store.search_chunks_fts_strict(
+            &chunk_query,
+            DEFAULT_CHUNK_CANDIDATE_K,
+            &candidate_scope_paths,
+        );
+        let lexical_future = self.state.vector_store.search_chunks_fts(
+            &chunk_query,
+            DEFAULT_CHUNK_CANDIDATE_K,
+            &candidate_scope_paths,
+        );
+        let dense_future = self.state.vector_store.search_similar_scoped(
+            query_embedding,
+            DEFAULT_CHUNK_CANDIDATE_K,
+            &candidate_scope_paths,
+        );
+        let (strict_lexical_matches, lexical_matches, dense_matches) =
+            tokio::try_join!(strict_future, lexical_future, dense_future)?;
+        metrics.chunk_strict_lexical_ms = elapsed_ms_u64(strict_lexical_started_at);
+        metrics.chunk_lexical_ms = elapsed_ms_u64(lexical_started_at);
         metrics.chunk_dense_ms = elapsed_ms_u64(dense_started_at);
-        info!(
-            count = dense_matches.len(),
-            ms = metrics.chunk_dense_ms,
-            "dense chunk search completed"
+        debug!(
+            strict_count = strict_lexical_matches.len(),
+            broad_count = lexical_matches.len(),
+            dense_count = dense_matches.len(),
+            strict_ms = metrics.chunk_strict_lexical_ms,
+            broad_ms = metrics.chunk_lexical_ms,
+            dense_ms = metrics.chunk_dense_ms,
+            "chunk searches completed"
         );
 
         let merge_started_at = Instant::now();
@@ -360,10 +343,10 @@ impl MemoriEngine {
         );
         metrics.merge_ms = elapsed_ms_u64(merge_started_at);
         metrics.chunk_candidate_count = merged.len();
-        info!(
+        debug!(
             merged_count = merged.len(),
             ms = metrics.merge_ms,
-            "evidence merge completed"
+            "evidence merge done"
         );
 
         if apply_gating_metrics(&mut metrics, &analysis, &merged) {
@@ -784,8 +767,23 @@ impl MemoriEngine {
     }
 
     pub async fn resume_indexing(&self) {
-        let mut runtime = self.state.indexing_runtime.write().await;
-        runtime.paused = false;
+        {
+            let mut runtime = self.state.indexing_runtime.write().await;
+            runtime.paused = false;
+        }
+
+        if let Some(root) = self.watch_root.clone() {
+            let state = Arc::clone(&self.state);
+            let graph_notify_tx = self.graph_notify_tx.clone();
+            tokio::spawn(async move {
+                if let Err(err) =
+                    run_full_rebuild(&state, &root, graph_notify_tx.as_ref(), "resume_indexing")
+                        .await
+                {
+                    warn!(error = %err, "resume indexing did not finish all retryable files");
+                }
+            });
+        }
     }
 
     pub async fn trigger_reindex(&self) -> Result<(), EngineError> {
@@ -810,16 +808,20 @@ impl MemoriEngine {
         if metadata.rebuild_state == RebuildState::Required
             || metadata.rebuild_state == RebuildState::Rebuilding
         {
-            return run_full_rebuild(
-                &self.state,
-                &root,
-                None,
-                metadata
-                    .rebuild_reason
-                    .as_deref()
-                    .unwrap_or("index_upgrade_required"),
-            )
-            .await;
+            let rebuild_reason = metadata
+                .rebuild_reason
+                .as_deref()
+                .unwrap_or("index_upgrade_required");
+            let recover_existing_progress = rebuild_reason.contains("retryable_files_remaining")
+                || rebuild_reason.starts_with("rebuild_failed:Index unavailable")
+                || rebuild_reason.starts_with("rebuild_failed:index is not ready")
+                || rebuild_reason.starts_with("rebuild_failed:索引不可用");
+            let reason = if recover_existing_progress {
+                format!("resume_prepare:{rebuild_reason}")
+            } else {
+                rebuild_reason.to_string()
+            };
+            return run_full_rebuild(&self.state, &root, None, &reason).await;
         }
 
         match self.state.vector_store.load_from_db().await {
@@ -916,11 +918,23 @@ impl MemoriEngine {
                     }
                 }
             } else {
-                info!(
-                    rebuild_state = metadata.rebuild_state.as_str(),
-                    rebuild_reason = metadata.rebuild_reason.as_deref().unwrap_or(""),
-                    "index metadata requires rebuild; skipping old cache load"
-                );
+                match state.vector_store.load_from_db().await {
+                    Ok(loaded) => {
+                        info!(
+                            loaded = loaded,
+                            rebuild_state = metadata.rebuild_state.as_str(),
+                            rebuild_reason = metadata.rebuild_reason.as_deref().unwrap_or(""),
+                            "loaded preserved vectors before index recovery"
+                        );
+                    }
+                    Err(err) => {
+                        warn!(
+                            error = %err,
+                            rebuild_state = metadata.rebuild_state.as_str(),
+                            "failed to load preserved vectors before index recovery"
+                        );
+                    }
+                }
             }
 
             let runtime_cfg = { state.indexing_runtime.read().await.config.clone() };
@@ -931,16 +945,21 @@ impl MemoriEngine {
                 if metadata.rebuild_state == RebuildState::Required
                     || metadata.rebuild_state == RebuildState::Rebuilding
                 {
-                    run_full_rebuild(
-                        &state,
-                        &root,
-                        Some(&graph_notify_tx),
-                        metadata
-                            .rebuild_reason
-                            .as_deref()
-                            .unwrap_or("index_upgrade_required"),
-                    )
-                    .await?;
+                    let rebuild_reason = metadata
+                        .rebuild_reason
+                        .as_deref()
+                        .unwrap_or("index_upgrade_required");
+                    let recover_existing_progress = rebuild_reason
+                        .contains("retryable_files_remaining")
+                        || rebuild_reason.starts_with("rebuild_failed:Index unavailable")
+                        || rebuild_reason.starts_with("rebuild_failed:index is not ready")
+                        || rebuild_reason.starts_with("rebuild_failed:索引不可用");
+                    let reason = if recover_existing_progress {
+                        format!("resume_startup:{rebuild_reason}")
+                    } else {
+                        rebuild_reason.to_string()
+                    };
+                    run_full_rebuild(&state, &root, Some(&graph_notify_tx), &reason).await?;
                 }
 
                 if metadata.rebuild_state == RebuildState::Ready {

@@ -11,6 +11,7 @@ type ActionPhase = "idle" | "running" | "success" | "error";
 
 type AdvancedTabProps = {
   t: TranslateFn;
+  uiLang: string;
   indexingMode: IndexingMode;
   onIndexingModeChange: (mode: IndexingMode) => void;
   resourceBudget: ResourceBudget;
@@ -35,8 +36,55 @@ type AdvancedTabProps = {
   onResumeIndexing: () => Promise<void>;
 };
 
+function isModelConnectionProblem(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return [
+    "embedding request failed",
+    "connection refused",
+    "actively refused",
+    "failed to connect",
+    "error sending request",
+    "timed out",
+    "timeout",
+    "tcp connect error",
+    "connectex"
+  ].some((pattern) => normalized.includes(pattern));
+}
+
+function formatIndexingHealthMessage(
+  message: string | null | undefined,
+  uiLang: string,
+  fallback: string
+): string {
+  const raw = message?.trim();
+  if (!raw) return fallback;
+  const lower = raw.toLowerCase();
+  if (isModelConnectionProblem(raw)) {
+    return uiLang === "zh-CN"
+      ? "向量模型未启动或端口不可连接。请先启动 embedding 模型，然后点击继续索引或重建索引。"
+      : "Embedding model is not running or the port is unreachable. Start it, then resume or rebuild indexing.";
+  }
+  if (lower.includes("retryable_files_remaining")) {
+    return uiLang === "zh-CN"
+      ? "还有文件等待重试。通常是模型未启动、端口不通或文件暂时不可读。"
+      : "Some files are waiting for retry. This is usually caused by a stopped model, blocked port, or temporarily unreadable files.";
+  }
+  if (lower.includes("index is not ready")) {
+    return uiLang === "zh-CN"
+      ? "索引还没完成，当前不能检索。请先启动模型并继续索引。"
+      : "Indexing is not finished yet. Start the model and continue indexing before searching.";
+  }
+  if (raw.includes("索引不可用")) {
+    return uiLang === "zh-CN"
+      ? "索引还没完成。如果刚才模型没启动，请先启动模型，然后点击继续索引或重建索引。"
+      : "Indexing is not finished yet. If the model was stopped, start it and then resume or rebuild indexing.";
+  }
+  return raw;
+}
+
 export function AdvancedTab({
   t,
+  uiLang,
   indexingMode,
   onIndexingModeChange,
   resourceBudget,
@@ -60,6 +108,17 @@ export function AdvancedTab({
   onPauseIndexing,
   onResumeIndexing
 }: AdvancedTabProps) {
+  const readableLastError = formatIndexingHealthMessage(
+    indexingStatus?.last_error,
+    uiLang,
+    t("indexingNoError")
+  );
+  const readableRebuildReason = formatIndexingHealthMessage(
+    indexingStatus?.rebuild_reason,
+    uiLang,
+    t("indexingNoError")
+  );
+
   return (
     <motion.div
       key="settings-tab-advanced"
@@ -202,11 +261,11 @@ export function AdvancedTab({
             <div>{t("indexingLastScan")}</div>
             <div className="text-[var(--text-primary)]">{lastScanLabel}</div>
             <div>{t("indexingLastError")}</div>
-            <div className="text-[var(--text-primary)]">{indexingStatus?.last_error?.trim() || t("indexingNoError")}</div>
+            <div className="text-[var(--text-primary)]">{readableLastError}</div>
             <div>{t("indexingRebuildState")}</div>
             <div className="text-[var(--text-primary)]">{indexingRebuildLabel}</div>
             <div>{t("indexingRebuildReason")}</div>
-            <div className="text-[var(--text-primary)]">{indexingStatus?.rebuild_reason?.trim() || t("indexingNoError")}</div>
+            <div className="text-[var(--text-primary)]">{readableRebuildReason}</div>
             <div>{t("indexingIndexVersion")}</div>
             <div className="text-[var(--text-primary)]">{indexingStatus?.index_format_version ?? 0}</div>
             <div>{t("indexingParserVersion")}</div>

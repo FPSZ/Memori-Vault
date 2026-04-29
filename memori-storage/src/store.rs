@@ -108,7 +108,17 @@ impl SqliteStore {
     /// 返回值为加载到缓存中的向量条数。
     pub async fn load_from_db(&self) -> Result<usize, StorageError> {
         let metadata = self.read_index_metadata().await?;
-        if metadata.rebuild_state != RebuildState::Ready {
+        let can_load_preserved_index = metadata
+            .rebuild_reason
+            .as_deref()
+            .map(|reason| {
+                reason.contains("retryable_files_remaining")
+                    || reason.starts_with("rebuild_failed:Index unavailable")
+                    || reason.starts_with("rebuild_failed:index is not ready")
+                    || reason.starts_with("rebuild_failed:索引不可用")
+            })
+            .unwrap_or(false);
+        if metadata.rebuild_state != RebuildState::Ready && !can_load_preserved_index {
             let mut cache_guard = self.cache.write().await;
             cache_guard.clear();
             return Ok(0);

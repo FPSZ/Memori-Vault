@@ -18,6 +18,7 @@ import {
 import { open } from "@tauri-apps/plugin-dialog";
 import { AnimatedPressButton } from "../../MotionKit";
 import type {
+  LocalPerformancePreset,
   LocalModelProfileDto,
   LocalModelRuntimeStatusDto,
   LocalModelRuntimeStatusesDto,
@@ -31,6 +32,33 @@ import { useI18n } from "../../../i18n";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
 type ModelRoleKey = "chat" | "graph" | "embed";
+
+const PERFORMANCE_PRESETS: Array<{
+  value: LocalPerformancePreset;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "compat",
+    label: "兼容模式",
+    description: "不额外添加激进参数，适合不确定硬件或首次配置。"
+  },
+  {
+    value: "gpu",
+    label: "GPU 加速",
+    description: "尽量把模型层放到显卡，适合显存充足的电脑。"
+  },
+  {
+    value: "low_vram",
+    label: "低显存",
+    description: "降低 batch 并使用较省显存的 KV cache，适合显存紧张。"
+  },
+  {
+    value: "throughput",
+    label: "高吞吐",
+    description: "提高 batch，适合显存较大且希望更快回答。"
+  }
+];
 
 function extractPort(endpoint: string): string {
   try {
@@ -113,6 +141,13 @@ function endpointHasUsablePort(endpoint: string): boolean {
   } catch {
     return false;
   }
+}
+
+function optionalNumber(value: string, min?: number): number | null {
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return min == null ? parsed : Math.max(min, parsed);
 }
 
 function validateLocalRoles(
@@ -480,6 +515,7 @@ export function ModelsTab({
     graph: false,
     embed: false
   });
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [localRoleErrors, setLocalRoleErrors] = useState<RoleErrorMap>({});
   const [localConfigMessages, setLocalConfigMessages] = useState<string[]>([]);
 
@@ -783,6 +819,141 @@ export function ModelsTab({
                 <RefreshCw className={`h-3 w-3 ${localModelRuntimeBusyRole ? "animate-spin" : ""}`} />
                 刷新运行状态
               </button>
+            </div>
+            <div className="space-y-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-medium text-[var(--text-secondary)]">llama.cpp 性能预设</div>
+                  <div className="mt-0.5 text-[11px] text-[var(--text-muted)]">
+                    默认用兼容模式；换电脑后如果启动失败，先切回兼容模式。
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen((prev) => !prev)}
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+                >
+                  {advancedOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  高级参数
+                </button>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                {PERFORMANCE_PRESETS.map((preset) => {
+                  const selected = (modelSettings.local_profile.performance_preset ?? "compat") === preset.value;
+                  return (
+                    <button
+                      key={preset.value}
+                      type="button"
+                      onClick={() => updateProfile({ performance_preset: preset.value })}
+                      className={`rounded-lg border px-3 py-2 text-left transition ${
+                        selected
+                          ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                          : "border-[var(--border-subtle)] bg-[var(--bg-surface-1)] hover:border-[var(--accent)]/50"
+                      }`}
+                    >
+                      <div className="text-xs font-medium text-[var(--text-primary)]">{preset.label}</div>
+                      <div className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">{preset.description}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <AnimatePresence>
+                {advancedOpen ? (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.18 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="grid gap-3 border-t border-[var(--border-subtle)] pt-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-[var(--text-muted)]">GPU layers</label>
+                        <input
+                          type="number"
+                          value={modelSettings.local_profile.n_gpu_layers ?? ""}
+                          onChange={(e) => updateProfile({ n_gpu_layers: optionalNumber(e.target.value) })}
+                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                          placeholder="留空使用预设，-1 表示尽量全放 GPU"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-[var(--text-muted)]">Batch size</label>
+                        <input
+                          type="number"
+                          value={modelSettings.local_profile.batch_size ?? ""}
+                          onChange={(e) => updateProfile({ batch_size: optionalNumber(e.target.value, 1) })}
+                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                          placeholder="例如 512 / 1024 / 2048"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-[var(--text-muted)]">Ubatch size</label>
+                        <input
+                          type="number"
+                          value={modelSettings.local_profile.ubatch_size ?? ""}
+                          onChange={(e) => updateProfile({ ubatch_size: optionalNumber(e.target.value, 1) })}
+                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                          placeholder="显存不够就调小"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-[var(--text-muted)]">CPU threads</label>
+                        <input
+                          type="number"
+                          value={modelSettings.local_profile.threads ?? ""}
+                          onChange={(e) => updateProfile({ threads: optionalNumber(e.target.value, 1) })}
+                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                          placeholder="留空自动"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-[var(--text-muted)]">Batch threads</label>
+                        <input
+                          type="number"
+                          value={modelSettings.local_profile.threads_batch ?? ""}
+                          onChange={(e) => updateProfile({ threads_batch: optionalNumber(e.target.value, 1) })}
+                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                          placeholder="留空自动"
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(modelSettings.local_profile.flash_attn)}
+                          onChange={(e) => updateProfile({ flash_attn: e.target.checked })}
+                        />
+                        开启 Flash Attention
+                      </label>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-[var(--text-muted)]">Cache type K</label>
+                        <input
+                          type="text"
+                          value={modelSettings.local_profile.cache_type_k ?? ""}
+                          onChange={(e) => updateProfile({ cache_type_k: e.target.value })}
+                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-3 py-1.5 font-mono text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                          placeholder="例如 f16 / q8_0"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-[var(--text-muted)]">Cache type V</label>
+                        <input
+                          type="text"
+                          value={modelSettings.local_profile.cache_type_v ?? ""}
+                          onChange={(e) => updateProfile({ cache_type_v: e.target.value })}
+                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-3 py-1.5 font-mono text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                          placeholder="例如 f16 / q8_0"
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                      高级参数会覆盖预设。参数改完后需要保存配置，并重启对应模型服务才会生效。
+                    </div>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
             </div>
           </div>
         ) : null}

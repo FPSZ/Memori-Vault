@@ -220,6 +220,19 @@ fn resolve_endpoint(
         .unwrap_or_else(|| default.to_string())
 }
 
+pub(crate) fn normalize_performance_preset(value: Option<String>) -> Option<String> {
+    match normalize_optional_text(value)
+        .unwrap_or_else(|| "compat".to_string())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "gpu" => Some("gpu".to_string()),
+        "low_vram" | "low-vram" => Some("low_vram".to_string()),
+        "throughput" => Some("throughput".to_string()),
+        _ => Some("compat".to_string()),
+    }
+}
+
 pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
     let fallback_provider = settings.active_provider.clone().unwrap_or_else(|| {
         settings.provider.clone().unwrap_or_else(|| {
@@ -478,6 +491,17 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             chat_concurrency: settings.local_chat_concurrency,
             graph_concurrency: settings.local_graph_concurrency,
             embed_concurrency: settings.local_embed_concurrency,
+            performance_preset: normalize_performance_preset(
+                settings.local_performance_preset.clone(),
+            ),
+            n_gpu_layers: settings.local_n_gpu_layers,
+            batch_size: settings.local_batch_size,
+            ubatch_size: settings.local_ubatch_size,
+            threads: settings.local_threads,
+            threads_batch: settings.local_threads_batch,
+            flash_attn: settings.local_flash_attn,
+            cache_type_k: normalize_optional_text(settings.local_cache_type_k.clone()),
+            cache_type_v: normalize_optional_text(settings.local_cache_type_v.clone()),
         },
         remote_profile: RemoteModelProfileDto {
             chat_endpoint: normalize_endpoint(
@@ -565,6 +589,10 @@ pub(crate) fn normalize_model_settings_payload(
         normalize_optional_existing_file(payload.local_profile.graph_model_path, "graph model")?;
     let local_embed_model_path =
         normalize_optional_existing_file(payload.local_profile.embed_model_path, "embed model")?;
+    let local_performance_preset =
+        normalize_performance_preset(payload.local_profile.performance_preset);
+    let local_cache_type_k = normalize_optional_text(payload.local_profile.cache_type_k);
+    let local_cache_type_v = normalize_optional_text(payload.local_profile.cache_type_v);
 
     Ok(ModelSettingsDto {
         active_provider: provider_to_string(active_provider),
@@ -586,6 +614,15 @@ pub(crate) fn normalize_model_settings_payload(
             chat_concurrency: payload.local_profile.chat_concurrency,
             graph_concurrency: payload.local_profile.graph_concurrency,
             embed_concurrency: payload.local_profile.embed_concurrency,
+            performance_preset: local_performance_preset,
+            n_gpu_layers: payload.local_profile.n_gpu_layers,
+            batch_size: payload.local_profile.batch_size,
+            ubatch_size: payload.local_profile.ubatch_size,
+            threads: payload.local_profile.threads,
+            threads_batch: payload.local_profile.threads_batch,
+            flash_attn: payload.local_profile.flash_attn,
+            cache_type_k: local_cache_type_k,
+            cache_type_v: local_cache_type_v,
         },
         remote_profile: RemoteModelProfileDto {
             chat_endpoint: remote_chat_endpoint,

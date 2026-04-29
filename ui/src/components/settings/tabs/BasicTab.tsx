@@ -3,6 +3,8 @@ import { AnimatedPanel, AnimatedPressButton, fadeSlideUpVariants, staggerContain
 import { CyberToggle } from "../../UI";
 import { LanguageSwitch, SelectionChips, SettingCard } from "../controls";
 import { useI18n, type Language } from "../../../i18n";
+import type { IndexFilterConfigDto } from "../types";
+import { FilterPanel } from "./FilterTab";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
 
@@ -21,6 +23,11 @@ type BasicTabProps = {
   onAutoSyncDaemonChange: (value: boolean) => void;
   graphRagInfer: boolean;
   onGraphRagInferChange: (value: boolean) => void;
+  filterConfig: IndexFilterConfigDto;
+  filterBusy: boolean;
+  filterMessage: string | null;
+  onFilterConfigChange: (next: IndexFilterConfigDto) => void;
+  onSaveFilterConfig: () => Promise<void>;
 };
 
 export function BasicTab({
@@ -37,7 +44,12 @@ export function BasicTab({
   autoSyncDaemon,
   onAutoSyncDaemonChange,
   graphRagInfer,
-  onGraphRagInferChange
+  onGraphRagInferChange,
+  filterConfig,
+  filterBusy,
+  filterMessage,
+  onFilterConfigChange,
+  onSaveFilterConfig
 }: BasicTabProps) {
   return (
     <motion.div
@@ -87,6 +99,16 @@ export function BasicTab({
             </AnimatedPressButton>
           </div>
           <div className="mt-2 text-xs text-[var(--text-secondary)]">{t("watchRootRestartHint")}</div>
+          <div className="mt-3">
+            <FilterPanel
+              filterConfig={filterConfig}
+              filterBusy={filterBusy}
+              filterMessage={filterMessage}
+              watchRoot={watchRoot}
+              onFilterConfigChange={onFilterConfigChange}
+              onSaveFilterConfig={onSaveFilterConfig}
+            />
+          </div>
         </AnimatedPanel>
         <SettingCard title={t("autoSyncDaemon")} description={t("autoSyncDaemonDesc")}>
           <CyberToggle

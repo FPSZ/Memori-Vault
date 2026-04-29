@@ -4,6 +4,7 @@ export type FontPreset = "system" | "neo" | "mono";
 export type FontScale = "s" | "m" | "l";
 export type ThemeMode = "dark" | "light";
 export type ModelProvider = "llama_cpp_local" | "openai_compatible";
+export type LocalPerformancePreset = "compat" | "gpu" | "low_vram" | "throughput";
 export type IndexingMode = "continuous" | "manual" | "scheduled";
 export type ResourceBudget = "low" | "balanced" | "fast";
 export type ModelRole = "chat_model" | "graph_model" | "embed_model";
@@ -40,6 +41,15 @@ export type LocalModelProfileDto = {
   chat_concurrency?: number | null;
   graph_concurrency?: number | null;
   embed_concurrency?: number | null;
+  performance_preset?: LocalPerformancePreset | string | null;
+  n_gpu_layers?: number | null;
+  batch_size?: number | null;
+  ubatch_size?: number | null;
+  threads?: number | null;
+  threads_batch?: number | null;
+  flash_attn?: boolean | null;
+  cache_type_k?: string | null;
+  cache_type_v?: string | null;
 };
 
 export type RemoteModelProfileDto = {

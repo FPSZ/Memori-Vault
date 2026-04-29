@@ -1,11 +1,11 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Brain, Cpu, Database, Filter, Network, Palette, ScrollText, Search, Settings } from "lucide-react";
+import { ArrowRight, Brain, Cpu, Database, Network, Palette, ScrollText, Search, Settings } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { Language } from "../i18n";
 import { useI18n } from "../i18n";
 import { AnimatedPressButton } from "./MotionKit";
 import { rankSettingsQuery } from "../app/api/desktop";
-import { AdvancedTab, BasicTab, FilterTab, LogsTab, McpTab, MemoryTab, ModelsTab, PersonalizationTab } from "./settings/tabs";
+import { AdvancedTab, BasicTab, LogsTab, McpTab, MemoryTab, ModelsTab, PersonalizationTab } from "./settings/tabs";
 import type {
   FontPreset,
   FontScale,
@@ -17,7 +17,7 @@ import type {
 } from "./settings/types";
 import type { IndexingActionKey } from "./settings/tabs/AdvancedTab";
 
-type TabKey = "basic" | "models" | "memory" | "mcp" | "advanced" | "filter" | "personalization" | "logs";
+type TabKey = "basic" | "models" | "memory" | "mcp" | "advanced" | "personalization" | "logs";
 
 export function SettingsModal({
   open,
@@ -113,7 +113,27 @@ export function SettingsModal({
         key: "basic" as const,
         label: t("basic"),
         icon: Cpu,
-        keywords: [t("uiLanguage"), t("aiReplyLanguage"), t("watchRoot"), t("topK")]
+        keywords: [
+          t("uiLanguage"),
+          t("aiReplyLanguage"),
+          t("watchRoot"),
+          t("topK"),
+          t("filter"),
+          t("fileFilter"),
+          t("includeExtensions"),
+          t("excludeExtensions"),
+          t("excludePaths"),
+          t("includePaths"),
+          t("minDate"),
+          t("maxDate"),
+          t("minSize"),
+          t("maxSize"),
+          "文件类型",
+          "读取文件夹",
+          "不读取文件夹",
+          "日期筛选",
+          "大小筛选"
+        ]
       },
       {
         key: "models" as const,
@@ -151,22 +171,6 @@ export function SettingsModal({
           t("triggerReindex"),
           t("pauseIndexing"),
           t("resumeIndexing")
-        ]
-      },
-      {
-        key: "filter" as const,
-        label: t("filter"),
-        icon: Filter,
-        keywords: [
-          t("fileFilter"),
-          t("includeExtensions"),
-          t("excludeExtensions"),
-          t("excludePaths"),
-          t("includePaths"),
-          t("minDate"),
-          t("maxDate"),
-          t("minSize"),
-          t("maxSize"),
         ]
       },
       {
@@ -307,7 +311,19 @@ export function SettingsModal({
 
   const etaLabel = useMemo(() => {
     const phase = indexingStatus?.phase ?? "idle";
-    if (phase === "idle" || phase === "ready") {
+    const normalizedPhase = phase.toLowerCase();
+    const rebuildState = (indexingStatus?.rebuild_state ?? "ready").toLowerCase();
+    const hasError = Boolean(indexingStatus?.last_error?.trim());
+    if (normalizedPhase === "idle" || normalizedPhase === "ready") {
+      if (rebuildState === "required") {
+        return uiLang === "zh-CN" ? "等待重试" : "Waiting to retry";
+      }
+      if (rebuildState === "rebuilding") {
+        return uiLang === "zh-CN" ? "重建中" : "Rebuilding";
+      }
+      if (hasError) {
+        return uiLang === "zh-CN" ? "已暂停，需处理错误" : "Paused, fix error";
+      }
       return uiLang === "zh-CN" ? "已完成" : "Done";
     }
     const perDocSec = resourceBudget === "fast" ? 0.3 : resourceBudget === "balanced" ? 0.6 : 1.0;
@@ -325,10 +341,10 @@ export function SettingsModal({
       totalSec = backlog * perChunkGraphSec;
     }
     if (totalSec < 60) {
-      return uiLang === "zh-CN" ? `≈ ${Math.ceil(totalSec)} 秒` : `~${Math.ceil(totalSec)}s`;
+      return uiLang === "zh-CN" ? `约 ${Math.ceil(totalSec)} 秒` : `~${Math.ceil(totalSec)}s`;
     }
     const minutes = Math.ceil(totalSec / 60);
-    return uiLang === "zh-CN" ? `≈ ${minutes} 分钟` : `~${minutes} min`;
+    return uiLang === "zh-CN" ? `约 ${minutes} 分钟` : `~${minutes} min`;
   }, [indexingStatus, resourceBudget, uiLang]);
 
   const indexingButtonClass = (key: IndexingActionKey) => {
@@ -439,6 +455,11 @@ export function SettingsModal({
                 onAutoSyncDaemonChange={setAutoSyncDaemon}
                 graphRagInfer={graphRagInfer}
                 onGraphRagInferChange={setGraphRagInfer}
+                filterConfig={filterConfig}
+                filterBusy={filterBusy}
+                filterMessage={filterMessage}
+                onFilterConfigChange={onFilterConfigChange}
+                onSaveFilterConfig={onSaveFilterConfig}
               />
             ) : null}
 
@@ -468,6 +489,7 @@ export function SettingsModal({
                         {activeTab === "advanced" ? (
               <AdvancedTab
                 t={t}
+                uiLang={uiLang}
                 indexingMode={indexingMode}
                 onIndexingModeChange={onIndexingModeChange}
                 resourceBudget={resourceBudget}
@@ -528,16 +550,6 @@ export function SettingsModal({
                 onThemeModeChange={onThemeModeChange}
                 fontPresetOptions={fontPresetOptions}
                 fontScaleOptions={fontScaleOptions}
-              />
-            ) : null}
-
-            {activeTab === "filter" ? (
-              <FilterTab
-                filterConfig={filterConfig}
-                filterBusy={filterBusy}
-                filterMessage={filterMessage}
-                onFilterConfigChange={onFilterConfigChange}
-                onSaveFilterConfig={onSaveFilterConfig}
               />
             ) : null}
 
