@@ -129,6 +129,11 @@ pub(crate) async fn open_source_location(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) async fn read_file_content(path: String) -> Result<String, String> {
+    read_file_preview(path).await.map(|preview| preview.content)
+}
+
+#[tauri::command]
+pub(crate) async fn read_file_preview(path: String) -> Result<FilePreviewDto, String> {
     info!(path = %path, "[用户操作] 预览文件");
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -171,5 +176,14 @@ pub(crate) async fn read_file_content(path: String) -> Result<String, String> {
     } else {
         std::fs::read_to_string(&target).map_err(|e| format!("读取文件失败: {e}"))?
     };
-    Ok(content)
+    let format = match ext.as_str() {
+        "md" => "markdown",
+        "docx" | "pdf" => "document",
+        _ => "text",
+    };
+    Ok(FilePreviewDto {
+        content,
+        format: format.to_string(),
+        extension: ext,
+    })
 }

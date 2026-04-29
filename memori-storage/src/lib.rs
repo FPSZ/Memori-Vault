@@ -678,6 +678,70 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 
+    #[tokio::test]
+    async fn opening_store_repairs_empty_fts_from_existing_chunks() {
+        let db_path = unique_db_path("memori_vault_storage_repair_fts");
+        if db_path.exists() {
+            let _ = std::fs::remove_file(&db_path);
+        }
+
+        {
+            let store = SqliteStore::new(&db_path).expect("create sqlite store");
+            let file_path =
+                std::path::PathBuf::from("Memory_Test/doc_017_技术架构_银杏-17_会议纪要.md");
+            store
+                .replace_document_index(
+                    &file_path,
+                    None,
+                    123,
+                    "content_hash_v1",
+                    vec![DocumentChunk {
+                        file_path: file_path.clone(),
+                        content: "- 项目代号：银杏-17 / ARC-17\n- 负责人：苏澈（平台架构组）"
+                            .to_string(),
+                        chunk_index: 0,
+                        heading_path: vec!["关键结论".to_string()],
+                        block_kind: memori_parser::ChunkBlockKind::List,
+                    }],
+                    vec![vec![1.0_f32, 0.0_f32]],
+                )
+                .await
+                .expect("replace document index");
+        }
+
+        {
+            let conn = Connection::open(&db_path).expect("open sqlite");
+            conn.execute("DELETE FROM chunks_fts", [])
+                .expect("clear chunks fts");
+            conn.execute("DELETE FROM documents_fts", [])
+                .expect("clear documents fts");
+        }
+
+        let repaired = SqliteStore::new(&db_path).expect("reopen repairs sqlite store");
+        let lexical_chunks = repaired
+            .search_chunks_fts("银杏-17 负责人", 5, &[])
+            .await
+            .expect("search repaired chunks fts");
+        assert!(
+            lexical_chunks
+                .iter()
+                .any(|item| item.content.contains("负责人：苏澈"))
+        );
+
+        let lexical_docs = repaired
+            .search_documents_fts("银杏-17", 5, &[])
+            .await
+            .expect("search repaired documents fts");
+        assert!(
+            lexical_docs
+                .iter()
+                .any(|item| item.relative_path.contains("银杏-17"))
+        );
+
+        drop(repaired);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
     #[test]
     fn document_search_text_samples_late_chunks_across_document() {
         let catalog_entry = CatalogEntry {

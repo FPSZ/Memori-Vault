@@ -304,6 +304,10 @@ export function SettingsModal({
   };
 
   const indexingModelBlocked = useMemo(() => {
+    const phase = indexingStatus?.phase?.toLowerCase() ?? "idle";
+    if (["scanning", "embedding", "graphing"].includes(phase)) {
+      return false;
+    }
     const text = `${indexingStatus?.last_error ?? ""} ${indexingStatus?.rebuild_reason ?? ""}`.toLowerCase();
     return [
       "embedding request failed",
@@ -318,7 +322,7 @@ export function SettingsModal({
       "向量模型未启动",
       "端口不可连接"
     ].some((pattern) => text.includes(pattern));
-  }, [indexingStatus?.last_error, indexingStatus?.rebuild_reason]);
+  }, [indexingStatus?.last_error, indexingStatus?.phase, indexingStatus?.rebuild_reason]);
 
   const indexingPhaseLabel = useMemo(() => {
     if (indexingModelBlocked) {

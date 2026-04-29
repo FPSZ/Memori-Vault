@@ -1,6 +1,7 @@
 use crate::*;
 
 mod ask;
+mod graph;
 mod indexing;
 mod logs;
 mod mcp;
@@ -9,6 +10,7 @@ mod scope;
 mod settings;
 
 pub(crate) use ask::*;
+pub(crate) use graph::*;
 pub(crate) use indexing::*;
 pub(crate) use logs::*;
 pub(crate) use mcp::*;

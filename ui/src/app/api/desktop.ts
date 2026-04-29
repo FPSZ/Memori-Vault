@@ -3,6 +3,7 @@ import type {
   AppSettingsDto,
   AskResponseStructured,
   FileMatch,
+  FilePreviewDto,
   SearchScopeItem,
   VaultStatsRaw
 } from "../types";
@@ -19,6 +20,11 @@ import type {
   LocalModelRuntimeStatusesDto,
   ProviderModelsDto
 } from "../../components/settings/types";
+import type {
+  GraphNodeDto,
+  GraphNeighborsDto,
+  GraphStatsDto
+} from "../types";
 
 type ProviderModelsPayload = {
   provider: ModelProvider;
@@ -151,6 +157,10 @@ export function readFileContent(path: string) {
   return invoke<string>("read_file_content", { path });
 }
 
+export function readFilePreview(path: string) {
+  return invoke<FilePreviewDto>("read_file_preview", { path });
+}
+
 export function getMcpSettings() {
   return invoke<McpSettingsDto>("get_mcp_settings");
 }
@@ -194,4 +204,16 @@ export function getLogs(payload: { limit?: number; level_filter?: string | null 
 
 export function getLogDir() {
   return invoke<string>("get_log_dir");
+}
+
+export function searchGraphNodes(query: string, limit?: number) {
+  return invoke<GraphNodeDto[]>("search_graph_nodes", { query, limit });
+}
+
+export function getGraphNeighbors(entityId: string, limit?: number) {
+  return invoke<GraphNeighborsDto>("get_graph_neighbors", { entityId, limit });
+}
+
+export function getGraphStats() {
+  return invoke<GraphStatsDto>("get_graph_stats");
 }

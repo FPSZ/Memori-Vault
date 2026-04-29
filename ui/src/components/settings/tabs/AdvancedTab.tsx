@@ -119,17 +119,40 @@ export function AdvancedTab({
     t("indexingNoError")
   );
   const shownProgress = indexingModelBlocked ? 0 : (indexingStatus?.progress_percent ?? 0);
+  const rebuildState = (indexingStatus?.rebuild_state ?? "ready").toLowerCase();
+  const retryableFilesRemaining = Boolean(indexingStatus?.rebuild_reason?.includes("retryable_files_remaining"));
+  const hasIndexedChunks = (indexingStatus?.indexed_chunks ?? 0) > 0;
+  const searchReady = (rebuildState === "ready" || (retryableFilesRemaining && hasIndexedChunks)) && !indexingModelBlocked;
+  const phase = (indexingStatus?.phase ?? "idle").toLowerCase();
+  const optimizing = searchReady && (phase === "graphing" || (indexingStatus?.graph_backlog ?? 0) > 0);
+  const progressTone = shownProgress < 66 ? "building" : shownProgress < 100 ? "searchable" : "optimized";
   const progressText = indexingModelBlocked
     ? uiLang === "zh-CN"
       ? "等待向量模型启动"
       : "Waiting for embedding model"
-    : shownProgress < 33
-      ? "扫描文档中...（暂不可用）"
-      : shownProgress < 66
-        ? "建立向量索引中...（即将可用）"
-        : shownProgress < 100
-          ? "构建知识图谱中...（已可使用）"
-          : "索引完全就绪";
+    : optimizing
+      ? uiLang === "zh-CN"
+        ? "可搜索，正在继续优化图谱..."
+        : "Search is available. Optimizing graph..."
+      : searchReady
+        ? uiLang === "zh-CN"
+          ? "索引就绪，可以搜索"
+          : "Index ready. Search is available"
+      : phase === "graphing"
+        ? uiLang === "zh-CN"
+          ? "向量已完成，等待开放搜索..."
+          : "Vectors are ready. Waiting to enable search..."
+        : phase === "embedding"
+          ? uiLang === "zh-CN"
+            ? "建立向量索引中...（搜索暂不可用）"
+            : "Building vector index... (search unavailable)"
+          : phase === "scanning"
+            ? uiLang === "zh-CN"
+              ? "扫描文档中...（搜索暂不可用）"
+              : "Scanning documents... (search unavailable)"
+            : uiLang === "zh-CN"
+              ? "索引重建中...（搜索暂不可用）"
+              : "Index rebuild in progress... (search unavailable)";
 
   return (
     <motion.div
@@ -195,17 +218,15 @@ export function AdvancedTab({
         <AnimatedPanel className="glass-panel-infer rounded-lg px-3 py-3">
           <div className="mb-2 text-sm text-[var(--text-primary)]">{t("indexingStatusTitle")}</div>
           {/* Progress bar */}
-          {indexingStatus && (indexingStatus.phase !== "idle" || indexingModelBlocked) ? (
+          {indexingStatus && (indexingStatus.phase !== "idle" || indexingModelBlocked || !searchReady) ? (
             <div className="mb-3">
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className={`font-medium ${
-                  shownProgress < 33
-                    ? "text-red-400"
-                    : shownProgress < 66
-                      ? "text-amber-400"
-                      : shownProgress < 100
-                        ? "text-emerald-400"
-                        : "text-sky-400"
+                  progressTone === "building"
+                    ? "text-amber-400"
+                    : progressTone === "searchable"
+                      ? "text-emerald-400"
+                      : "text-sky-400"
                 }`}>
                   {progressText}
                 </span>
@@ -215,35 +236,52 @@ export function AdvancedTab({
               <div className="relative h-2 w-full">
                 {/* Background track with segments */}
                 <div className="absolute inset-0 flex rounded-full overflow-hidden">
-                  <div className="w-[33%] h-full bg-red-500/15 border-r border-[var(--bg-surface-1)]" />
-                  <div className="w-[33%] h-full bg-amber-500/15 border-r border-[var(--bg-surface-1)]" />
-                  <div className="w-[34%] h-full bg-emerald-500/15" />
+                  <div className="w-[66%] h-full bg-amber-500/15 border-r border-[var(--bg-surface-1)]" />
+                  <div className="w-[17%] h-full bg-emerald-500/15 border-r border-[var(--bg-surface-1)]" />
+                  <div className="w-[17%] h-full bg-sky-500/15" />
                 </div>
                 {/* Fill bar */}
                 <motion.div
                   className={`absolute top-0 left-0 h-full rounded-full ${
-                    shownProgress < 33
-                      ? "bg-red-400"
-                      : shownProgress < 66
+                    progressTone === "building"
                         ? "bg-amber-400"
-                        : shownProgress < 100
+                      : progressTone === "searchable"
                           ? "bg-emerald-400"
-                          : "bg-sky-400"
+                        : "bg-sky-400"
                   }`}
                   initial={{ width: 0 }}
                   animate={{ width: `${shownProgress}%` }}
                   transition={{ duration: 0.5, ease: "easeOut" }}
                 />
                 {/* Milestone markers */}
-                <div className="absolute top-0 left-[33%] h-full w-px bg-[var(--bg-surface-1)]" />
                 <div className="absolute top-0 left-[66%] h-full w-px bg-[var(--bg-surface-1)]" />
+                <div className="absolute top-0 left-[83%] h-full w-px bg-[var(--bg-surface-1)]" />
               </div>
               {/* Milestone labels */}
               <div className="mt-1 flex justify-between text-[9px] text-[var(--text-muted)]">
-                <span className={shownProgress >= 33 ? "text-amber-400 font-medium" : ""}>可用</span>
-                <span className={shownProgress >= 66 ? "text-emerald-400 font-medium" : ""}>搜索</span>
-                <span className={shownProgress >= 100 ? "text-sky-400 font-medium" : ""}>优化</span>
+                <span className={shownProgress < 66 ? "text-amber-400 font-medium" : ""}>
+                  {uiLang === "zh-CN" ? "构建" : "Build"}
+                </span>
+                <span className={searchReady ? "text-sky-400 font-medium" : ""}>
+                  {uiLang === "zh-CN" ? "可搜索" : "Search ready"}
+                </span>
+                <span className={shownProgress >= 100 ? "text-sky-400 font-medium" : ""}>
+                  {uiLang === "zh-CN" ? "优化" : "Optimize"}
+                </span>
               </div>
+              {!searchReady ? (
+                <div className="mt-2 rounded-md border border-amber-400/25 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-500">
+                  {uiLang === "zh-CN"
+                    ? "黄色阶段表示向量索引仍在构建，暂时不能搜索。进入绿色后即可搜索，蓝色阶段会继续做图谱优化。"
+                    : "Yellow means the vector index is still building. Search starts in green; blue continues graph optimization."}
+                </div>
+              ) : retryableFilesRemaining ? (
+                <div className="mt-2 rounded-md border border-amber-400/25 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-500">
+                  {uiLang === "zh-CN"
+                    ? "已有分块可以搜索；少量失败文件会继续重试，不再阻塞检索。"
+                    : "Search is available from indexed chunks; remaining failed files will be retried without blocking retrieval."}
+                </div>
+              ) : null}
               <div className="mt-1 flex gap-3 text-[10px] text-[var(--text-muted)]">
                 <span>文档 {indexingStatus.indexed_docs}/{indexingStatus.total_docs}</span>
                 <span>分块 {indexingStatus.indexed_chunks}/{indexingStatus.total_chunks}</span>

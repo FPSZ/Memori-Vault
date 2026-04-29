@@ -586,7 +586,7 @@ fn append_llama_runtime_args(command: &mut Command, args: &LlamaRuntimeArgs) {
         command.arg("--threads-batch").arg(value.to_string());
     }
     if args.flash_attn {
-        command.arg("--flash-attn");
+        command.arg("--flash-attn").arg("on");
     }
     if let Some(value) = args
         .cache_type_k
@@ -651,6 +651,65 @@ fn is_port_available(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
+fn local_model_log_dir() -> Result<PathBuf, String> {
+    dirs::config_dir()
+        .map(|p| p.join(SETTINGS_APP_DIR_NAME).join("logs").join("models"))
+        .ok_or_else(|| "无法获取模型日志目录".to_string())
+}
+
+fn local_model_log_path(role: &str, port: u16) -> Result<PathBuf, String> {
+    let dir = local_model_log_dir()?;
+    fs::create_dir_all(&dir).map_err(|err| format!("创建模型日志目录失败: {err}"))?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    Ok(dir.join(format!("{role}-{port}-{now}.log")))
+}
+
+fn read_tail(path: &Path, max_bytes: usize) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    let start = bytes.len().saturating_sub(max_bytes);
+    let text = String::from_utf8_lossy(&bytes[start..]).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+fn is_port_listening(port: u16) -> bool {
+    std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        std::time::Duration::from_millis(250),
+    )
+    .is_ok()
+}
+
+async fn wait_for_local_model_startup(
+    role: &str,
+    port: u16,
+    child: &mut std::process::Child,
+    log_path: &Path,
+) -> Result<&'static str, String> {
+    for _ in 0..8 {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let log_tail = read_tail(log_path, 4000)
+                    .unwrap_or_else(|| "未捕获到 llama-server 输出".to_string());
+                return Err(format!(
+                    "{role} 模型启动后已退出：{status}。原因：{log_tail}"
+                ));
+            }
+            Ok(None) => {}
+            Err(err) => return Err(format!("{role} 模型进程状态读取失败: {err}")),
+        }
+
+        if is_port_listening(port) {
+            return Ok("running");
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    Ok("starting")
+}
+
 async fn local_runtime_statuses(
     state: &State<'_, DesktopState>,
     profile: &LocalModelProfileDto,
@@ -666,13 +725,20 @@ async fn local_runtime_statuses(
             match process.child.try_wait() {
                 Ok(Some(status)) => {
                     remove_dead = true;
+                    let log_tail = read_tail(Path::new(&process.log_path), 2000);
                     LocalModelRuntimeStatusDto {
                         role: role.to_string(),
                         endpoint,
                         port,
                         pid: None,
                         state: "stopped".to_string(),
-                        message: Some(format!("llama-server exited with status {status}")),
+                        message: Some(match log_tail {
+                            Some(tail) => {
+                                format!("llama-server 已退出：{status}；最近日志：{tail}")
+                            }
+                            None => format!("llama-server 已退出：{status}"),
+                        }),
+                        log_path: Some(process.log_path.clone()),
                     }
                 }
                 Ok(None) => LocalModelRuntimeStatusDto {
@@ -680,8 +746,16 @@ async fn local_runtime_statuses(
                     endpoint: process.endpoint.clone(),
                     port: Some(process.port),
                     pid: Some(process.child.id()),
-                    state: "running".to_string(),
-                    message: Some(format!("{} -> {}", process.model, process.model_path)),
+                    state: if is_port_listening(process.port) {
+                        "running".to_string()
+                    } else {
+                        "starting".to_string()
+                    },
+                    message: Some(format!(
+                        "{} -> {}；日志：{}",
+                        process.model, process.model_path, process.log_path
+                    )),
+                    log_path: Some(process.log_path.clone()),
                 },
                 Err(err) => {
                     remove_dead = true;
@@ -692,6 +766,7 @@ async fn local_runtime_statuses(
                         pid: None,
                         state: "error".to_string(),
                         message: Some(format!("failed to read process status: {err}")),
+                        log_path: Some(process.log_path.clone()),
                     }
                 }
             }
@@ -703,6 +778,7 @@ async fn local_runtime_statuses(
                 pid: None,
                 state: "stopped".to_string(),
                 message: None,
+                log_path: None,
             }
         };
         if remove_dead {
@@ -759,6 +835,16 @@ async fn start_local_model_role(
         return Err(message);
     }
 
+    let log_path = local_model_log_path(role, port)?;
+    let stdout_log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|err| format!("打开模型日志失败({}): {err}", log_path.display()))?;
+    let stderr_log = stdout_log
+        .try_clone()
+        .map_err(|err| format!("复制模型日志句柄失败({}): {err}", log_path.display()))?;
+
     let mut command = Command::new(&llama_server);
     command
         .arg("-m")
@@ -786,8 +872,11 @@ async fn start_local_model_role(
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+    command
+        .stdout(std::process::Stdio::from(stdout_log))
+        .stderr(std::process::Stdio::from(stderr_log));
 
-    let child = command.spawn().map_err(|err| {
+    let mut child = command.spawn().map_err(|err| {
         let message = format!(
             "failed to start llama-server for {role}; executable={}; model={}; port={port}; reason={err}",
             llama_server.display(),
@@ -797,6 +886,25 @@ async fn start_local_model_role(
         message
     })?;
     let pid = child.id();
+    let startup_state = match wait_for_local_model_startup(role, port, &mut child, &log_path).await
+    {
+        Ok(state) => state,
+        Err(message) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            error!(
+                role = %role,
+                pid = pid,
+                port = port,
+                model = %model,
+                path = %model_path_buf.display(),
+                log_path = %log_path.display(),
+                error = %message,
+                "local model start failed"
+            );
+            return Err(format!("{message}；日志：{}", log_path.display()));
+        }
+    };
     info!(
         role = %role,
         pid = pid,
@@ -805,6 +913,8 @@ async fn start_local_model_role(
         model = %model,
         model_path = %model_path_buf.display(),
         llama_server = %llama_server.display(),
+        startup_state = %startup_state,
+        log_path = %log_path.display(),
         "started local llama.cpp model"
     );
 
@@ -817,6 +927,7 @@ async fn start_local_model_role(
             port,
             model_path: model_path_buf.to_string_lossy().to_string(),
             model,
+            log_path: log_path.to_string_lossy().to_string(),
         },
     );
     Ok(())

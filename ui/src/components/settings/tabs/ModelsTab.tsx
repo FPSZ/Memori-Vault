@@ -280,9 +280,13 @@ function ModelCard({
   const Icon = meta.icon;
   const port = extractPort(endpoint);
   const running = runtimeStatus?.state === "running";
+  const starting = runtimeStatus?.state === "starting";
+  const processAlive = running || starting;
   const stateLabel =
     runtimeStatus?.state === "running"
       ? "运行中"
+      : runtimeStatus?.state === "starting"
+        ? "加载中"
       : runtimeStatus?.state === "error"
         ? "异常"
         : "未启动";
@@ -301,7 +305,7 @@ function ModelCard({
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
             {port ? <span className="font-mono">端口 {port}</span> : null}
             {isLocal ? (
-              <span className={running ? "text-emerald-400" : runtimeStatus?.state === "error" ? "text-red-400" : ""}>
+              <span className={running ? "text-emerald-400" : starting ? "text-amber-400" : runtimeStatus?.state === "error" ? "text-red-400" : ""}>
                 {stateLabel}{runtimeStatus?.pid ? ` · PID ${runtimeStatus.pid}` : ""}
               </span>
             ) : null}
@@ -309,7 +313,7 @@ function ModelCard({
         </div>
         <div className="flex items-center gap-1.5">
           {isLocal ? (
-            running ? (
+            processAlive ? (
               <button
                 type="button"
                 onClick={onStop}
@@ -422,7 +426,7 @@ function ModelCard({
                       onContextLengthChange(v === "" ? null : Math.max(1, Number(v)));
                     }}
                     className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                    placeholder="32768"
+                    placeholder={role === "chat" ? "16384" : role === "graph" ? "4096" : "8192"}
                   />
                 </div>
                 <div className="space-y-1">
@@ -446,7 +450,7 @@ function ModelCard({
                 </div>
               ) : null}
 
-              {isLocal && running ? (
+              {isLocal && processAlive ? (
                 <button
                   type="button"
                   onClick={onRestart}

@@ -79,8 +79,9 @@ export type LocalModelRuntimeStatusDto = {
   endpoint: string;
   port?: number | null;
   pid?: number | null;
-  state: "stopped" | "running" | "error" | string;
+  state: "stopped" | "starting" | "running" | "error" | string;
   message?: string | null;
+  log_path?: string | null;
 };
 
 export type LocalModelRuntimeStatusesDto = {

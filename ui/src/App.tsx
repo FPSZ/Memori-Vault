@@ -50,7 +50,7 @@ import {
   getVaultStats,
   listProviderModels,
   openSourceLocation,
-  readFileContent,
+  readFilePreview,
   pauseIndexing,
   probeModelProvider,
   restartLocalModel,
@@ -107,6 +107,7 @@ const FONT_PRESET_STORAGE_KEY = "memori-font-preset";
 const FONT_SCALE_STORAGE_KEY = "memori-font-scale";
 const RETRIEVE_TOP_K_STORAGE_KEY = "memori-retrieve-top-k";
 const MODEL_ACTION_TIMEOUT_MS = 20000;
+const LOCAL_MODEL_ACTION_TIMEOUT_MS = 45000;
 const INDEXING_ACTION_TIMEOUT_MS = 15000;
 const DEFAULT_FONT_SCALE: FontScale = "m";
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
@@ -416,6 +417,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [previewFilePath, setPreviewFilePath] = useState<string | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [previewFormat, setPreviewFormat] = useState<string>("text");
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => resolveInitialSidebarWidth());
   const sidebarWidthRef = useRef<number>(sidebarWidth);
   useEffect(() => { sidebarWidthRef.current = sidebarWidth; }, [sidebarWidth]);
@@ -1219,7 +1221,7 @@ export default function App() {
       setModelSettings(saved);
       const runtime = await withTimeout(
         action(),
-        MODEL_ACTION_TIMEOUT_MS,
+        LOCAL_MODEL_ACTION_TIMEOUT_MS,
         "Local model runtime action timed out."
       );
       setLocalModelRuntimeStatuses(runtime);
@@ -1471,9 +1473,10 @@ export default function App() {
   const onPreviewFile = async (path: string) => {
     if (!path) return;
     try {
-      const content = await readFileContent(path);
+      const preview = await readFilePreview(path);
       setPreviewFilePath(path);
-      setPreviewContent(content);
+      setPreviewContent(preview.content);
+      setPreviewFormat(preview.format);
     } catch (err) {
       setError(toUiErrorMessage(err));
     }
@@ -1482,6 +1485,7 @@ export default function App() {
   const onCloseFilePreview = () => {
     setPreviewFilePath(null);
     setPreviewContent(null);
+    setPreviewFormat("text");
   };
 
   const onPickWatchRoot = async () => {
@@ -1667,6 +1671,7 @@ export default function App() {
                       t={t}
                       filePath={previewFilePath}
                       content={previewContent}
+                      format={previewFormat}
                       onClose={onCloseFilePreview}
                     />
                   ) : (

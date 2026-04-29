@@ -178,6 +178,7 @@ fn humanize_key(key: &str) -> String {
 fn humanize_message(message: &str) -> &str {
     match message {
         "started local llama.cpp model" => "本地模型已启动",
+        "local model start failed" => "本地模型启动失败",
         "stopped local llama.cpp model" => "本地模型已停止",
         "failed to stop local llama.cpp model" => "停止本地模型失败",
         "local llama.cpp port conflict" => "端口被占用，模型启动失败",

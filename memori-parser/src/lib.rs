@@ -633,14 +633,45 @@ fn extract_docx_text(path: &Path) -> Option<String> {
 
     let mut reader = quick_xml::Reader::from_reader(&buf[..]);
     reader.config_mut().trim_text(true);
-    let mut texts = Vec::new();
+    let mut out = String::new();
+    let mut in_text = false;
     let mut buf = Vec::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
+            Ok(quick_xml::events::Event::Start(e)) => {
+                let name = e.name();
+                if name.as_ref() == b"w:t" {
+                    in_text = true;
+                } else if name.as_ref() == b"w:tab" {
+                    out.push('\t');
+                } else if name.as_ref() == b"w:br" {
+                    out.push('\n');
+                }
+            }
+            Ok(quick_xml::events::Event::Empty(e)) => {
+                let name = e.name();
+                if name.as_ref() == b"w:tab" {
+                    out.push('\t');
+                } else if name.as_ref() == b"w:br" {
+                    out.push('\n');
+                }
+            }
+            Ok(quick_xml::events::Event::End(e)) => {
+                let name = e.name();
+                if name.as_ref() == b"w:t" {
+                    in_text = false;
+                } else if name.as_ref() == b"w:p" {
+                    push_newline_if_needed(&mut out, 2);
+                } else if name.as_ref() == b"w:tc" {
+                    out.push('\t');
+                } else if name.as_ref() == b"w:tr" {
+                    push_newline_if_needed(&mut out, 1);
+                }
+            }
             Ok(quick_xml::events::Event::Text(e)) => {
-                if let Ok(t) = e.unescape() {
-                    texts.push(t.into_owned());
+                if in_text && let Ok(t) = e.unescape() {
+                    out.push_str(&t);
                 }
             }
             Ok(quick_xml::events::Event::Eof) => break,
@@ -650,13 +681,7 @@ fn extract_docx_text(path: &Path) -> Option<String> {
         buf.clear();
     }
 
-    let raw = texts.join("");
-    // Replace soft-hyphens and normalize whitespace
-    let cleaned = raw
-        .replace("\u{00AD}", "")
-        .replace("\r\n", "\n")
-        .replace('\r', "\n");
-    Some(cleaned)
+    Some(clean_extracted_document_text(&out))
 }
 
 /// Extract text from a PDF file using lopdf.
@@ -674,6 +699,40 @@ fn extract_pdf_text(path: &Path) -> Option<String> {
         }
     }
     let raw = texts.join("\n");
-    let cleaned = raw.replace("\r\n", "\n").replace('\r', "\n");
-    Some(cleaned)
+    Some(clean_extracted_document_text(&raw))
+}
+
+fn push_newline_if_needed(out: &mut String, target_count: usize) {
+    let current = out.chars().rev().take_while(|ch| *ch == '\n').count();
+    for _ in current..target_count {
+        out.push('\n');
+    }
+}
+
+fn clean_extracted_document_text(text: &str) -> String {
+    let normalized = text
+        .replace("\u{00AD}", "")
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let mut lines = Vec::new();
+    let mut blank_count = 0usize;
+    for line in normalized.lines() {
+        let line = line
+            .split('\t')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let line = line.trim();
+        if line.is_empty() {
+            blank_count += 1;
+            if blank_count <= 1 && !lines.is_empty() {
+                lines.push(String::new());
+            }
+        } else {
+            blank_count = 0;
+            lines.push(line.to_string());
+        }
+    }
+    lines.join("\n").trim().to_string()
 }

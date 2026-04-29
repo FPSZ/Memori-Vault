@@ -148,6 +148,9 @@ pub fn run() {
             ask_vault_structured,
             ask_vault,
             get_vault_stats,
+            search_graph_nodes,
+            get_graph_neighbors,
+            get_graph_stats,
             get_indexing_status,
             set_indexing_mode,
             trigger_reindex,
@@ -179,6 +182,7 @@ pub fn run() {
             list_search_scopes,
             open_source_location,
             read_file_content,
+            read_file_preview,
             rank_settings_query,
             get_logs,
             get_log_dir

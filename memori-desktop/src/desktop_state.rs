@@ -17,6 +17,7 @@ pub(crate) struct LocalModelProcess {
     pub(crate) port: u16,
     pub(crate) model_path: String,
     pub(crate) model: String,
+    pub(crate) log_path: String,
 }
 
 impl DesktopState {

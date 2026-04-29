@@ -1,5 +1,9 @@
 use crate::*;
 
+pub(crate) const DEFAULT_LOCAL_CHAT_CONTEXT_LENGTH: u32 = 16_384;
+pub(crate) const DEFAULT_LOCAL_GRAPH_CONTEXT_LENGTH: u32 = 4_096;
+pub(crate) const DEFAULT_LOCAL_EMBED_CONTEXT_LENGTH: u32 = 8_192;
+
 pub(crate) async fn replace_engine(
     engine_slot: &Arc<Mutex<Option<MemoriEngine>>>,
     init_error: &Arc<Mutex<Option<String>>>,
@@ -485,9 +489,21 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             chat_model_path: normalize_optional_text(settings.local_chat_model_path.clone()),
             graph_model_path: normalize_optional_text(settings.local_graph_model_path.clone()),
             embed_model_path: normalize_optional_text(settings.local_embed_model_path.clone()),
-            chat_context_length: settings.local_chat_context_length,
-            graph_context_length: settings.local_graph_context_length,
-            embed_context_length: settings.local_embed_context_length,
+            chat_context_length: Some(
+                settings
+                    .local_chat_context_length
+                    .unwrap_or(DEFAULT_LOCAL_CHAT_CONTEXT_LENGTH),
+            ),
+            graph_context_length: Some(
+                settings
+                    .local_graph_context_length
+                    .unwrap_or(DEFAULT_LOCAL_GRAPH_CONTEXT_LENGTH),
+            ),
+            embed_context_length: Some(
+                settings
+                    .local_embed_context_length
+                    .unwrap_or(DEFAULT_LOCAL_EMBED_CONTEXT_LENGTH),
+            ),
             chat_concurrency: settings.local_chat_concurrency,
             graph_concurrency: settings.local_graph_concurrency,
             embed_concurrency: settings.local_embed_concurrency,

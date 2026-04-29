@@ -732,7 +732,9 @@ impl MemoriEngine {
                     33 + ((indexed_chunks as f64 / total_chunks.max(1) as f64) * 33.0) as u32
                 }
                 "graphing" => {
-                    66 + ((graphed_chunks as f64 / total_chunks.max(1) as f64) * 34.0) as u32
+                    let graph_total = graphed_chunks + graph_backlog;
+                    let done = graph_total.saturating_sub(graph_backlog);
+                    66 + ((done as f64 / graph_total.max(1) as f64) * 34.0) as u32
                 }
                 _ if metadata.rebuild_state == memori_storage::RebuildState::Ready => 100,
                 _ => 0,

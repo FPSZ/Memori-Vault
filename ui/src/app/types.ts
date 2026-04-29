@@ -16,6 +16,43 @@ export type VaultStatsRaw = Partial<
   }
 >;
 
+export type GraphNodeDto = {
+  id: string;
+  label: string;
+  name: string;
+  description: string | null;
+};
+
+export type GraphEdgeDto = {
+  id: string;
+  source_node: string;
+  target_node: string;
+  relation: string;
+};
+
+export type GraphNeighborsDto = {
+  center: GraphNodeDto | null;
+  nodes: GraphNodeDto[];
+  edges: GraphEdgeDto[];
+  source_chunks: ChunkRecord[];
+};
+
+export type GraphStatsDto = {
+  node_count: number;
+  edge_count: number;
+  is_building: boolean;
+};
+
+export type ChunkRecord = {
+  id: number;
+  doc_id: number;
+  chunk_index: number;
+  content: string;
+  heading_path: string[];
+  block_kind: string;
+  char_len: number;
+};
+
 export type AskStatus = "answered" | "insufficient_evidence" | "model_failed_with_evidence";
 
 export type CitationItem = {
@@ -165,4 +202,10 @@ export type FileMatch = {
   ext: string;
   mtime_secs: number;
   file_size: number;
+};
+
+export type FilePreviewDto = {
+  content: string;
+  format: "markdown" | "document" | "text" | string;
+  extension: string;
 };

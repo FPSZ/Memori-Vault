@@ -166,6 +166,7 @@ pub(crate) fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
     ensure_file_catalog_schema(conn)?;
     ensure_memory_schema(conn)?;
     migrate_legacy_fts_tables(conn)?;
+    repair_empty_fts_from_existing_chunks(conn)?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_documents_relative_path ON documents(relative_path)",
         [],
@@ -533,6 +534,69 @@ fn migrate_legacy_file_catalog_ext_column(conn: &Connection) -> Result<(), Stora
     .map_err(map_sqlite_error)?;
 
     Ok(())
+}
+
+fn repair_empty_fts_from_existing_chunks(conn: &Connection) -> Result<(), StorageError> {
+    let chunk_count = table_row_count(conn, "chunks")?;
+    if chunk_count == 0 {
+        return Ok(());
+    }
+
+    let chunks_fts_count = table_row_count(conn, "chunks_fts")?;
+    let documents_fts_count = table_row_count(conn, "documents_fts")?;
+    if chunks_fts_count > 0 && documents_fts_count > 0 {
+        return Ok(());
+    }
+
+    let tx = conn.unchecked_transaction().map_err(map_sqlite_error)?;
+    if chunks_fts_count == 0 {
+        tx.execute(
+            "INSERT INTO chunks_fts(content, heading_text, file_name, relative_path, chunk_id, doc_id, file_path)
+             SELECT c.content,
+                    COALESCE(
+                        (SELECT GROUP_CONCAT(value, ' / ') FROM json_each(c.heading_path_json)),
+                        ''
+                    ) AS heading_text,
+                    d.file_name,
+                    d.relative_path,
+                    c.id,
+                    c.doc_id,
+                    d.file_path
+             FROM chunks c
+             INNER JOIN documents d ON d.id = c.doc_id
+             INNER JOIN file_catalog fc ON fc.file_path = d.file_path
+             WHERE fc.removed_at IS NULL",
+            [],
+        )
+        .map_err(map_sqlite_error)?;
+    }
+
+    if documents_fts_count == 0 {
+        tx.execute(
+            "INSERT INTO documents_fts(search_text, file_name, relative_path, heading_catalog_text, doc_id, file_path)
+             SELECT d.document_search_text,
+                    d.file_name,
+                    d.relative_path,
+                    d.heading_catalog_text,
+                    d.id,
+                    d.file_path
+             FROM documents d
+             INNER JOIN file_catalog fc ON fc.file_path = d.file_path
+             WHERE fc.removed_at IS NULL",
+            [],
+        )
+        .map_err(map_sqlite_error)?;
+    }
+
+    tx.commit().map_err(map_sqlite_error)?;
+    Ok(())
+}
+
+fn table_row_count(conn: &Connection, table: &str) -> Result<i64, StorageError> {
+    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+        row.get(0)
+    })
+    .map_err(map_sqlite_error)
 }
 
 pub(crate) fn ensure_file_catalog_schema(conn: &Connection) -> Result<(), StorageError> {

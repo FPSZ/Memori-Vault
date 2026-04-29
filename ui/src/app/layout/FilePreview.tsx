@@ -13,15 +13,52 @@ type FilePreviewProps = {
   t: TranslateFn;
   filePath: string;
   content: string;
+  format?: string;
   onClose: () => void;
 };
 
 const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 const REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize, rehypeHighlight];
 
-export function FilePreview({ t, filePath, content, onClose }: FilePreviewProps) {
+function renderDocumentText(content: string) {
+  const blocks = content
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  return blocks.map((block, index) => {
+    const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
+    const isTableLike = lines.length > 1 && lines.every((line) => line.includes(" | "));
+    if (isTableLike) {
+      return (
+        <div key={index} className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)]/60">
+          <table className="w-full border-collapse text-left text-sm">
+            <tbody>
+              {lines.map((line, rowIndex) => (
+                <tr key={rowIndex} className="border-b border-[var(--border-subtle)] last:border-0">
+                  {line.split(/\s+\|\s+/).map((cell, cellIndex) => (
+                    <td key={cellIndex} className="px-3 py-2 align-top text-[var(--text-primary)]">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+    return (
+      <p key={index} className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-primary)]">
+        {block}
+      </p>
+    );
+  });
+}
+
+export function FilePreview({ t, filePath, content, format, onClose }: FilePreviewProps) {
   const fileName = filePath.split(/[/\\]/).pop() || filePath;
-  const isMarkdown = fileName.toLowerCase().endsWith(".md");
+  const isMarkdown = (format ?? "").toLowerCase() === "markdown" || fileName.toLowerCase().endsWith(".md");
+  const isDocument = (format ?? "").toLowerCase() === "document";
 
   return (
     <div className="flex h-full flex-col">
@@ -50,6 +87,10 @@ export function FilePreview({ t, filePath, content, onClose }: FilePreviewProps)
             <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS}>
               {content}
             </ReactMarkdown>
+          </div>
+        ) : isDocument ? (
+          <div className="document-preview space-y-4 px-6 py-5">
+            {renderDocumentText(content)}
           </div>
         ) : (
           <pre className="m-0 whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-[var(--text-primary)] font-mono">

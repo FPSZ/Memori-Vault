@@ -23,9 +23,9 @@ use llm_generator::generate_answer as generate_llm_answer;
 pub use memori_parser::DocumentChunk;
 use memori_parser::{ParserStub, parse_and_chunk};
 pub use memori_storage::{
-    LifecycleAction, MemoryEventRecord, MemoryLayer, MemoryLifecycleLogRecord, MemoryRecord,
-    MemoryScope, MemorySearchOptions, MemorySourceType, MemoryStatus, NewMemoryEvent,
-    NewMemoryRecord, UpdateMemoryRecord,
+    GraphEdge, GraphNeighbors, GraphNode, LifecycleAction, MemoryEventRecord, MemoryLayer,
+    MemoryLifecycleLogRecord, MemoryRecord, MemoryScope, MemorySearchOptions, MemorySourceType,
+    MemoryStatus, NewMemoryEvent, NewMemoryRecord, UpdateMemoryRecord,
 };
 use memori_storage::{RebuildState, SqliteStore, StorageError};
 use memori_vault::{
@@ -85,6 +85,15 @@ async fn set_runtime_idle(state: &Arc<AppState>, last_error: Option<String>) {
 
 async fn ensure_search_ready(state: &Arc<AppState>) -> Result<(), EngineError> {
     let metadata = state.vector_store.read_index_metadata().await?;
+    if metadata.rebuild_state != RebuildState::Ready
+        && metadata
+            .rebuild_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("retryable_files_remaining"))
+        && state.vector_store.count_chunks().await.unwrap_or(0) > 0
+    {
+        return Ok(());
+    }
     match metadata.rebuild_state {
         RebuildState::Ready => Ok(()),
         RebuildState::Required => Err(EngineError::IndexUnavailable {
@@ -1110,6 +1119,19 @@ mod tests {
             .expect("upsert seed index state");
     }
 
+    async fn seed_document_chunks(
+        state: &Arc<AppState>,
+        file_path: &PathBuf,
+        chunks: Vec<DocumentChunk>,
+    ) {
+        let embeddings = vec![vec![0.1_f32, 0.2_f32]; chunks.len()];
+        state
+            .vector_store
+            .replace_document_index(file_path, None, 123, "test_hash", chunks, embeddings)
+            .await
+            .expect("replace document index");
+    }
+
     #[tokio::test]
     async fn removed_event_purges_existing_index() {
         let db_path = temp_db_path("removed");
@@ -1142,6 +1164,52 @@ mod tests {
                 .expect("get file index after remove")
                 .is_none()
         );
+
+        drop(state);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
+    async fn retrieval_uses_chunk_fts_for_matched_cjk_identifier_document() {
+        let db_path = temp_db_path("cjk_chunk_fts");
+        let state = Arc::new(AppState::new(&db_path).expect("create app state"));
+        let file_path = PathBuf::from("Memory_Test/doc_017_技术架构_银杏-17_会议纪要.md");
+        seed_document_chunks(
+            &state,
+            &file_path,
+            vec![
+                DocumentChunk {
+                    file_path: file_path.clone(),
+                    content: "会议背景：平台架构组讨论上线安排。".to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["会议纪要".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                DocumentChunk {
+                    file_path: file_path.clone(),
+                    content: "- 项目代号：银杏-17 / ARC-17\n- 负责人：苏澈（平台架构组）\n- 核心事实：银杏-17 的上线冻结窗口是每周三 19:40-21:10。".to_string(),
+                    chunk_index: 1,
+                    heading_path: vec!["关键结论".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::List,
+                },
+            ],
+        )
+        .await;
+
+        let engine = MemoriEngine::new(state.clone(), memori_vault::create_event_channel().1);
+        let inspection = engine
+            .retrieve_structured_with_embedding("银杏-17的负责人是谁", Vec::new(), None, Some(3))
+            .await
+            .expect("retrieve structured");
+
+        assert_eq!(inspection.status, AskStatus::Answered);
+        assert!(
+            inspection
+                .evidence
+                .iter()
+                .any(|item| item.content.contains("负责人：苏澈"))
+        );
+        assert!(inspection.metrics.chunk_candidate_count > 0);
 
         drop(state);
         let _ = std::fs::remove_file(&db_path);

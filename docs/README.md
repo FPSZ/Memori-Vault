@@ -31,6 +31,7 @@ This directory is organized by document purpose. Keep new files in the matching 
 - [Release notes v0.2.0](./release/RELEASE_NOTES_v0.2.0.md)
 - [Release notes v0.3.0](./release/RELEASE_NOTES_v0.3.0.md)
 - [Release notes v0.4.0](./release/RELEASE_NOTES_v0.4.0.md)
+- [Release notes v1.0.0](./release/RELEASE_NOTES_v1.0.0.md)
 
 ## Archive
 

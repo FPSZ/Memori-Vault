@@ -261,6 +261,7 @@ pub(crate) struct LocalModelRuntimeStatusDto {
     pub(crate) pid: Option<u32>,
     pub(crate) state: String,
     pub(crate) message: Option<String>,
+    pub(crate) log_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,6 +320,13 @@ pub(crate) struct SearchScopeItem {
     pub(crate) relative_path: String,
     pub(crate) is_dir: bool,
     pub(crate) depth: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct FilePreviewDto {
+    pub(crate) content: String,
+    pub(crate) format: String,
+    pub(crate) extension: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
