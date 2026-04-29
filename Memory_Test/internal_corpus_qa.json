@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "company": "星衡智能",
+  "note": "这些问题用于验证回答是否来自 Memory_Test 内部资料，而不是模型常识。",
+  "cases": [
+    {
+      "id": "internal_aur-17",
+      "query": "极光账本（AUR-17）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_001_",
+      "must_include": [
+        "林知远",
+        "极光账本的试点客户只允许选择 3 家：禾川物流、南屿商贸、钧石制造。",
+        "北极星指标不是 DAU，而是“月度已核销对账单数”，一期目标为 18,600 张。"
+      ],
+      "anti_common_answer": "不要按通用 SaaS 项目写成 DAU 或转化率。"
+    },
+    {
+      "id": "internal_grow-29",
+      "query": "青梧留存（GROW-29）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_006_",
+      "must_include": [
+        "陈夏",
+        "公司内部把“冷启动用户”定义为 14 天内访问过但未创建项目的人",
+        "青梧留存的核心阈值是 D14 二次创建率 31.5%，低于 29% 必须暂停投放。"
+      ],
+      "anti_common_answer": "不要回答行业常见的新注册用户定义。"
+    },
+    {
+      "id": "internal_sec-41",
+      "query": "玄武密钥（SEC-41）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_011_",
+      "must_include": [
+        "周曼青",
+        "玄武密钥轮换窗口固定为每月第二个周四 22:10-22:35。",
+        "服务端密钥最大存活期为 43 天"
+      ],
+      "anti_common_answer": "不要写成常见的 90 天轮换。"
+    },
+    {
+      "id": "internal_arc-17",
+      "query": "银杏-17（ARC-17）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_016_",
+      "must_include": [
+        "苏澈",
+        "银杏-17 的上线冻结窗口是每周三 19:40-21:10。",
+        "网关错误率超过 0.47% 且持续 6 分钟才触发自动回滚。"
+      ],
+      "anti_common_answer": "不要回答成常见的 5% 灰度或任意时间发布。"
+    },
+    {
+      "id": "internal_cs-08",
+      "query": "白鹭工单（CS-08）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_021_",
+      "must_include": [
+        "马溪",
+        "白鹭工单的 P1 升级 SLA 是 11 分钟",
+        "一线首次响应满意度目标为 92.4%，但不纳入月奖，只纳入复盘。"
+      ],
+      "anti_common_answer": "不要套用通用 15/30/60 分钟工单 SLA。"
+    },
+    {
+      "id": "internal_fin-33",
+      "query": "赤松预算（FIN-33）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_026_",
+      "must_include": [
+        "何砚",
+        "赤松预算的审批线不是金额固定线",
+        "试点期单笔采购上限 78,000 元"
+      ],
+      "anti_common_answer": "不要回答成传统金额越大越高层审批。"
+    },
+    {
+      "id": "internal_data-12",
+      "query": "松塔标签（DATA-12）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_031_",
+      "must_include": [
+        "顾安",
+        "松塔标签把“活跃门店”定义为 10 天内完成过库存盘点的门店。",
+        "标签产出延迟 SLO 是 T+38 分钟，不是 T+1 天。"
+      ],
+      "anti_common_answer": "不要按零售行业常见日活门店口径回答。"
+    },
+    {
+      "id": "internal_hr-22",
+      "query": "石竹梯队（HR-22）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_036_",
+      "must_include": [
+        "赵闻笛",
+        "石竹梯队的 L3 晋升必要条件是主持过一次跨部门复盘",
+        "2026 上半年 L3 名额上限为 14 人，技术序列最多占 6 人。"
+      ],
+      "anti_common_answer": "不要写成通用绩效评分或团队规模决定晋升。"
+    },
+    {
+      "id": "internal_scm-17",
+      "query": "蓝鲸 B17（SCM-17）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_041_",
+      "must_include": [
+        "唐稚",
+        "蓝鲸 B17 的安全库存不是 30 天",
+        "当 Bin-7 库位低于 51 台时触发黄色预警，低于 23 台触发红色预警。"
+      ],
+      "anti_common_answer": "不要按制造业常见天数库存回答。"
+    },
+    {
+      "id": "internal_mkt-05",
+      "query": "雾凇发布（MKT-05）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_046_",
+      "must_include": [
+        "沈乔",
+        "雾凇发布的禁用词清单包含“颠覆行业”“零成本替代”“全自动合规”。",
+        "发布会目标不是线索数，而是 46 家目标客户中至少 19 家完成闭门演示预约。"
+      ],
+      "anti_common_answer": "不要输出营销通用夸张词。"
+    },
+    {
+      "id": "internal_law-19",
+      "query": "琥珀条款（LAW-19）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_051_",
+      "must_include": [
+        "魏蓝",
+        "琥珀条款要求所有试点合同加入“本地模型不出域”附件 A-3。",
+        "合同回传时限是 5 个工作日"
+      ],
+      "anti_common_answer": "不要写成普通 SaaS 数据处理协议即可。"
+    },
+    {
+      "id": "internal_dev-26",
+      "query": "蜂巢流水线（DEV-26）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_056_",
+      "must_include": [
+        "于北辰",
+        "蜂巢流水线的强制阻断项是“迁移脚本缺少回滚段”",
+        "主干构建 18 分钟内完成算绿色"
+      ],
+      "anti_common_answer": "不要只回答提高单测覆盖率。"
+    },
+    {
+      "id": "internal_pre-09",
+      "query": "云帆模板（PRE-09）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_061_",
+      "must_include": [
+        "梁其",
+        "云帆模板中“私有化部署”默认写作 3 节点轻量集群",
+        "标准演示时长为 28 分钟，其中知识库问答必须控制在 7 分钟内。"
+      ],
+      "anti_common_answer": "不要按通用售前方案写成越完整越好。"
+    },
+    {
+      "id": "internal_qa-31",
+      "query": "晴川验收（QA-31）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_066_",
+      "must_include": [
+        "董霁",
+        "晴川验收把“可交付”定义为完成 9 条端到端证据链",
+        "验收抽样比例固定为 17%，但核心流程必须 100% 覆盖。"
+      ],
+      "anti_common_answer": "不要回答成普通测试通过率。"
+    },
+    {
+      "id": "internal_aud-14",
+      "query": "镜湖审计（AUD-14）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_071_",
+      "must_include": [
+        "郝映",
+        "镜湖审计的抽查样本来自“最近 5 次异常回滚”",
+        "每次审计至少追踪 4 个角色：申请人、审批人、执行人、复核人。"
+      ],
+      "anti_common_answer": "不要套用通用随机抽样审计。"
+    },
+    {
+      "id": "internal_km-07",
+      "query": "栈桥知识库（KM-07）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_076_",
+      "must_include": [
+        "黎鸥",
+        "栈桥知识库的过期规则是 75 天无人引用即进入复审",
+        "核心知识卡必须包含适用场景、反例和负责组三项。"
+      ],
+      "anti_common_answer": "不要回答普通文档生命周期管理。"
+    },
+    {
+      "id": "internal_chn-11",
+      "query": "翠微伙伴（CHN-11）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_081_",
+      "must_include": [
+        "秦若",
+        "翠微伙伴的分级依据是“联合交付成功次数”",
+        "银级需要 2 次成功交付，金级需要 5 次，黑松级需要 9 次。"
+      ],
+      "anti_common_answer": "不要按销售额或返点比例回答。"
+    },
+    {
+      "id": "internal_pri-28",
+      "query": "芦苇脱敏（PRI-28）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_086_",
+      "must_include": [
+        "薛宁",
+        "芦苇脱敏把门店联系人电话保留后 2 位用于排障",
+        "脱敏任务超过 13 分钟未完成要进入人工复核队列。"
+      ],
+      "anti_common_answer": "不要写成全部字段简单删除。"
+    },
+    {
+      "id": "internal_inc-44",
+      "query": "灯塔演练（INC-44）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_091_",
+      "must_include": [
+        "任栎",
+        "灯塔演练规定主责人在 4 分钟内声明 incident commander。",
+        "SEV-2 的内部同步频率是每 17 分钟一次，不是半小时。"
+      ],
+      "anti_common_answer": "不要按通用 SRE 手册写 30 分钟同步。"
+    },
+    {
+      "id": "internal_bi-16",
+      "query": "海棠看板（BI-16）的内部规定是什么？负责人是谁？",
+      "target_document_prefix": "doc_096_",
+      "must_include": [
+        "白予墨",
+        "海棠看板的营收口径排除一次性迁移服务费",
+        "周报必须同时展示净收入留存 NRR 和证据引用率两个指标。"
+      ],
+      "anti_common_answer": "不要按普通 ARR 看板只回答收入。"
+    }
+  ]
+}
