@@ -237,6 +237,18 @@ impl SqliteStore {
         })
     }
 
+    /// 统计 edges 表总行数。
+    pub async fn count_edges(&self) -> Result<u64, StorageError> {
+        let conn_guard = self.lock_conn()?;
+        let count: i64 = conn_guard
+            .query_row("SELECT COUNT(*) FROM edges", [], |row| row.get(0))
+            .map_err(map_sqlite_error)?;
+        u64::try_from(count).map_err(|_| StorageError::NegativeCount {
+            table: "edges",
+            count,
+        })
+    }
+
     /// 统计 file_catalog 表总行数（不含已删除的）。
     pub async fn count_catalog_entries(&self) -> Result<u64, StorageError> {
         let conn_guard = self.lock_conn()?;
