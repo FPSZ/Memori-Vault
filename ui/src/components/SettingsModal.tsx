@@ -513,23 +513,9 @@ export function SettingsModal({
           <ArrowRight className="h-4 w-4" />
           <span className="text-xs tracking-[0.1em] uppercase">{t("back")}</span>
         </AnimatedPressButton>
-        <div className="flex items-center gap-3">
-          <span className="text-xs tracking-[0.16em] text-[var(--text-secondary)] uppercase">
-            {t("settingsTitle")}
-          </span>
-          <AnimatedPressButton
-            type="button"
-            onClick={() => void runActiveSave()}
-            disabled={saveTarget.disabled || topSaveBusy}
-            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:opacity-90 disabled:opacity-50 ${
-              topSaveError ? "bg-red-500" : "bg-[var(--accent)]"
-            }`}
-            title={saveTarget.label}
-          >
-            {topSaveBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {saveTarget.label}
-          </AnimatedPressButton>
-        </div>
+        <span className="text-xs tracking-[0.16em] text-[var(--text-secondary)] uppercase">
+          {t("settingsTitle")}
+        </span>
       </div>
 
       <div className="flex h-[calc(100%-44px)] min-h-0">
@@ -581,6 +567,20 @@ export function SettingsModal({
         </aside>
 
         <section className="settings-content settings-panel-solid settings-scrollbar relative min-h-0 w-[72%] overflow-y-auto px-5 py-5">
+          <div className="sticky top-0 z-20 mb-[-42px] flex h-10 justify-end pointer-events-none">
+            <AnimatedPressButton
+              type="button"
+              onClick={() => void runActiveSave()}
+              disabled={saveTarget.disabled || topSaveBusy}
+              className={`pointer-events-auto inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white shadow-sm transition hover:opacity-90 disabled:opacity-50 ${
+                topSaveError ? "bg-red-500" : "bg-[var(--accent)]"
+              }`}
+              title={saveTarget.label}
+            >
+              {topSaveBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {saveTarget.label}
+            </AnimatedPressButton>
+          </div>
           <AnimatePresence mode="wait">
             {activeTab === "basic" ? (
               <BasicTab
