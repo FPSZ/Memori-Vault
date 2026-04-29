@@ -96,38 +96,37 @@ pub fn should_index_file(
 
     // 5. 文件大小范围
     if let Some(size) = file_size {
-        if let Some(min) = filter.min_size {
-            if size < min {
-                debug!(path = %path.display(), size = size, min = min, "文件大小小于最小值");
-                return false;
-            }
+        if let Some(min) = filter.min_size
+            && size < min
+        {
+            debug!(path = %path.display(), size = size, min = min, "文件大小小于最小值");
+            return false;
         }
-        if let Some(max) = filter.max_size {
-            if size > max {
-                debug!(path = %path.display(), size = size, max = max, "文件大小大于最大值");
-                return false;
-            }
+        if let Some(max) = filter.max_size
+            && size > max
+        {
+            debug!(path = %path.display(), size = size, max = max, "文件大小大于最大值");
+            return false;
         }
     }
 
     // 6. 修改日期范围
     if let Some(mtime) = mtime_secs {
-        if let Some(ref min_date) = filter.min_mtime {
-            if let Ok(min_ts) = date_str_to_timestamp(min_date) {
-                if mtime < min_ts {
-                    debug!(path = %path.display(), mtime = mtime, min_ts = min_ts, "文件修改日期早于最小值");
-                    return false;
-                }
-            }
+        if let Some(ref min_date) = filter.min_mtime
+            && let Ok(min_ts) = date_str_to_timestamp(min_date)
+            && mtime < min_ts
+        {
+            debug!(path = %path.display(), mtime = mtime, min_ts = min_ts, "文件修改日期早于最小值");
+            return false;
         }
-        if let Some(ref max_date) = filter.max_mtime {
-            if let Ok(max_ts) = date_str_to_timestamp(max_date) {
-                // max_date 设为当天的 23:59:59
-                let max_ts_end = max_ts + 86399;
-                if mtime > max_ts_end {
-                    debug!(path = %path.display(), mtime = mtime, max_ts = max_ts_end, "文件修改日期晚于最大值");
-                    return false;
-                }
+        if let Some(ref max_date) = filter.max_mtime
+            && let Ok(max_ts) = date_str_to_timestamp(max_date)
+        {
+            // max_date 设为当天的 23:59:59
+            let max_ts_end = max_ts + 86399;
+            if mtime > max_ts_end {
+                debug!(path = %path.display(), mtime = mtime, max_ts = max_ts_end, "文件修改日期晚于最大值");
+                return false;
             }
         }
     }
@@ -149,10 +148,10 @@ fn matches_glob_any(relative: &str, patterns: &[String]) -> bool {
         // 2. 标准 glob（如 "**/*.tmp" 或 "temp/**"）
         let is_glob = pattern.contains('*') || pattern.contains('?');
         if is_glob {
-            if let Ok(globber) = glob::Pattern::new(pattern) {
-                if globber.matches(relative) {
-                    return true;
-                }
+            if let Ok(globber) = glob::Pattern::new(pattern)
+                && globber.matches(relative)
+            {
+                return true;
             }
         } else {
             // 前缀匹配：目录名或文件前缀

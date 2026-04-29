@@ -52,10 +52,10 @@ pub(crate) async fn get_logs(
             let Ok(log_entry) = parse_log_line(line) else {
                 continue;
             };
-            if let Some(ref f) = filter {
-                if log_entry.level.to_ascii_uppercase() != *f {
-                    continue;
-                }
+            if let Some(ref f) = filter
+                && log_entry.level.to_ascii_uppercase() != *f
+            {
+                continue;
             }
             entries.push(log_entry);
             if entries.len() >= max {

@@ -11,7 +11,9 @@ fn retryable_rebuild_reason(retryable_count: usize, last_error: Option<&str>) ->
         .map(|message| message.replace(['\r', '\n'], " "));
 
     match clean_error {
-        Some(message) => format!("retryable_files_remaining:{retryable_count}; last_error:{message}"),
+        Some(message) => {
+            format!("retryable_files_remaining:{retryable_count}; last_error:{message}")
+        }
         None => format!("retryable_files_remaining:{retryable_count}"),
     }
 }
@@ -105,18 +107,18 @@ pub(crate) async fn process_file_event(
     // 应用筛选规则
     {
         let runtime = state.indexing_runtime.read().await;
-        if let Some(ref filter) = runtime.filter_config {
-            if !crate::filter::should_index_file(
+        if let Some(ref filter) = runtime.filter_config
+            && !crate::filter::should_index_file(
                 &event.path,
                 Some(filter),
                 watch_root,
                 Some(metadata.len()),
                 Some(mtime_secs),
-            ) {
-                debug!(path = %event.path.display(), "文件被筛选规则排除，跳过索引");
-                set_runtime_idle(state, None).await;
-                return;
-            }
+            )
+        {
+            debug!(path = %event.path.display(), "文件被筛选规则排除，跳过索引");
+            set_runtime_idle(state, None).await;
+            return;
         }
     }
 
