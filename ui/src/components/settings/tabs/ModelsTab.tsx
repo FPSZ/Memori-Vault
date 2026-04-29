@@ -10,7 +10,6 @@ import {
   Network,
   Play,
   RefreshCw,
-  Save,
   Share2,
   Square,
   Zap
@@ -476,7 +475,6 @@ type ModelsTabProps = {
   localModelRuntimeBusyRole: string | null;
   onProviderSwitch: (provider: ModelProvider) => void;
   onModelSettingsChange: (next: ModelSettingsDto) => void;
-  onSaveModelSettings: () => Promise<void>;
   onProbeModelProvider: () => Promise<void>;
   onRefreshProviderModels: () => Promise<void>;
   onRefreshLocalModelRuntimeStatus: () => Promise<void>;
@@ -497,7 +495,6 @@ export function ModelsTab({
   localModelRuntimeBusyRole,
   onProviderSwitch,
   onModelSettingsChange,
-  onSaveModelSettings,
   onProbeModelProvider,
   onRefreshProviderModels,
   onRefreshLocalModelRuntimeStatus,
@@ -1032,17 +1029,6 @@ export function ModelsTab({
           </div>
         ) : null}
 
-        <div className="flex justify-end pt-2">
-          <AnimatedPressButton
-            type="button"
-            onClick={() => void onSaveModelSettings()}
-            disabled={modelBusy}
-            className="inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
-          >
-            {modelBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            保存配置
-          </AnimatedPressButton>
-        </div>
       </div>
     </motion.div>
   );

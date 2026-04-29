@@ -26,11 +26,11 @@ type AdvancedTabProps = {
   indexingRebuildLabel: string;
   lastScanLabel: string;
   etaLabel: string;
+  indexingModelBlocked: boolean;
   stableActionButtonClass: string;
   indexingButtonClass: (key: IndexingActionKey) => string;
   indexingAction: { key: IndexingActionKey | null; phase: ActionPhase; tick: number };
   onIndexingAction: (key: IndexingActionKey, action: () => Promise<void>) => Promise<void>;
-  onSaveIndexingConfig: () => Promise<void>;
   onTriggerReindex: () => Promise<void>;
   onPauseIndexing: () => Promise<void>;
   onResumeIndexing: () => Promise<void>;
@@ -99,11 +99,11 @@ export function AdvancedTab({
   indexingRebuildLabel,
   lastScanLabel,
   etaLabel,
+  indexingModelBlocked,
   stableActionButtonClass,
   indexingButtonClass,
   indexingAction,
   onIndexingAction,
-  onSaveIndexingConfig,
   onTriggerReindex,
   onPauseIndexing,
   onResumeIndexing
@@ -118,6 +118,18 @@ export function AdvancedTab({
     uiLang,
     t("indexingNoError")
   );
+  const shownProgress = indexingModelBlocked ? 0 : (indexingStatus?.progress_percent ?? 0);
+  const progressText = indexingModelBlocked
+    ? uiLang === "zh-CN"
+      ? "等待向量模型启动"
+      : "Waiting for embedding model"
+    : shownProgress < 33
+      ? "扫描文档中...（暂不可用）"
+      : shownProgress < 66
+        ? "建立向量索引中...（即将可用）"
+        : shownProgress < 100
+          ? "构建知识图谱中...（已可使用）"
+          : "索引完全就绪";
 
   return (
     <motion.div
@@ -183,27 +195,21 @@ export function AdvancedTab({
         <AnimatedPanel className="glass-panel-infer rounded-lg px-3 py-3">
           <div className="mb-2 text-sm text-[var(--text-primary)]">{t("indexingStatusTitle")}</div>
           {/* Progress bar */}
-          {indexingStatus && indexingStatus.phase !== "idle" ? (
+          {indexingStatus && (indexingStatus.phase !== "idle" || indexingModelBlocked) ? (
             <div className="mb-3">
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className={`font-medium ${
-                  indexingStatus.progress_percent < 33
+                  shownProgress < 33
                     ? "text-red-400"
-                    : indexingStatus.progress_percent < 66
+                    : shownProgress < 66
                       ? "text-amber-400"
-                      : indexingStatus.progress_percent < 100
+                      : shownProgress < 100
                         ? "text-emerald-400"
                         : "text-sky-400"
                 }`}>
-                  {indexingStatus.progress_percent < 33
-                    ? "扫描文档中…（暂不可用）"
-                    : indexingStatus.progress_percent < 66
-                      ? "建立向量索引中…（即将可用）"
-                      : indexingStatus.progress_percent < 100
-                        ? "构建知识图谱中…（已可使用）"
-                        : "索引完全就绪"}
+                  {progressText}
                 </span>
-                <span className="font-mono text-[var(--text-muted)]">{indexingStatus.progress_percent}%</span>
+                <span className="font-mono text-[var(--text-muted)]">{shownProgress}%</span>
               </div>
               {/* Segmented progress bar with milestone markers */}
               <div className="relative h-2 w-full">
@@ -216,16 +222,16 @@ export function AdvancedTab({
                 {/* Fill bar */}
                 <motion.div
                   className={`absolute top-0 left-0 h-full rounded-full ${
-                    indexingStatus.progress_percent < 33
+                    shownProgress < 33
                       ? "bg-red-400"
-                      : indexingStatus.progress_percent < 66
+                      : shownProgress < 66
                         ? "bg-amber-400"
-                        : indexingStatus.progress_percent < 100
+                        : shownProgress < 100
                           ? "bg-emerald-400"
                           : "bg-sky-400"
                   }`}
                   initial={{ width: 0 }}
-                  animate={{ width: `${indexingStatus.progress_percent}%` }}
+                  animate={{ width: `${shownProgress}%` }}
                   transition={{ duration: 0.5, ease: "easeOut" }}
                 />
                 {/* Milestone markers */}
@@ -234,9 +240,9 @@ export function AdvancedTab({
               </div>
               {/* Milestone labels */}
               <div className="mt-1 flex justify-between text-[9px] text-[var(--text-muted)]">
-                <span className={indexingStatus.progress_percent >= 33 ? "text-amber-400 font-medium" : ""}>可用</span>
-                <span className={indexingStatus.progress_percent >= 66 ? "text-emerald-400 font-medium" : ""}>搜索</span>
-                <span className={indexingStatus.progress_percent >= 100 ? "text-sky-400 font-medium" : ""}>优化</span>
+                <span className={shownProgress >= 33 ? "text-amber-400 font-medium" : ""}>可用</span>
+                <span className={shownProgress >= 66 ? "text-emerald-400 font-medium" : ""}>搜索</span>
+                <span className={shownProgress >= 100 ? "text-sky-400 font-medium" : ""}>优化</span>
               </div>
               <div className="mt-1 flex gap-3 text-[10px] text-[var(--text-muted)]">
                 <span>文档 {indexingStatus.indexed_docs}/{indexingStatus.total_docs}</span>
@@ -275,18 +281,6 @@ export function AdvancedTab({
 
         <AnimatedPanel className="glass-panel-infer rounded-lg px-3 py-3">
           <div className="flex flex-wrap gap-2">
-            <motion.button
-              key="save-indexing"
-              type="button"
-              disabled={indexingBusy}
-              onClick={() => void onIndexingAction("saveIndexing", onSaveIndexingConfig)}
-              className={`${stableActionButtonClass} ${indexingButtonClass("saveIndexing")}`}
-            >
-              {indexingAction.phase === "running" && indexingAction.key === "saveIndexing" ? (
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-              ) : null}
-              {t("saveIndexingConfig")}
-            </motion.button>
             <motion.button
               key="trigger-indexing"
               type="button"

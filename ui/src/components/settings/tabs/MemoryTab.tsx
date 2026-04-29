@@ -1,5 +1,4 @@
 import { motion } from "framer-motion";
-import { LoaderCircle } from "lucide-react";
 import { AnimatedPanel, AnimatedPressButton, fadeSlideUpVariants, staggerContainerVariants } from "../../MotionKit";
 import { SelectionChips, SettingCard } from "../controls";
 import type { MemorySettingsDto } from "../types";
@@ -13,16 +12,13 @@ type MemoryTabProps = {
   memoryBusy: boolean;
   memoryMessage: string | null;
   onMemorySettingsChange: (next: MemorySettingsDto) => void;
-  onSaveMemorySettings: () => Promise<void>;
 };
 
 export function MemoryTab({
   t,
   memorySettings,
-  memoryBusy,
   memoryMessage,
-  onMemorySettingsChange,
-  onSaveMemorySettings
+  onMemorySettingsChange
 }: MemoryTabProps) {
   return (
     <motion.div
@@ -178,16 +174,7 @@ export function MemoryTab({
         </AnimatedPanel>
 
         <AnimatedPanel className="glass-panel-infer rounded-lg px-3 py-3">
-          <AnimatedPressButton
-            type="button"
-            onClick={() => void onSaveMemorySettings()}
-            disabled={memoryBusy}
-            className="rounded-md bg-transparent px-3 py-2 text-sm text-[var(--accent)] transition hover:bg-[var(--accent-soft)] disabled:opacity-60"
-          >
-            {memoryBusy ? <LoaderCircle className="mr-2 inline h-3.5 w-3.5 animate-spin" /> : null}
-            {t("saveMemorySettings")}
-          </AnimatedPressButton>
-          {memoryMessage ? <span className="ml-3 text-xs text-[var(--text-secondary)]">{memoryMessage}</span> : null}
+          {memoryMessage ? <span className="text-xs text-[var(--text-secondary)]">{memoryMessage}</span> : null}
         </AnimatedPanel>
       </motion.div>
     </motion.div>

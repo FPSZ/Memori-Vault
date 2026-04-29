@@ -1,5 +1,17 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Brain, Cpu, Database, Network, Palette, ScrollText, Search, Settings } from "lucide-react";
+import {
+  ArrowRight,
+  Brain,
+  Cpu,
+  Database,
+  LoaderCircle,
+  Network,
+  Palette,
+  Save,
+  ScrollText,
+  Search,
+  Settings
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { Language } from "../i18n";
 import { useI18n } from "../i18n";
@@ -102,6 +114,15 @@ export function SettingsModal({
     tick: number;
   }>({
     key: null,
+    phase: "idle",
+    tick: 0
+  });
+  const [settingsSaveAction, setSettingsSaveAction] = useState<{
+    tab: TabKey | null;
+    phase: ActionPhase;
+    tick: number;
+  }>({
+    tab: null,
     phase: "idle",
     tick: 0
   });
@@ -282,20 +303,43 @@ export function SettingsModal({
     });
   };
 
+  const indexingModelBlocked = useMemo(() => {
+    const text = `${indexingStatus?.last_error ?? ""} ${indexingStatus?.rebuild_reason ?? ""}`.toLowerCase();
+    return [
+      "embedding request failed",
+      "connection refused",
+      "actively refused",
+      "failed to connect",
+      "error sending request",
+      "timed out",
+      "timeout",
+      "tcp connect error",
+      "connectex",
+      "向量模型未启动",
+      "端口不可连接"
+    ].some((pattern) => text.includes(pattern));
+  }, [indexingStatus?.last_error, indexingStatus?.rebuild_reason]);
+
   const indexingPhaseLabel = useMemo(() => {
+    if (indexingModelBlocked) {
+      return uiLang === "zh-CN" ? "等待模型启动" : "Waiting for model";
+    }
     const normalized = indexingStatus?.phase?.toLowerCase() ?? "idle";
     if (normalized === "scanning") return t("indexingPhaseScanning");
     if (normalized === "embedding") return t("indexingPhaseEmbedding");
     if (normalized === "graphing") return t("indexingPhaseGraphing");
     return t("indexingPhaseIdle");
-  }, [indexingStatus?.phase, t]);
+  }, [indexingModelBlocked, indexingStatus?.phase, t, uiLang]);
 
   const indexingRebuildLabel = useMemo(() => {
+    if (indexingModelBlocked) {
+      return uiLang === "zh-CN" ? "等待模型" : "Waiting for model";
+    }
     const normalized = indexingStatus?.rebuild_state?.toLowerCase() ?? "ready";
     if (normalized === "required") return t("indexingRebuildRequired");
     if (normalized === "rebuilding") return t("indexingRebuildInProgress");
     return t("indexingRebuildReady");
-  }, [indexingStatus?.rebuild_state, t]);
+  }, [indexingModelBlocked, indexingStatus?.rebuild_state, t, uiLang]);
 
   const lastScanLabel = useMemo(() => {
     const ts = indexingStatus?.last_scan_at;
@@ -310,6 +354,9 @@ export function SettingsModal({
   }, [indexingStatus?.last_scan_at, t, uiLang]);
 
   const etaLabel = useMemo(() => {
+    if (indexingModelBlocked) {
+      return uiLang === "zh-CN" ? "等待模型启动后继续" : "Waiting for model";
+    }
     const phase = indexingStatus?.phase ?? "idle";
     const normalizedPhase = phase.toLowerCase();
     const rebuildState = (indexingStatus?.rebuild_state ?? "ready").toLowerCase();
@@ -345,7 +392,7 @@ export function SettingsModal({
     }
     const minutes = Math.ceil(totalSec / 60);
     return uiLang === "zh-CN" ? `约 ${minutes} 分钟` : `~${minutes} min`;
-  }, [indexingStatus, resourceBudget, uiLang]);
+  }, [indexingModelBlocked, indexingStatus, resourceBudget, uiLang]);
 
   const indexingButtonClass = (key: IndexingActionKey) => {
     if (indexingAction.key !== key) {
@@ -362,6 +409,88 @@ export function SettingsModal({
     }
     return "bg-transparent text-[var(--text-primary)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]";
   };
+
+  const saveTarget = useMemo(() => {
+    switch (activeTab) {
+      case "basic":
+        return {
+          label: uiLang === "zh-CN" ? "保存基础设置" : "Save Basics",
+          busy: filterBusy,
+          disabled: false,
+          action: onSaveFilterConfig
+        };
+      case "models":
+        return {
+          label: uiLang === "zh-CN" ? "保存配置" : "Save Config",
+          busy: modelBusy,
+          disabled: false,
+          action: onSaveModelSettings
+        };
+      case "advanced":
+        return {
+          label: uiLang === "zh-CN" ? "保存索引策略" : "Save Indexing",
+          busy: indexingBusy,
+          disabled: false,
+          action: onSaveIndexingConfig
+        };
+      case "mcp":
+        return {
+          label: t("mcpSave"),
+          busy: mcpBusy,
+          disabled: false,
+          action: onSaveMcpSettings
+        };
+      case "memory":
+        return {
+          label: t("saveMemorySettings"),
+          busy: memoryBusy,
+          disabled: false,
+          action: onSaveMemorySettings
+        };
+      default:
+        return {
+          label: uiLang === "zh-CN" ? "无需保存" : "No Save Needed",
+          busy: false,
+          disabled: true,
+          action: async () => {}
+        };
+    }
+  }, [
+    activeTab,
+    filterBusy,
+    indexingBusy,
+    mcpBusy,
+    memoryBusy,
+    modelBusy,
+    onSaveFilterConfig,
+    onSaveIndexingConfig,
+    onSaveMcpSettings,
+    onSaveMemorySettings,
+    onSaveModelSettings,
+    t,
+    uiLang
+  ]);
+
+  const runActiveSave = async () => {
+    if (saveTarget.disabled || saveTarget.busy) return;
+    setSettingsSaveAction((prev) => ({ tab: activeTab, phase: "running", tick: prev.tick + 1 }));
+    try {
+      await saveTarget.action();
+      setSettingsSaveAction((prev) => ({ tab: activeTab, phase: "success", tick: prev.tick + 1 }));
+      window.setTimeout(() => {
+        setSettingsSaveAction((prev) => ({ tab: prev.tab, phase: "idle", tick: prev.tick + 1 }));
+      }, 1600);
+    } catch {
+      setSettingsSaveAction((prev) => ({ tab: activeTab, phase: "error", tick: prev.tick + 1 }));
+      window.setTimeout(() => {
+        setSettingsSaveAction((prev) => ({ tab: prev.tab, phase: "idle", tick: prev.tick + 1 }));
+      }, 2200);
+    }
+  };
+
+  const topSaveBusy =
+    saveTarget.busy || (settingsSaveAction.tab === activeTab && settingsSaveAction.phase === "running");
+  const topSaveError = settingsSaveAction.tab === activeTab && settingsSaveAction.phase === "error";
 
   return (
     <motion.aside
@@ -384,9 +513,23 @@ export function SettingsModal({
           <ArrowRight className="h-4 w-4" />
           <span className="text-xs tracking-[0.1em] uppercase">{t("back")}</span>
         </AnimatedPressButton>
-        <span className="text-xs tracking-[0.16em] text-[var(--text-secondary)] uppercase">
-          {t("settingsTitle")}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs tracking-[0.16em] text-[var(--text-secondary)] uppercase">
+            {t("settingsTitle")}
+          </span>
+          <AnimatedPressButton
+            type="button"
+            onClick={() => void runActiveSave()}
+            disabled={saveTarget.disabled || topSaveBusy}
+            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:opacity-90 disabled:opacity-50 ${
+              topSaveError ? "bg-red-500" : "bg-[var(--accent)]"
+            }`}
+            title={saveTarget.label}
+          >
+            {topSaveBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saveTarget.label}
+          </AnimatedPressButton>
+        </div>
       </div>
 
       <div className="flex h-[calc(100%-44px)] min-h-0">
@@ -472,7 +615,6 @@ export function SettingsModal({
                 modelBusy={modelBusy}
                 onProviderSwitch={onProviderSwitch}
                 onModelSettingsChange={onModelSettingsChange}
-                onSaveModelSettings={onSaveModelSettings}
                 onProbeModelProvider={onProbeModelProvider}
                 onRefreshProviderModels={onRefreshProviderModels}
                 localModelRuntimeStatuses={localModelRuntimeStatuses}
@@ -504,11 +646,11 @@ export function SettingsModal({
                 indexingRebuildLabel={indexingRebuildLabel}
                 lastScanLabel={lastScanLabel}
                 etaLabel={etaLabel}
+                indexingModelBlocked={indexingModelBlocked}
                 stableActionButtonClass={stableActionButtonClass}
                 indexingButtonClass={indexingButtonClass}
                 indexingAction={indexingAction}
                 onIndexingAction={onIndexingAction}
-                onSaveIndexingConfig={onSaveIndexingConfig}
                 onTriggerReindex={onTriggerReindex}
                 onPauseIndexing={onPauseIndexing}
                 onResumeIndexing={onResumeIndexing}
@@ -523,7 +665,6 @@ export function SettingsModal({
                 mcpBusy={mcpBusy}
                 mcpMessage={mcpMessage}
                 onMcpSettingsChange={onMcpSettingsChange}
-                onSaveMcpSettings={onSaveMcpSettings}
                 onCopyMcpClientConfig={onCopyMcpClientConfig}
               />
             ) : null}
@@ -535,7 +676,6 @@ export function SettingsModal({
                 memoryBusy={memoryBusy}
                 memoryMessage={memoryMessage}
                 onMemorySettingsChange={onMemorySettingsChange}
-                onSaveMemorySettings={onSaveMemorySettings}
               />
             ) : null}
 

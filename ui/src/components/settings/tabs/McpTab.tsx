@@ -1,5 +1,5 @@
 ﻿import { motion } from "framer-motion";
-import { Copy, LoaderCircle } from "lucide-react";
+import { Copy } from "lucide-react";
 import { AnimatedPanel, AnimatedPressButton, fadeSlideUpVariants, staggerContainerVariants } from "../../MotionKit";
 import { CyberInput } from "../../UI";
 import { SelectionChips, SettingCard } from "../controls";
@@ -15,7 +15,6 @@ type McpTabProps = {
   mcpBusy: boolean;
   mcpMessage: string | null;
   onMcpSettingsChange: (next: McpSettingsDto) => void;
-  onSaveMcpSettings: () => Promise<void>;
   onCopyMcpClientConfig: (client: string) => Promise<void>;
 };
 
@@ -26,7 +25,6 @@ export function McpTab({
   mcpBusy,
   mcpMessage,
   onMcpSettingsChange,
-  onSaveMcpSettings,
   onCopyMcpClientConfig
 }: McpTabProps) {
   const transportMode: McpTransportMode = mcpSettings.transports.includes("stdio") && mcpSettings.transports.includes("http")
@@ -156,16 +154,7 @@ export function McpTab({
             <div>resources / templates</div>
             <div>prompts / graph / settings</div>
           </div>
-          <AnimatedPressButton
-            type="button"
-            onClick={() => void onSaveMcpSettings()}
-            disabled={mcpBusy}
-            className="rounded-md bg-transparent px-3 py-2 text-sm text-[var(--accent)] transition hover:bg-[var(--accent-soft)] disabled:opacity-60"
-          >
-            {mcpBusy ? <LoaderCircle className="mr-2 inline h-3.5 w-3.5 animate-spin" /> : null}
-            {t("mcpSave")}
-          </AnimatedPressButton>
-          {mcpMessage ? <span className="ml-3 text-xs text-[var(--text-secondary)]">{mcpMessage}</span> : null}
+          {mcpMessage ? <span className="text-xs text-[var(--text-secondary)]">{mcpMessage}</span> : null}
         </AnimatedPanel>
       </motion.div>
     </motion.div>

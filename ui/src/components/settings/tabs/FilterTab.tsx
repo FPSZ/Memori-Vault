@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { ChevronDown, ChevronRight, FileText, Folder, LoaderCircle, RefreshCw, Save, X } from "lucide-react";
+import { ChevronDown, ChevronRight, FileText, Folder, RefreshCw, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { listSearchScopes } from "../../../app/api/desktop";
 import type { SearchScopeItem } from "../../../app/types";
@@ -394,15 +394,6 @@ function FilterBody({
           className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs text-[var(--text-secondary)] transition hover:text-red-400"
         >
           清空
-        </AnimatedPressButton>
-        <AnimatedPressButton
-          type="button"
-          onClick={() => void onSaveFilterConfig()}
-          disabled={filterBusy}
-          className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50"
-        >
-          {filterBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          保存
         </AnimatedPressButton>
       </div>
     </div>

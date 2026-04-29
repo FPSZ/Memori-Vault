@@ -692,19 +692,56 @@ impl MemoriEngine {
             .await
             .unwrap_or(0);
         let total_chunks = indexed_chunks.max(1);
-        let progress_percent = match runtime.phase.as_str() {
-            "scanning" => ((indexed_docs as f64 / total_docs.max(1) as f64) * 33.0) as u32,
-            "embedding" => {
-                33 + ((indexed_chunks as f64 / total_chunks.max(1) as f64) * 33.0) as u32
+        let model_connection_blocked = {
+            let text = format!(
+                "{} {}",
+                runtime.last_error.as_deref().unwrap_or_default(),
+                metadata.rebuild_reason.as_deref().unwrap_or_default()
+            )
+            .to_ascii_lowercase();
+            [
+                "embedding request failed",
+                "connection refused",
+                "actively refused",
+                "failed to connect",
+                "error sending request",
+                "timed out",
+                "timeout",
+                "tcp connect error",
+                "connectex",
+            ]
+            .iter()
+            .any(|pattern| text.contains(pattern))
+        };
+        let phase = if model_connection_blocked {
+            "idle".to_string()
+        } else {
+            runtime.phase.clone()
+        };
+        let rebuild_state = if model_connection_blocked {
+            memori_storage::RebuildState::Required
+        } else {
+            metadata.rebuild_state
+        };
+        let progress_percent = if model_connection_blocked {
+            0
+        } else {
+            match runtime.phase.as_str() {
+                "scanning" => ((indexed_docs as f64 / total_docs.max(1) as f64) * 33.0) as u32,
+                "embedding" => {
+                    33 + ((indexed_chunks as f64 / total_chunks.max(1) as f64) * 33.0) as u32
+                }
+                "graphing" => {
+                    66 + ((graphed_chunks as f64 / total_chunks.max(1) as f64) * 34.0) as u32
+                }
+                _ if metadata.rebuild_state == memori_storage::RebuildState::Ready => 100,
+                _ => 0,
             }
-            "graphing" => 66 + ((graphed_chunks as f64 / total_chunks.max(1) as f64) * 34.0) as u32,
-            _ if metadata.rebuild_state == memori_storage::RebuildState::Ready => 100,
-            _ => 0,
-        }
-        .min(100);
+            .min(100)
+        };
 
         Ok(IndexingStatus {
-            phase: runtime.phase.clone(),
+            phase,
             indexed_docs,
             indexed_chunks,
             graphed_chunks,
@@ -717,7 +754,7 @@ impl MemoriEngine {
             paused: runtime.paused,
             mode: runtime.config.mode,
             resource_budget: runtime.config.resource_budget,
-            rebuild_state: metadata.rebuild_state.as_str().to_string(),
+            rebuild_state: rebuild_state.as_str().to_string(),
             rebuild_reason: metadata.rebuild_reason,
             index_format_version: metadata.index_format_version,
             parser_format_version: metadata.parser_format_version,
