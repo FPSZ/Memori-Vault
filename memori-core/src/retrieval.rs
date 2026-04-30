@@ -614,7 +614,7 @@ pub(crate) fn should_refuse_for_insufficient_evidence(
 
 #[derive(Debug, Clone)]
 pub(crate) struct GatingDecision {
-    refuse: bool,
+    pub(crate) refuse: bool,
     reason: &'static str,
     top_doc_distinct_term_hits: usize,
     top_doc_term_coverage: f64,
@@ -809,6 +809,59 @@ pub(crate) fn apply_gating_metrics(
         .unwrap_or("none")
         .to_string();
     decision.refuse
+}
+
+pub(crate) fn accumulate_compound_metrics(
+    metrics: &mut RetrievalMetrics,
+    part_metrics: &RetrievalMetrics,
+) {
+    metrics.doc_recall_ms += part_metrics.doc_recall_ms;
+    metrics.doc_exact_ms += part_metrics.doc_exact_ms;
+    metrics.doc_strict_lexical_ms += part_metrics.doc_strict_lexical_ms;
+    metrics.doc_lexical_ms += part_metrics.doc_lexical_ms;
+    metrics.doc_merge_ms += part_metrics.doc_merge_ms;
+    metrics.chunk_strict_lexical_ms += part_metrics.chunk_strict_lexical_ms;
+    metrics.chunk_lexical_ms += part_metrics.chunk_lexical_ms;
+    metrics.chunk_dense_ms += part_metrics.chunk_dense_ms;
+    metrics.merge_ms += part_metrics.merge_ms;
+    metrics.doc_candidate_count = metrics
+        .doc_candidate_count
+        .max(part_metrics.doc_candidate_count);
+    metrics.chunk_candidate_count = metrics
+        .chunk_candidate_count
+        .max(part_metrics.chunk_candidate_count);
+}
+
+pub(crate) fn dedupe_evidence_preserve_order(evidence: &mut Vec<MergedEvidence>) {
+    let mut seen = HashSet::new();
+    evidence.retain(|item| {
+        seen.insert((
+            item.chunk.file_path.to_string_lossy().to_string(),
+            item.chunk.chunk_index,
+        ))
+    });
+}
+
+pub(crate) fn compound_part_has_grounded_evidence(
+    analysis: &QueryAnalysis,
+    evidence: &[MergedEvidence],
+) -> bool {
+    let Some(top) = evidence.first() else {
+        return false;
+    };
+    if !has_any_chunk_lexical(top) {
+        return false;
+    }
+    if has_strong_document_signal(top) {
+        return true;
+    }
+    let top_doc_path = top.chunk.file_path.to_string_lossy().to_string();
+    let top_doc_evidence = evidence
+        .iter()
+        .filter(|item| item.chunk.file_path.to_string_lossy() == top_doc_path)
+        .collect::<Vec<_>>();
+    let (hits, coverage) = compute_top_doc_term_coverage(analysis, &top_doc_evidence);
+    hits >= 2 && coverage >= 0.4
 }
 
 pub(crate) fn compute_top_doc_term_coverage(

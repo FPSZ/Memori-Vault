@@ -543,6 +543,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             graph_concurrency: settings.remote_graph_concurrency,
             embed_concurrency: settings.remote_embed_concurrency,
         },
+        stop_local_models_on_exit: settings.stop_local_models_on_exit.unwrap_or(true),
     }
 }
 
@@ -655,6 +656,7 @@ pub(crate) fn normalize_model_settings_payload(
             graph_concurrency: payload.remote_profile.graph_concurrency,
             embed_concurrency: payload.remote_profile.embed_concurrency,
         },
+        stop_local_models_on_exit: payload.stop_local_models_on_exit,
     })
 }
 

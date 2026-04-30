@@ -72,6 +72,7 @@ export type ModelSettingsDto = {
   active_provider: ModelProvider;
   local_profile: LocalModelProfileDto;
   remote_profile: RemoteModelProfileDto;
+  stop_local_models_on_exit: boolean;
 };
 
 export type LocalModelRuntimeStatusDto = {
@@ -79,7 +80,7 @@ export type LocalModelRuntimeStatusDto = {
   endpoint: string;
   port?: number | null;
   pid?: number | null;
-  state: "stopped" | "starting" | "running" | "error" | string;
+  state: "stopped" | "starting" | "running" | "external" | "error" | string;
   message?: string | null;
   log_path?: string | null;
 };

@@ -62,6 +62,7 @@ pub(crate) struct AppSettings {
     pub(crate) local_flash_attn: Option<bool>,
     pub(crate) local_cache_type_k: Option<String>,
     pub(crate) local_cache_type_v: Option<String>,
+    pub(crate) stop_local_models_on_exit: Option<bool>,
     pub(crate) remote_endpoint: Option<String>,
     pub(crate) remote_chat_endpoint: Option<String>,
     pub(crate) remote_graph_endpoint: Option<String>,
@@ -251,6 +252,12 @@ pub(crate) struct ModelSettingsDto {
     pub(crate) active_provider: String,
     pub(crate) local_profile: LocalModelProfileDto,
     pub(crate) remote_profile: RemoteModelProfileDto,
+    #[serde(default = "default_stop_local_models_on_exit")]
+    pub(crate) stop_local_models_on_exit: bool,
+}
+
+fn default_stop_local_models_on_exit() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -130,10 +130,17 @@ pub fn run() {
             }
             match event {
                 WindowEvent::CloseRequested { .. } => {
-                    if let Some(state) = window.try_state::<DesktopState>() {
-                        tauri::async_runtime::block_on(async {
-                            state.stop_all_local_models().await;
-                        });
+                    let stop_local_models = load_app_settings()
+                        .map(|settings| settings.stop_local_models_on_exit.unwrap_or(true))
+                        .unwrap_or(true);
+                    if stop_local_models {
+                        if let Some(state) = window.try_state::<DesktopState>() {
+                            tauri::async_runtime::block_on(async {
+                                state.stop_all_local_models().await;
+                            });
+                        }
+                    } else {
+                        info!("leaving local llama.cpp models running after app close");
                     }
                 }
                 WindowEvent::Moved(_) | WindowEvent::Resized(_) => {

@@ -361,6 +361,30 @@ struct QueryPreparation {
 }
 
 #[derive(Debug, Clone)]
+struct EvidenceRetrievalResult {
+    candidate_docs: Vec<DocumentCandidate>,
+    evidence: Vec<MergedEvidence>,
+}
+
+#[derive(Debug, Clone)]
+struct CompoundEvidenceResult {
+    evidence: Vec<MergedEvidence>,
+    matched_parts: usize,
+    partial: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompoundQueryPart {
+    topic: String,
+    query: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompoundQueryPlan {
+    parts: Vec<CompoundQueryPart>,
+}
+
+#[derive(Debug, Clone)]
 struct DocumentCandidate {
     file_path: String,
     relative_path: String,
@@ -1076,10 +1100,10 @@ mod tests {
         MemoryEvidence, MemoryLayer, MemoryScope, MemorySourceType, MemoryStatus, MergedEvidence,
         ModelProvider, QueryFamily, QueryIntent, RetrievalMetrics, RuntimeModelConfig, WatchEvent,
         WatchEventKind, analyze_query, apply_gating_metrics, build_citations,
-        build_memory_context_for_prompt, document_signal_query, has_strong_document_signal,
-        is_implementation_lookup, merge_document_candidates, process_file_event,
-        should_allow_memory_only_answer, should_refuse_for_insufficient_evidence,
-        validate_runtime_model_settings,
+        build_memory_context_for_prompt, detect_compound_query, document_signal_query,
+        has_strong_document_signal, is_implementation_lookup, merge_document_candidates,
+        process_file_event, should_allow_memory_only_answer,
+        should_refuse_for_insufficient_evidence, validate_runtime_model_settings,
     };
     use memori_parser::DocumentChunk;
     use memori_storage::RebuildState;
@@ -1210,6 +1234,227 @@ mod tests {
                 .any(|item| item.content.contains("负责人：苏澈"))
         );
         assert!(inspection.metrics.chunk_candidate_count > 0);
+
+        drop(state);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn compound_query_detection_splits_specific_project_topics() {
+        let plan =
+            detect_compound_query("极光账本 和 雾凇发布 的负责人分别是谁").expect("compound plan");
+
+        assert_eq!(plan.parts.len(), 2);
+        assert_eq!(plan.parts[0].topic, "极光账本");
+        assert_eq!(plan.parts[1].topic, "雾凇发布");
+        assert!(plan.parts[0].query.contains("负责人"));
+        assert!(detect_compound_query("极光账本-17 的负责人是谁").is_none());
+    }
+
+    #[tokio::test]
+    async fn compound_query_retrieves_evidence_for_multiple_projects() {
+        let db_path = temp_db_path("compound_projects");
+        let state = Arc::new(AppState::new(&db_path).expect("create app state"));
+        let aurora_path = PathBuf::from("Memory_Test/doc_001_极光账本-17_会议纪要.md");
+        let rime_path = PathBuf::from("Memory_Test/doc_002_雾凇发布-04_问答卡.md");
+        seed_document_chunks(
+            &state,
+            &aurora_path,
+            vec![
+                DocumentChunk {
+                    file_path: aurora_path.clone(),
+                    content: "项目代号：极光账本-17。负责人：林澈。当前风险：预算审批延迟。"
+                        .to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["项目概况".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                DocumentChunk {
+                    file_path: aurora_path.clone(),
+                    content: "极光账本-17 的验收要求是完成财务流水核验和权限审计。".to_string(),
+                    chunk_index: 1,
+                    heading_path: vec!["验收".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+            ],
+        )
+        .await;
+        seed_document_chunks(
+            &state,
+            &rime_path,
+            vec![
+                DocumentChunk {
+                    file_path: rime_path.clone(),
+                    content: "项目代号：雾凇发布-04。负责人：周岚。当前风险：发布物料冻结较晚。"
+                        .to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["项目概况".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                DocumentChunk {
+                    file_path: rime_path.clone(),
+                    content: "雾凇发布-04 的验收要求是完成市场问答卡和品牌检查清单。".to_string(),
+                    chunk_index: 1,
+                    heading_path: vec!["验收".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+            ],
+        )
+        .await;
+
+        let engine = MemoriEngine::new(state.clone(), memori_vault::create_event_channel().1);
+        let inspection = engine
+            .retrieve_structured_with_embedding(
+                "极光账本-17 和 雾凇发布-04 的负责人分别是谁",
+                Vec::new(),
+                None,
+                Some(6),
+            )
+            .await
+            .expect("retrieve structured");
+
+        assert_eq!(inspection.status, AskStatus::Answered);
+        assert_eq!(
+            inspection.metrics.gating_decision_reason,
+            "compound_evidence_release"
+        );
+        assert!(
+            inspection
+                .metrics
+                .query_flags
+                .contains(&"compound_query:true".to_string())
+        );
+        assert!(
+            inspection
+                .evidence
+                .iter()
+                .any(|item| item.content.contains("负责人：林澈"))
+        );
+        assert!(
+            inspection
+                .evidence
+                .iter()
+                .any(|item| item.content.contains("负责人：周岚"))
+        );
+
+        drop(state);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
+    async fn compound_query_allows_partial_project_evidence() {
+        let db_path = temp_db_path("compound_partial");
+        let state = Arc::new(AppState::new(&db_path).expect("create app state"));
+        let aurora_path = PathBuf::from("Memory_Test/doc_003_极光账本-17_制度.md");
+        seed_document_chunks(
+            &state,
+            &aurora_path,
+            vec![
+                DocumentChunk {
+                    file_path: aurora_path.clone(),
+                    content: "项目代号：极光账本-17。负责人：林澈。".to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["项目概况".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                DocumentChunk {
+                    file_path: aurora_path.clone(),
+                    content: "极光账本-17 的当前风险是预算审批延迟。".to_string(),
+                    chunk_index: 1,
+                    heading_path: vec!["风险".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+            ],
+        )
+        .await;
+
+        let engine = MemoriEngine::new(state.clone(), memori_vault::create_event_channel().1);
+        let inspection = engine
+            .retrieve_structured_with_embedding(
+                "极光账本-17 和 不存在项目-99 的负责人分别是谁",
+                Vec::new(),
+                None,
+                Some(6),
+            )
+            .await
+            .expect("retrieve structured");
+
+        assert_eq!(inspection.status, AskStatus::Answered);
+        assert!(
+            inspection
+                .metrics
+                .query_flags
+                .contains(&"compound_query:true".to_string())
+        );
+        assert!(
+            inspection
+                .metrics
+                .query_flags
+                .contains(&"compound_partial:true".to_string())
+        );
+        assert!(
+            inspection
+                .evidence
+                .iter()
+                .any(|item| item.content.contains("负责人：林澈"))
+        );
+
+        drop(state);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
+    async fn compound_query_can_answer_when_root_query_has_no_candidates() {
+        let db_path = temp_db_path("compound_no_root");
+        let state = Arc::new(AppState::new(&db_path).expect("create app state"));
+        let aurora_path = PathBuf::from("Memory_Test/doc_004_极光账本_内部资料.md");
+        seed_document_chunks(
+            &state,
+            &aurora_path,
+            vec![
+                DocumentChunk {
+                    file_path: aurora_path.clone(),
+                    content: "极光账本 的负责人是林知远，关键指标是月度已核销对账单数。"
+                        .to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["项目概况".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                DocumentChunk {
+                    file_path: aurora_path.clone(),
+                    content: "极光账本 的内部规定要求试点客户限定为三家。".to_string(),
+                    chunk_index: 1,
+                    heading_path: vec!["内部规定".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+            ],
+        )
+        .await;
+
+        let engine = MemoriEngine::new(state.clone(), memori_vault::create_event_channel().1);
+        let inspection = engine
+            .retrieve_structured_with_embedding(
+                "极光账本和不存在项目-99的负责人分别是谁",
+                Vec::new(),
+                None,
+                Some(6),
+            )
+            .await
+            .expect("retrieve structured");
+
+        assert_eq!(inspection.status, AskStatus::Answered);
+        assert!(
+            inspection
+                .metrics
+                .query_flags
+                .contains(&"compound_query:true".to_string())
+        );
+        assert!(
+            inspection
+                .evidence
+                .iter()
+                .any(|item| item.content.contains("林知远"))
+        );
 
         drop(state);
         let _ = std::fs::remove_file(&db_path);

@@ -137,7 +137,8 @@ const DEFAULT_MODEL_SETTINGS: ModelSettingsDto = {
     chat_model: "gpt-4o-mini",
     graph_model: "gpt-4o-mini",
     embed_model: "text-embedding-3-small"
-  }
+  },
+  stop_local_models_on_exit: true
 };
 
 const DEFAULT_ENTERPRISE_POLICY: EnterprisePolicyDto = {

@@ -695,6 +695,249 @@ pub(crate) fn query_flags_as_labels(analysis: &QueryAnalysis) -> Vec<String> {
     labels
 }
 
+pub(crate) fn detect_compound_query(query: &str) -> Option<CompoundQueryPlan> {
+    let normalized = query.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() < 6 {
+        return None;
+    }
+    let lower = normalized.to_ascii_lowercase();
+    let has_compound_marker = normalized.contains("分别")
+        || normalized.contains("对比")
+        || normalized.contains("比较")
+        || normalized.contains("各自")
+        || normalized.contains("和")
+        || normalized.contains("与")
+        || normalized.contains("、")
+        || normalized.contains('/')
+        || lower.contains(" and ")
+        || lower.contains(" vs ")
+        || lower.contains(" versus ")
+        || lower.contains(" compare ");
+    if !has_compound_marker {
+        return None;
+    }
+
+    let raw_tokens = extract_query_tokens(&normalized);
+    if raw_tokens.len() > 32 {
+        return None;
+    }
+    let mut topics = extract_compound_topics_from_text(&normalized);
+    if topics.len() < 2 && raw_tokens.len() >= 2 {
+        topics = extract_compound_topics(&raw_tokens);
+    }
+    if topics.len() < 2 {
+        return None;
+    }
+    let focus = build_compound_focus(&normalized, &topics);
+    let parts = topics
+        .into_iter()
+        .take(4)
+        .map(|topic| {
+            let query = if focus.is_empty() {
+                topic.clone()
+            } else {
+                format!("{topic} {focus}")
+            };
+            CompoundQueryPart { topic, query }
+        })
+        .collect::<Vec<_>>();
+    if parts.len() < 2 {
+        None
+    } else {
+        Some(CompoundQueryPlan { parts })
+    }
+}
+
+fn extract_compound_topics(raw_tokens: &[String]) -> Vec<String> {
+    let mut topics = Vec::new();
+    let mut seen = HashMap::<String, ()>::new();
+
+    for token in raw_tokens {
+        let trimmed = trim_compound_topic_token(token);
+        if trimmed.is_empty() || is_compound_connector_or_question(trimmed) {
+            continue;
+        }
+        let expanded = expand_query_token(trimmed);
+        let has_specific_signal = trimmed.chars().any(|ch| ch.is_ascii_digit())
+            || trimmed
+                .chars()
+                .any(|ch| matches!(ch, '-' | '_' | '.' | '/' | '\\'))
+            || expanded.iter().any(|term| {
+                term.chars().any(|ch| ch.is_ascii_digit())
+                    || term
+                        .chars()
+                        .any(|ch| matches!(ch, '-' | '_' | '.' | '/' | '\\'))
+            })
+            || is_specific_cjk_topic(trimmed);
+        if !has_specific_signal {
+            continue;
+        }
+        let normalized = trimmed.to_string();
+        let key = normalized.to_ascii_lowercase();
+        if seen.insert(key, ()).is_none() {
+            topics.push(normalized);
+        }
+    }
+
+    topics
+}
+
+fn extract_compound_topics_from_text(query: &str) -> Vec<String> {
+    let mut topics = Vec::new();
+    let mut seen = HashMap::<String, ()>::new();
+    let normalized = query
+        .replace("以及", "和")
+        .replace("还有", "和")
+        .replace("与", "和")
+        .replace('、', "和")
+        .replace(" and ", "和")
+        .replace(" vs ", "和")
+        .replace(" versus ", "和");
+
+    for segment in normalized.split('和') {
+        let candidate = normalize_compound_topic_segment(segment);
+        if candidate.is_empty() || is_compound_connector_or_question(&candidate) {
+            continue;
+        }
+        if !is_specific_compound_topic(&candidate) {
+            continue;
+        }
+        let key = candidate.to_ascii_lowercase();
+        if seen.insert(key, ()).is_none() {
+            topics.push(candidate);
+        }
+    }
+
+    topics
+}
+
+fn normalize_compound_topic_segment(segment: &str) -> String {
+    let mut candidate = trim_compound_topic_token(segment).trim().to_string();
+    for prefix in ["请对比", "对比", "比较", "请比较", "请问", "查询", "看看"] {
+        if let Some(stripped) = candidate.strip_prefix(prefix) {
+            candidate = stripped.trim().to_string();
+        }
+    }
+    for marker in [
+        "的负责人",
+        "负责人",
+        "的核心",
+        "核心",
+        "的关键",
+        "关键",
+        "的当前",
+        "当前",
+        "的风险",
+        "风险",
+        "的验收",
+        "验收",
+        "分别",
+        "是谁",
+        "是什么",
+        "如何",
+        "怎么",
+    ] {
+        if let Some((topic, _)) = candidate.split_once(marker) {
+            candidate = topic.trim().to_string();
+        }
+    }
+    trim_compound_topic_token(&candidate).to_string()
+}
+
+fn is_specific_cjk_topic(token: &str) -> bool {
+    let cjk_count = token.chars().filter(|ch| is_cjk(*ch)).count();
+    cjk_count >= 3
+        && cjk_count <= 10
+        && !CJK_DOC_NOISE_TERMS.contains(&token)
+        && ![
+            "负责人",
+            "当前风险",
+            "验收要求",
+            "内部规定",
+            "核心事实",
+            "关键指标",
+            "分别是谁",
+            "是什么",
+        ]
+        .contains(&token)
+}
+
+fn is_specific_compound_topic(token: &str) -> bool {
+    let expanded = expand_query_token(token);
+    token.chars().any(|ch| ch.is_ascii_digit())
+        || token
+            .chars()
+            .any(|ch| matches!(ch, '-' | '_' | '.' | '/' | '\\'))
+        || expanded.iter().any(|term| {
+            term.chars().any(|ch| ch.is_ascii_digit())
+                || term
+                    .chars()
+                    .any(|ch| matches!(ch, '-' | '_' | '.' | '/' | '\\'))
+        })
+        || is_specific_cjk_topic(token)
+}
+
+fn trim_compound_topic_token(token: &str) -> &str {
+    token.trim_matches(|ch: char| {
+        ch.is_whitespace()
+            || matches!(
+                ch,
+                '，' | ','
+                    | '。'
+                    | '.'
+                    | '？'
+                    | '?'
+                    | '！'
+                    | '!'
+                    | '：'
+                    | ':'
+                    | '；'
+                    | ';'
+                    | '（'
+                    | '('
+                    | '）'
+                    | ')'
+                    | '【'
+                    | '['
+                    | '】'
+                    | ']'
+                    | '《'
+                    | '<'
+                    | '》'
+                    | '>'
+            )
+    })
+}
+
+fn is_compound_connector_or_question(token: &str) -> bool {
+    let lower = token.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "and" | "or" | "vs" | "versus" | "compare" | "comparison" | "project" | "projects"
+    ) || matches!(
+        token,
+        "和" | "与" | "及" | "或" | "分别" | "对比" | "比较" | "各自" | "项目" | "内容" | "资料"
+    ) || CJK_QUESTION_SUFFIXES
+        .iter()
+        .any(|suffix| token.contains(suffix))
+}
+
+fn build_compound_focus(query: &str, topics: &[String]) -> String {
+    let mut focus = query.to_string();
+    for topic in topics {
+        focus = focus.replace(topic, " ");
+    }
+    for marker in [
+        "分别", "对比", "比较", "各自", "以及", "还有", "和", "与", "、", "/", "，", ",", "？", "?",
+    ] {
+        focus = focus.replace(marker, " ");
+    }
+    for marker in [" and ", " vs ", " versus ", " compare ", " comparison "] {
+        focus = focus.replace(marker, " ");
+    }
+    focus.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 pub(crate) fn document_signal_query(analysis: &QueryAnalysis) -> String {
     let mut signal_terms = Vec::new();
     let mut seen = HashMap::<String, ()>::new();

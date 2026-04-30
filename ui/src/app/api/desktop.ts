@@ -188,6 +188,7 @@ export function setWatchRoot(path: string) {
 export type LogEntry = {
   timestamp: string;
   level: string;
+  category: string;
   target: string;
   message: string;
   file: string | null;

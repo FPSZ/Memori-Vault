@@ -104,6 +104,7 @@ pub(crate) async fn set_model_settings(
     settings.local_flash_attn = normalized.local_profile.flash_attn;
     settings.local_cache_type_k = normalized.local_profile.cache_type_k.clone();
     settings.local_cache_type_v = normalized.local_profile.cache_type_v.clone();
+    settings.stop_local_models_on_exit = Some(normalized.stop_local_models_on_exit);
     settings.remote_chat_context_length = normalized.remote_profile.chat_context_length;
     settings.remote_graph_context_length = normalized.remote_profile.graph_context_length;
     settings.remote_embed_context_length = normalized.remote_profile.embed_context_length;
@@ -771,13 +772,25 @@ async fn local_runtime_statuses(
                 }
             }
         } else {
+            let externally_running = port.is_some_and(is_port_listening);
             LocalModelRuntimeStatusDto {
                 role: role.to_string(),
                 endpoint,
                 port,
                 pid: None,
-                state: "stopped".to_string(),
-                message: None,
+                state: if externally_running {
+                    "external".to_string()
+                } else {
+                    "stopped".to_string()
+                },
+                message: if externally_running {
+                    Some(
+                        "configured port is already serving a model; this process was not started by the current app session"
+                            .to_string(),
+                    )
+                } else {
+                    None
+                },
                 log_path: None,
             }
         };

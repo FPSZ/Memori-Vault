@@ -88,7 +88,12 @@ impl MemoriEngine {
         }
 
         let final_evidence = build_merged_evidence_from_items(&inspection.evidence);
-        let answer_question = build_answer_question(&inspection.question, lang);
+        let mut answer_question = build_answer_question(&inspection.question, lang);
+        if detect_compound_query(&inspection.question).is_some() {
+            answer_question.push_str(
+                "\n\n多项目/多主题回答要求：请按项目或主题分段回答；每个项目只使用对应证据，不要把不同项目的事实混在一起。如果某个项目证据不足，请单独说明该项目缺少证据。",
+            );
+        }
         let (text_context, document_tokens) =
             build_text_context_from_evidence_with_budget(&final_evidence, 18_000);
         let (memory_context_text, memory_tokens) =
@@ -243,18 +248,73 @@ impl MemoriEngine {
         } = prepare_query_for_retrieval(&question);
         debug!(intent = %analysis.query_intent.as_str(), family = %analysis.query_family.as_str(), flags = ?metrics.query_flags, "query analyzed");
         let memory_context = self.retrieve_memory_context(&analysis, 6).await?;
+        let compound_plan = detect_compound_query(&question);
+        if let Some(plan) = compound_plan.as_ref() {
+            metrics.query_flags.push("compound_query:true".to_string());
+            metrics
+                .query_flags
+                .push(format!("compound_parts:{}", plan.parts.len()));
+        }
 
-        let doc_started_at = Instant::now();
-        let candidate_docs = self
-            .resolve_candidate_documents(&analysis, &normalized_scope_paths, &mut metrics)
+        let retrieval = self
+            .retrieve_evidence_for_analysis(
+                &analysis,
+                query_embedding,
+                &normalized_scope_paths,
+                &mut metrics,
+            )
             .await?;
-        metrics.doc_recall_ms = elapsed_ms_u64(doc_started_at);
-        metrics.doc_candidate_count = candidate_docs.len();
-        debug!(
-            doc_count = candidate_docs.len(),
-            doc_recall_ms = metrics.doc_recall_ms,
-            "document recall done"
-        );
+        let candidate_docs = retrieval.candidate_docs;
+        let mut merged = retrieval.evidence;
+
+        if let Some(plan) = compound_plan.as_ref() {
+            let compound_result = self
+                .retrieve_compound_evidence(
+                    plan,
+                    &analysis,
+                    &merged,
+                    &normalized_scope_paths,
+                    final_answer_k,
+                    &mut metrics,
+                )
+                .await?;
+            if !compound_result.evidence.is_empty() {
+                merged = compound_result.evidence;
+            }
+            metrics
+                .query_flags
+                .push(format!("compound_partial:{}", compound_result.partial));
+            if compound_result.matched_parts > 0 {
+                metrics.gating_decision_reason =
+                    if compound_result.matched_parts == plan.parts.len() {
+                        "compound_evidence_release".to_string()
+                    } else {
+                        "compound_partial_release".to_string()
+                    };
+                let final_evidence = merged.into_iter().take(final_answer_k).collect::<Vec<_>>();
+                metrics.final_evidence_count = final_evidence.len();
+                let citations = build_citations(&final_evidence);
+                let evidence_items = build_evidence_items(&final_evidence);
+                return Ok(RetrievalInspection {
+                    status: AskStatus::Answered,
+                    question,
+                    scope_paths: serialized_scope_paths,
+                    source_groups: build_source_groups(&citations, &evidence_items),
+                    citations,
+                    evidence: evidence_items,
+                    metrics,
+                    answer_source_mix: if memory_context.is_empty() {
+                        AnswerSourceMix::DocumentOnly
+                    } else {
+                        AnswerSourceMix::DocumentPlusMemory
+                    },
+                    memory_context,
+                    failure_class: FailureClass::None,
+                    context_budget_report: ContextBudgetReport::default(),
+                });
+            }
+            metrics.gating_decision_reason = "compound_all_missing".to_string();
+        }
 
         if candidate_docs.is_empty() {
             info!(reason = "no_candidate_documents", "证据不足，已拒答");
@@ -294,60 +354,6 @@ impl MemoriEngine {
                 context_budget_report: ContextBudgetReport::default(),
             });
         }
-
-        let candidate_scope_paths = candidate_docs
-            .iter()
-            .map(|doc| PathBuf::from(&doc.file_path))
-            .collect::<Vec<_>>();
-        let chunk_query = query_string_for_terms(&analysis.chunk_terms, &analysis.normalized_query);
-        let strict_lexical_started_at = Instant::now();
-        let lexical_started_at = Instant::now();
-        let dense_started_at = Instant::now();
-        let strict_future = self.state.vector_store.search_chunks_fts_strict(
-            &chunk_query,
-            DEFAULT_CHUNK_CANDIDATE_K,
-            &candidate_scope_paths,
-        );
-        let lexical_future = self.state.vector_store.search_chunks_fts(
-            &chunk_query,
-            DEFAULT_CHUNK_CANDIDATE_K,
-            &candidate_scope_paths,
-        );
-        let dense_future = self.state.vector_store.search_similar_scoped(
-            query_embedding,
-            DEFAULT_CHUNK_CANDIDATE_K,
-            &candidate_scope_paths,
-        );
-        let (strict_lexical_matches, lexical_matches, dense_matches) =
-            tokio::try_join!(strict_future, lexical_future, dense_future)?;
-        metrics.chunk_strict_lexical_ms = elapsed_ms_u64(strict_lexical_started_at);
-        metrics.chunk_lexical_ms = elapsed_ms_u64(lexical_started_at);
-        metrics.chunk_dense_ms = elapsed_ms_u64(dense_started_at);
-        debug!(
-            strict_count = strict_lexical_matches.len(),
-            broad_count = lexical_matches.len(),
-            dense_count = dense_matches.len(),
-            strict_ms = metrics.chunk_strict_lexical_ms,
-            broad_ms = metrics.chunk_lexical_ms,
-            dense_ms = metrics.chunk_dense_ms,
-            "chunk searches completed"
-        );
-
-        let merge_started_at = Instant::now();
-        let merged = merge_chunk_evidence(
-            &analysis,
-            &candidate_docs,
-            strict_lexical_matches,
-            lexical_matches,
-            dense_matches,
-        );
-        metrics.merge_ms = elapsed_ms_u64(merge_started_at);
-        metrics.chunk_candidate_count = merged.len();
-        debug!(
-            merged_count = merged.len(),
-            ms = metrics.merge_ms,
-            "evidence merge done"
-        );
 
         if apply_gating_metrics(&mut metrics, &analysis, &merged) {
             info!(reason = %metrics.gating_decision_reason, "gating blocked answer as insufficient evidence");
@@ -460,6 +466,158 @@ impl MemoriEngine {
             },
         );
         Ok(embedding)
+    }
+
+    async fn retrieve_evidence_for_analysis(
+        &self,
+        analysis: &QueryAnalysis,
+        query_embedding: Vec<f32>,
+        normalized_scope_paths: &[PathBuf],
+        metrics: &mut RetrievalMetrics,
+    ) -> Result<EvidenceRetrievalResult, EngineError> {
+        let doc_started_at = Instant::now();
+        let candidate_docs = self
+            .resolve_candidate_documents(analysis, normalized_scope_paths, metrics)
+            .await?;
+        metrics.doc_recall_ms += elapsed_ms_u64(doc_started_at);
+        metrics.doc_candidate_count = metrics.doc_candidate_count.max(candidate_docs.len());
+        debug!(
+            doc_count = candidate_docs.len(),
+            doc_recall_ms = metrics.doc_recall_ms,
+            "document recall done"
+        );
+
+        if candidate_docs.is_empty() {
+            return Ok(EvidenceRetrievalResult {
+                candidate_docs,
+                evidence: Vec::new(),
+            });
+        }
+
+        let candidate_scope_paths = candidate_docs
+            .iter()
+            .map(|doc| PathBuf::from(&doc.file_path))
+            .collect::<Vec<_>>();
+        let chunk_query = query_string_for_terms(&analysis.chunk_terms, &analysis.normalized_query);
+        let strict_lexical_started_at = Instant::now();
+        let lexical_started_at = Instant::now();
+        let dense_started_at = Instant::now();
+        let strict_future = self.state.vector_store.search_chunks_fts_strict(
+            &chunk_query,
+            DEFAULT_CHUNK_CANDIDATE_K,
+            &candidate_scope_paths,
+        );
+        let lexical_future = self.state.vector_store.search_chunks_fts(
+            &chunk_query,
+            DEFAULT_CHUNK_CANDIDATE_K,
+            &candidate_scope_paths,
+        );
+        let dense_future = self.state.vector_store.search_similar_scoped(
+            query_embedding,
+            DEFAULT_CHUNK_CANDIDATE_K,
+            &candidate_scope_paths,
+        );
+        let (strict_lexical_matches, lexical_matches, dense_matches) =
+            tokio::try_join!(strict_future, lexical_future, dense_future)?;
+        metrics.chunk_strict_lexical_ms += elapsed_ms_u64(strict_lexical_started_at);
+        metrics.chunk_lexical_ms += elapsed_ms_u64(lexical_started_at);
+        metrics.chunk_dense_ms += elapsed_ms_u64(dense_started_at);
+        debug!(
+            strict_count = strict_lexical_matches.len(),
+            broad_count = lexical_matches.len(),
+            dense_count = dense_matches.len(),
+            strict_ms = metrics.chunk_strict_lexical_ms,
+            broad_ms = metrics.chunk_lexical_ms,
+            dense_ms = metrics.chunk_dense_ms,
+            "chunk searches completed"
+        );
+
+        let merge_started_at = Instant::now();
+        let evidence = merge_chunk_evidence(
+            analysis,
+            &candidate_docs,
+            strict_lexical_matches,
+            lexical_matches,
+            dense_matches,
+        );
+        metrics.merge_ms += elapsed_ms_u64(merge_started_at);
+        metrics.chunk_candidate_count = metrics.chunk_candidate_count.max(evidence.len());
+        debug!(
+            merged_count = evidence.len(),
+            ms = metrics.merge_ms,
+            "evidence merge done"
+        );
+
+        Ok(EvidenceRetrievalResult {
+            candidate_docs,
+            evidence,
+        })
+    }
+
+    async fn retrieve_compound_evidence(
+        &self,
+        plan: &CompoundQueryPlan,
+        _root_analysis: &QueryAnalysis,
+        root_evidence: &[MergedEvidence],
+        normalized_scope_paths: &[PathBuf],
+        final_answer_k: usize,
+        metrics: &mut RetrievalMetrics,
+    ) -> Result<CompoundEvidenceResult, EngineError> {
+        let mut selected = Vec::<MergedEvidence>::new();
+        let mut matched_parts = 0usize;
+
+        for part in &plan.parts {
+            let part_analysis = analyze_query(&part.query);
+            if matches!(
+                part_analysis.query_intent,
+                QueryIntent::ExternalFact
+                    | QueryIntent::SecretRequest
+                    | QueryIntent::MissingFileLookup
+            ) {
+                continue;
+            }
+            let mut part_metrics = RetrievalMetrics::default();
+            let retrieval = self
+                .retrieve_evidence_for_analysis(
+                    &part_analysis,
+                    Vec::new(),
+                    normalized_scope_paths,
+                    &mut part_metrics,
+                )
+                .await?;
+            accumulate_compound_metrics(metrics, &part_metrics);
+
+            let decision = evaluate_gating_decision(&part_analysis, &retrieval.evidence);
+            if decision.refuse
+                && !compound_part_has_grounded_evidence(&part_analysis, &retrieval.evidence)
+            {
+                continue;
+            }
+            let per_part_k = final_answer_k
+                .saturating_div(plan.parts.len().max(1))
+                .clamp(1, 3);
+            let part_items = retrieval
+                .evidence
+                .into_iter()
+                .take(per_part_k)
+                .collect::<Vec<_>>();
+            if !part_items.is_empty() {
+                matched_parts += 1;
+                selected.extend(part_items);
+            }
+        }
+
+        if selected.is_empty() {
+            selected.extend(root_evidence.iter().take(final_answer_k).cloned());
+        }
+        dedupe_evidence_preserve_order(&mut selected);
+        selected.truncate(final_answer_k);
+
+        Ok(CompoundEvidenceResult {
+            evidence: selected,
+            matched_parts,
+            partial: matched_parts > 0 && matched_parts < plan.parts.len(),
+        })
     }
 
     async fn retrieve_memory_context(

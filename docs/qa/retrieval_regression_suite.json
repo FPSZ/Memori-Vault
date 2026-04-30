@@ -862,6 +862,63 @@
         "repo_mixed",
         "full_live"
       ]
+    },
+    {
+      "id": "R52",
+      "query": "极光账本和雾凇发布的负责人分别是谁？",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "Memory_Test/doc_001_产品策略_极光账本_制度.md",
+        "Memory_Test/doc_046_品牌市场_雾凇发布_制度.txt"
+      ],
+      "target_clues": [
+        "负责人：林知远",
+        "负责人：沈乔"
+      ],
+      "notes": "compound multi-project query should retrieve evidence from both internal dossiers",
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R53",
+      "query": "赤松预算和晴川验收的核心内部规定分别是什么？",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "Memory_Test/doc_026_财务风控_赤松预算_制度.txt",
+        "Memory_Test/doc_066_质量保障_晴川验收_制度.txt"
+      ],
+      "target_clues": [
+        "预算池剩余率",
+        "9 条端到端证据链"
+      ],
+      "notes": "compound multi-project query should not require all evidence to come from one top document",
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
+    },
+    {
+      "id": "R54",
+      "query": "AUR-17 和 MKT-05 的关键指标如何判断？",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "Memory_Test/doc_001_产品策略_极光账本_制度.md",
+        "Memory_Test/doc_046_品牌市场_雾凇发布_制度.txt"
+      ],
+      "target_clues": [
+        "月度已核销对账单数",
+        "46 家目标客户中至少 19 家完成闭门演示预约"
+      ],
+      "notes": "compound query should work when users ask by project code",
+      "profile_tags": [
+        "repo_mixed",
+        "full_live"
+      ]
     }
   ]
 }

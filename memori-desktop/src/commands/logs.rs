@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub struct LogEntry {
     pub timestamp: String,
     pub level: String,
+    pub category: String,
     pub target: String,
     pub message: String,
     pub file: Option<String>,
@@ -87,6 +88,16 @@ fn parse_log_line(line: &str) -> Result<LogEntry, serde_json::Error> {
             .unwrap_or("")
             .to_string()
     });
+    let target = value
+        .get("target")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let file = value
+        .get("file")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let category = classify_log_category(&target, &message, file.as_deref(), fields);
 
     Ok(LogEntry {
         timestamp: value
@@ -99,22 +110,73 @@ fn parse_log_line(line: &str) -> Result<LogEntry, serde_json::Error> {
             .and_then(|v| v.as_str())
             .unwrap_or("INFO")
             .to_string(),
-        target: value
-            .get("target")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
+        category,
+        target,
         message,
-        file: value
-            .get("file")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
+        file,
         line: value.get("line").and_then(|v| v.as_u64()).map(|n| n as u32),
         thread_id: value
             .get("threadId")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
     })
+}
+
+fn classify_log_category(
+    target: &str,
+    message: &str,
+    file: Option<&str>,
+    fields: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> String {
+    if is_mcp_log(target, message, file, fields) {
+        "MCP".to_string()
+    } else {
+        "SYSTEM".to_string()
+    }
+}
+
+fn is_mcp_log(
+    target: &str,
+    message: &str,
+    file: Option<&str>,
+    fields: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> bool {
+    if contains_mcp_marker(target) || contains_mcp_marker(message) {
+        return true;
+    }
+
+    if let Some(file) = file
+        && contains_mcp_marker(&file.replace('\\', "/"))
+    {
+        return true;
+    }
+
+    fields
+        .map(|fields| {
+            fields
+                .iter()
+                .any(|(key, value)| contains_mcp_marker(key) || json_value_contains_mcp(value))
+        })
+        .unwrap_or(false)
+}
+
+fn json_value_contains_mcp(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(text) => contains_mcp_marker(text),
+        serde_json::Value::Array(items) => items.iter().any(json_value_contains_mcp),
+        serde_json::Value::Object(map) => map
+            .iter()
+            .any(|(key, value)| contains_mcp_marker(key) || json_value_contains_mcp(value)),
+        _ => false,
+    }
+}
+
+fn contains_mcp_marker(text: &str) -> bool {
+    let normalized = text.to_ascii_lowercase();
+    normalized.contains("mcp")
+        || normalized.contains("model context protocol")
+        || normalized.contains("jsonrpc")
+        || normalized.contains("json-rpc")
 }
 
 fn format_log_message(fields: &serde_json::Map<String, serde_json::Value>) -> String {

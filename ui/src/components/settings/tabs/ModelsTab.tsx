@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AnimatedPressButton } from "../../MotionKit";
+import { CyberToggle } from "../../UI";
 import type {
   LocalPerformancePreset,
   LocalModelProfileDto,
@@ -280,11 +281,14 @@ function ModelCard({
   const Icon = meta.icon;
   const port = extractPort(endpoint);
   const running = runtimeStatus?.state === "running";
+  const external = runtimeStatus?.state === "external";
   const starting = runtimeStatus?.state === "starting";
-  const processAlive = running || starting;
+  const processAlive = running || external || starting;
   const stateLabel =
     runtimeStatus?.state === "running"
       ? "运行中"
+      : runtimeStatus?.state === "external"
+        ? "外部运行"
       : runtimeStatus?.state === "starting"
         ? "加载中"
       : runtimeStatus?.state === "error"
@@ -305,7 +309,7 @@ function ModelCard({
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
             {port ? <span className="font-mono">端口 {port}</span> : null}
             {isLocal ? (
-              <span className={running ? "text-emerald-400" : starting ? "text-amber-400" : runtimeStatus?.state === "error" ? "text-red-400" : ""}>
+              <span className={running || external ? "text-emerald-400" : starting ? "text-amber-400" : runtimeStatus?.state === "error" ? "text-red-400" : ""}>
                 {stateLabel}{runtimeStatus?.pid ? ` · PID ${runtimeStatus.pid}` : ""}
               </span>
             ) : null}
@@ -317,7 +321,8 @@ function ModelCard({
               <button
                 type="button"
                 onClick={onStop}
-                disabled={runtimeBusy}
+                disabled={runtimeBusy || external}
+                title={external ? "该模型服务不是当前软件会话启动的，请到原进程或系统任务管理器中关闭。" : undefined}
                 className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-400 transition hover:opacity-80 disabled:opacity-50"
               >
                 {runtimeBusy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
@@ -728,6 +733,27 @@ export function ModelsTab({
             </button>
           </div>
         </div>
+
+        {isLocal ? (
+          <div className="flex items-start justify-between gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-[var(--text-primary)]">退出时关闭本地模型</div>
+              <div className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                关闭后，退出软件会保留已启动的 llama.cpp 进程；需要释放显存时在模型卡片里手动停止。
+              </div>
+            </div>
+            <CyberToggle
+              checked={modelSettings.stop_local_models_on_exit}
+              onChange={(stopLocalModelsOnExit) =>
+                onModelSettingsChange({
+                  ...modelSettings,
+                  stop_local_models_on_exit: stopLocalModelsOnExit
+                })
+              }
+              ariaLabel="退出时关闭本地模型"
+            />
+          </div>
+        ) : null}
 
         {isLocal ? (
           <div className="space-y-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3">

@@ -37,6 +37,7 @@ export function LogsTab() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [levelFilter, setLevelFilter] = useState<string>("INFO");
+  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [compactMode, setCompactMode] = useState(true);
   const [logDir, setLogDir] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -89,16 +90,20 @@ export function LogsTab() {
       levelFilter === "ALL"
         ? entries
         : entries.filter((entry) => entry.level.toUpperCase() === levelFilter);
-    if (!compactMode) return levelFiltered;
+    const categoryFiltered =
+      categoryFilter === "ALL"
+        ? levelFiltered
+        : levelFiltered.filter((entry) => (entry.category || "SYSTEM").toUpperCase() === categoryFilter);
+    if (!compactMode) return categoryFiltered;
     // Compact mode: deduplicate rapid per-file logs by keeping only
     // the first and last of consecutive logs with the same target + similar message prefix
     const result: LogEntry[] = [];
     let lastKey = "";
     let lastIdx = -1;
-    for (let i = 0; i < levelFiltered.length; i++) {
-      const e = levelFiltered[i];
+    for (let i = 0; i < categoryFiltered.length; i++) {
+      const e = categoryFiltered[i];
       const msgPrefix = e.message.split("chunk")[0].slice(0, 40);
-      const key = `${e.target}|${msgPrefix}`;
+      const key = `${e.category || "SYSTEM"}|${e.target}|${msgPrefix}`;
       if (key === lastKey && lastIdx >= 0) {
         // Replace last with current (keeps the latest of the streak)
         result[lastIdx] = e;
@@ -109,9 +114,10 @@ export function LogsTab() {
       }
     }
     return result;
-  }, [entries, compactMode, levelFilter]);
+  }, [entries, compactMode, levelFilter, categoryFilter]);
 
   const levels = ["ALL", "TRACE", "DEBUG", "INFO", "WARN", "ERROR"];
+  const categories = ["ALL", "MCP"];
 
   const handleExport = () => {
     if (entries.length === 0) return;
@@ -162,6 +168,21 @@ export function LogsTab() {
               }`}
             >
               {lv}
+            </button>
+          ))}
+          <div className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
+          {categories.map((category) => (
+            <button
+              key={category}
+              type="button"
+              onClick={() => setCategoryFilter(category)}
+              className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                categoryFilter === category
+                  ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface-2)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              {category}
             </button>
           ))}
           <div className="ml-auto flex items-center gap-2">
@@ -234,6 +255,7 @@ export function LogsTab() {
               <tbody className="divide-y divide-[var(--border-subtle)]">
                 {filtered.map((entry, idx) => {
                   const level = entry.level.toUpperCase();
+                  const category = (entry.category || "SYSTEM").toUpperCase();
                   const colorClass = LEVEL_COLORS[level] ?? "text-[var(--text-secondary)]";
                   const bgClass = LEVEL_BG[level] ?? "";
                   return (
@@ -264,6 +286,13 @@ export function LogsTab() {
                         </span>
                       </td>
                       <td className="px-3 py-1.5 whitespace-nowrap text-[var(--text-secondary)]" title={entry.target}>
+                        <span className={`mr-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+                          category === "MCP"
+                            ? "bg-cyan-400/10 text-cyan-300"
+                            : "bg-[var(--bg-surface-2)] text-[var(--text-muted)]"
+                        }`}>
+                          {category}
+                        </span>
                         {entry.target.split("::").pop() ?? entry.target}
                       </td>
                       <td className="px-3 py-1.5 text-[var(--text-primary)]">
