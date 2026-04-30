@@ -4,6 +4,7 @@ pub mod prompts;
 pub mod protocol;
 pub mod resources;
 pub mod tools;
+pub mod tools_impl;
 pub mod transport_http;
 pub mod transport_stdio;
 pub mod types;

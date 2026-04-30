@@ -37,6 +37,7 @@ const MODEL_NOT_CONFIGURED_MESSAGE: &str = "未配置模型，请在 设置 > �
 mod desktop_state;
 mod dto;
 mod model_runtime;
+mod model_settings;
 mod provider_client;
 mod settings_io;
 mod window_state;
@@ -47,6 +48,7 @@ pub(crate) use commands::*;
 pub(crate) use desktop_state::*;
 pub(crate) use dto::*;
 pub(crate) use model_runtime::*;
+pub(crate) use model_settings::*;
 pub(crate) use provider_client::*;
 pub(crate) use settings_io::*;
 pub(crate) use window_state::*;

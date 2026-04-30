@@ -41,6 +41,7 @@ mod audit;
 mod auth;
 mod dto;
 mod mcp;
+mod model_fetch;
 mod model_runtime;
 mod routes;
 mod settings_io;
@@ -50,6 +51,7 @@ pub(crate) use audit::*;
 pub(crate) use auth::*;
 pub(crate) use dto::*;
 // mcp types are accessed via crate::mcp:: path, no need for glob re-export
+pub(crate) use model_fetch::*;
 pub(crate) use model_runtime::*;
 pub(crate) use routes::*;
 pub(crate) use settings_io::*;
