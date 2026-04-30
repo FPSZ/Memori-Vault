@@ -37,6 +37,7 @@ scripts/.last-smoke-session.json
 
 # Local AI assistant settings
 .claude/
+.monkeycode/
 Logo/
 
 # Test data

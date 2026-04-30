@@ -528,7 +528,6 @@ pub struct SqliteStore {
     cache: RwLock<Vec<CachedVector>>,
 }
 
-
 #[cfg(test)]
 mod tests;
 
