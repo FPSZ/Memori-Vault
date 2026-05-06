@@ -4,6 +4,8 @@
 
 `1.0.2` is a stabilization release for the current Memori-Vault desktop stack. It keeps the existing local-first, verifiable retrieval architecture and packages a smaller set of fixes aimed at release usability, runtime clarity, and delivery consistency.
 
+This release remains within the **Memory OS Lite** product boundary: local-first storage, verifiable retrieval, explicit evidence separation, and auditable agent-facing knowledge access.
+
 ## Highlights
 
 - Unified the published version to `1.0.2` across the Cargo workspace, UI package, and Tauri desktop config.
