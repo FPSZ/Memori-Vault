@@ -1,13 +1,8 @@
 import { useMemo } from "react";
-import {
-  ChevronRight,
-  FileText,
-  FolderOpen,
-  HardDrive,
-  Settings as SettingsIcon,
-  Sparkles
-} from "lucide-react";
+import { ChevronRight, FileText, FolderOpen, HardDrive, Settings as SettingsIcon } from "lucide-react";
+import { AppLogoMark } from "../../components/AppLogoMark";
 import { useI18n } from "../../i18n";
+import { normalizeScopeKey } from "../formatters";
 import type { SearchScopeItem } from "../types";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
@@ -23,10 +18,6 @@ type SidebarProps = {
   onPreviewFile: (path: string) => void;
   onToggleSettings: () => void;
 };
-
-function normalizeScopeKey(relativePath: string, fullPath: string): string {
-  return relativePath || fullPath;
-}
 
 export function Sidebar({
   t,
@@ -93,12 +84,10 @@ export function Sidebar({
   return (
     <aside className="flex h-full w-full flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-surface-2)]">
       {/* Header / Logo */}
-      <div className="flex h-12 items-center gap-2.5 px-4">
-        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
-          <Sparkles className="h-4 w-4 text-[var(--accent)]" />
-        </div>
-        <span className="text-sm font-semibold tracking-tight text-[var(--text-primary)]">
-          Memori
+      <div className="flex h-14 items-center gap-3 px-4">
+        <AppLogoMark className="h-10 w-10" alt="Memori-Vault" />
+        <span className="text-base font-semibold tracking-tight text-[var(--text-primary)]">
+          Memori-Vault
         </span>
       </div>
 

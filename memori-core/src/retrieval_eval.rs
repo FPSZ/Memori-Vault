@@ -78,10 +78,23 @@ pub(crate) fn evaluate_gating_decision(
     let query_is_long =
         analysis.normalized_query.chars().count() >= 8 || analysis.flags.token_count >= 3;
     let top_doc_phrase_quality = top.document_docs_phrase_quality;
+    let top_doc_has_multiple_chunks = top_doc_count >= 2;
 
-    if top.lexical_strict_rank.is_some() && top_doc_count >= 2 && has_strong_document_signal(top) {
+    if matches!(
+        analysis.query_family,
+        QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup
+    ) && top.document_rank <= 3
+        && top_doc_has_multiple_chunks
+        && top_doc_distinct_term_hits >= 2
+        && top_doc_term_coverage >= 0.4
+        && evidence
+            .iter()
+            .take(3)
+            .filter(|item| item.chunk.file_path == top.chunk.file_path)
+            .any(has_any_chunk_lexical)
+    {
         return GatingDecision::allow(
-            "strict_lexical_with_document_signal",
+            "docs_family_multi_chunk_release",
             top_doc_distinct_term_hits,
             top_doc_term_coverage,
             top_doc_phrase_quality,
@@ -93,8 +106,27 @@ pub(crate) fn evaluate_gating_decision(
         && has_any_chunk_lexical(top)
         && evidence.len() >= 2
     {
+        let reason = if matches!(
+            analysis.query_family,
+            QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup
+        ) && top_doc_has_multiple_chunks
+            && top_doc_distinct_term_hits >= 1
+        {
+            "docs_family_multi_chunk_release"
+        } else {
+            "top_ranked_document_signal"
+        };
         return GatingDecision::allow(
-            "top_ranked_document_signal",
+            reason,
+            top_doc_distinct_term_hits,
+            top_doc_term_coverage,
+            top_doc_phrase_quality,
+        );
+    }
+
+    if top.lexical_strict_rank.is_some() && top_doc_count >= 2 && has_strong_document_signal(top) {
+        return GatingDecision::allow(
+            "strict_lexical_with_document_signal",
             top_doc_distinct_term_hits,
             top_doc_term_coverage,
             top_doc_phrase_quality,
@@ -645,6 +677,14 @@ pub(crate) fn looks_like_implementation_lookup(
     flags: &QueryFlags,
 ) -> bool {
     let lower = query.to_ascii_lowercase();
+    let has_enterprise_docs_markers = looks_like_enterprise_docs_question(query, &lower);
+    let has_code_like_identifier = identifier_terms.iter().any(|term| {
+        term.contains('.')
+            || term.contains('/')
+            || term.contains('\\')
+            || term.contains('_')
+            || has_ascii_camel_case(term)
+    });
     let implementation_markers = [
         "which file",
         "which entry",
@@ -667,12 +707,45 @@ pub(crate) fn looks_like_implementation_lookup(
         "协议",
     ];
 
+    if has_enterprise_docs_markers {
+        return implementation_markers
+            .iter()
+            .any(|marker| lower.contains(marker) || query.contains(marker))
+            || has_code_like_identifier
+            || (!filename_terms.is_empty() && flags.has_path_like_token && document_terms.len() <= 8);
+    }
+
     implementation_markers
         .iter()
         .any(|marker| lower.contains(marker) || query.contains(marker))
         || !identifier_terms.is_empty()
         || (!filename_terms.is_empty() && flags.has_path_like_token && document_terms.len() <= 8)
         || (flags.has_ascii_identifier && flags.is_lookup_like)
+}
+
+pub(crate) fn looks_like_enterprise_docs_question(query: &str, lower: &str) -> bool {
+    let enterprise_markers = [
+        "负责人",
+        "内部规定",
+        "北极星指标",
+        "核心规定",
+        "关键指标",
+        "验收要求",
+        "验收",
+        "风险",
+        "阈值",
+        "定义",
+        "时限",
+        "窗口",
+        "目标",
+        "口径",
+        "sla",
+        "nrr",
+        "incident commander",
+    ];
+    enterprise_markers
+        .iter()
+        .any(|marker| lower.contains(marker) || query.contains(marker))
 }
 
 pub(crate) fn has_http_method_and_path(raw_tokens: &[String]) -> bool {

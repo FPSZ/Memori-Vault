@@ -890,6 +890,18 @@
             analyze_query("How do you start server mode?").query_family,
             QueryFamily::DocsExplanatory
         );
+        assert_eq!(
+            analyze_query("AUR-17 的北极星指标是什么？一期目标是多少？").query_family,
+            QueryFamily::DocsExplanatory
+        );
+        assert_eq!(
+            analyze_query("GROW-29 对冷启动用户的定义是什么？暂停投放阈值是多少？").query_family,
+            QueryFamily::DocsExplanatory
+        );
+        assert_eq!(
+            analyze_query("极光账本和雾凇发布的负责人分别是谁？").query_family,
+            QueryFamily::DocsExplanatory
+        );
     }
 
     #[test]
@@ -1019,6 +1031,36 @@
 
         assert_eq!(merged[0].relative_path, "docs/hiring.md");
         assert_eq!(merged[0].document_reason, "lexical_strict");
+    }
+
+    #[test]
+    fn document_merge_keeps_exact_path_priority_over_higher_raw_score_docs_phrase() {
+        let analysis = analyze_query("memori-core/src/retrieval.rs");
+        let merged = merge_document_candidates(
+            &analysis,
+            vec![memori_storage::DocumentSignalMatch {
+                file_path: "memori-core/src/retrieval.rs".to_string(),
+                relative_path: "memori-core/src/retrieval.rs".to_string(),
+                file_name: "retrieval.rs".to_string(),
+                matched_fields: vec!["exact_path".to_string()],
+                score: 180,
+                phrase_specific: false,
+            }],
+            vec![memori_storage::DocumentSignalMatch {
+                file_path: "docs/architecture/retrieval.md".to_string(),
+                relative_path: "docs/architecture/retrieval.md".to_string(),
+                file_name: "retrieval.md".to_string(),
+                matched_fields: vec!["docs_phrase".to_string()],
+                score: 400,
+                phrase_specific: true,
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert_eq!(merged[0].relative_path, "memori-core/src/retrieval.rs");
+        assert_eq!(merged[0].document_reason, "exact_path");
+        assert_eq!(merged[0].document_rank, 1);
     }
 
     #[test]
@@ -1241,6 +1283,71 @@
     }
 
     #[test]
+    fn docs_explanatory_multi_chunk_internal_evidence_is_not_rejected() {
+        let analysis = analyze_query("极光账本的北极星指标和一期目标分别是什么");
+        assert!(matches!(analysis.query_family, QueryFamily::DocsExplanatory));
+
+        let evidence = vec![
+            super::MergedEvidence {
+                chunk: DocumentChunk {
+                    file_path: PathBuf::from("Memory_Test/doc_001_产品策略_极光账本_会议纪要.txt"),
+                    content: "极光账本的北极星指标不是 DAU，而是月度已核销对账单数。".to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["核心指标".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                relative_path: "Memory_Test/doc_001_产品策略_极光账本_会议纪要.txt".to_string(),
+                document_reason: "lexical_strict".to_string(),
+                document_rank: 1,
+                document_raw_score: Some(1.3),
+                document_has_exact_signal: false,
+                document_has_docs_phrase_signal: false,
+                document_docs_phrase_quality: None,
+                document_has_filename_signal: false,
+                document_has_strict_lexical: true,
+                lexical_strict_rank: Some(1),
+                lexical_broad_rank: None,
+                lexical_raw_score: Some(1.1),
+                dense_rank: Some(2),
+                dense_raw_score: Some(0.7),
+                final_score: 1.1,
+            },
+            super::MergedEvidence {
+                chunk: DocumentChunk {
+                    file_path: PathBuf::from("Memory_Test/doc_001_产品策略_极光账本_会议纪要.txt"),
+                    content: "一期目标为 18600 张，作为月度已核销对账单数的阶段门槛。".to_string(),
+                    chunk_index: 1,
+                    heading_path: vec!["阶段目标".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                relative_path: "Memory_Test/doc_001_产品策略_极光账本_会议纪要.txt".to_string(),
+                document_reason: "lexical_strict".to_string(),
+                document_rank: 1,
+                document_raw_score: Some(1.3),
+                document_has_exact_signal: false,
+                document_has_docs_phrase_signal: false,
+                document_docs_phrase_quality: None,
+                document_has_filename_signal: false,
+                document_has_strict_lexical: true,
+                lexical_strict_rank: Some(2),
+                lexical_broad_rank: None,
+                lexical_raw_score: Some(1.0),
+                dense_rank: Some(3),
+                dense_raw_score: Some(0.69),
+                final_score: 1.0,
+            },
+        ];
+
+        let mut metrics = RetrievalMetrics::default();
+        let refused = apply_gating_metrics(&mut metrics, &analysis, &evidence);
+        assert!(!refused);
+        assert_eq!(
+            metrics.gating_decision_reason,
+            "docs_family_multi_chunk_release"
+        );
+    }
+
+    #[test]
     fn missing_file_lookup_without_document_signal_is_rejected() {
         let analysis = analyze_query("请总结 week8_report.md 的内容");
         let evidence = vec![super::MergedEvidence {
@@ -1289,4 +1396,3 @@
             "本周主要学习了 FORTIFY 绕过、CANNARY 检查与若干改进事项。"
         ));
     }
-

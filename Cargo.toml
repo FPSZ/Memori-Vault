@@ -21,3 +21,11 @@ thiserror = "2.0.17"
 tracing = "0.1.41"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3.20", features = ["json", "env-filter"] }
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false

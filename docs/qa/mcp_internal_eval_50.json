@@ -1,0 +1,426 @@
+{
+  "version": 1,
+  "name": "Memory_Test MCP fixed 50-case evaluation",
+  "watch_root": "Memory_Test",
+  "cases": [
+    {
+      "id": "M01",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "极光账本（AUR-17）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_001_"],
+      "required_answer_clues_all": ["林知远"],
+      "required_answer_clues_any": ["月度已核销对账单数", "18600", "禾川物流"]
+    },
+    {
+      "id": "M02",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "青梧留存（GROW-29）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_006_"],
+      "required_answer_clues_all": ["陈夏"],
+      "required_answer_clues_any": ["冷启动用户", "31.5%", "29%"]
+    },
+    {
+      "id": "M03",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "玄武密钥（SEC-41）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_011_"],
+      "required_answer_clues_all": ["周曼青"],
+      "required_answer_clues_any": ["22:10-22:35", "43天"]
+    },
+    {
+      "id": "M04",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "银杏-17（ARC-17）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_016_"],
+      "required_answer_clues_all": ["苏澈"],
+      "required_answer_clues_any": ["19:40-21:10", "0.47%", "6分钟"]
+    },
+    {
+      "id": "M05",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "白鹭工单（CS-08）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_021_"],
+      "required_answer_clues_all": ["马溪"],
+      "required_answer_clues_any": ["11分钟", "92.4%"]
+    },
+    {
+      "id": "M06",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "赤松预算（FIN-33）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_026_"],
+      "required_answer_clues_all": ["何砚"],
+      "required_answer_clues_any": ["78000元", "审批线不是金额固定线"]
+    },
+    {
+      "id": "M07",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "松塔标签（DATA-12）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_031_"],
+      "required_answer_clues_all": ["顾安"],
+      "required_answer_clues_any": ["活跃门店", "T+38分钟"]
+    },
+    {
+      "id": "M08",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "石竹梯队（HR-22）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_036_"],
+      "required_answer_clues_all": ["赵闻笛"],
+      "required_answer_clues_any": ["跨部门复盘", "14人", "6人"]
+    },
+    {
+      "id": "M09",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "蓝鲸 B17（SCM-17）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_041_"],
+      "required_answer_clues_all": ["唐稚"],
+      "required_answer_clues_any": ["51台", "23台", "安全库存不是30天"]
+    },
+    {
+      "id": "M10",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "雾凇发布（MKT-05）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_046_"],
+      "required_answer_clues_all": ["沈乔"],
+      "required_answer_clues_any": ["禁用词", "19家", "46家目标客户"]
+    },
+    {
+      "id": "M11",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "琥珀条款（LAW-19）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_051_"],
+      "required_answer_clues_all": ["魏蓝"],
+      "required_answer_clues_any": ["本地模型不出域", "A-3", "5个工作日"]
+    },
+    {
+      "id": "M12",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "蜂巢流水线（DEV-26）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_056_"],
+      "required_answer_clues_all": ["于北辰"],
+      "required_answer_clues_any": ["回滚段", "18分钟", "绿色"]
+    },
+    {
+      "id": "M13",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "云帆模板（PRE-09）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_061_"],
+      "required_answer_clues_all": ["梁其"],
+      "required_answer_clues_any": ["3节点轻量集群", "28分钟", "7分钟"]
+    },
+    {
+      "id": "M14",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "晴川验收（QA-31）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_066_"],
+      "required_answer_clues_all": ["董霁"],
+      "required_answer_clues_any": ["9条端到端证据链", "17%", "100%覆盖"]
+    },
+    {
+      "id": "M15",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "镜湖审计（AUD-14）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_071_"],
+      "required_answer_clues_all": ["郝映"],
+      "required_answer_clues_any": ["最近5次异常回滚", "4个角色"]
+    },
+    {
+      "id": "M16",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "栈桥知识库（KM-07）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_076_"],
+      "required_answer_clues_all": ["黎鸥"],
+      "required_answer_clues_any": ["75天", "适用场景", "反例", "负责组"]
+    },
+    {
+      "id": "M17",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "翠微伙伴（CHN-11）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_081_"],
+      "required_answer_clues_all": ["秦若"],
+      "required_answer_clues_any": ["联合交付成功次数", "2次", "5次", "9次"]
+    },
+    {
+      "id": "M18",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "芦苇脱敏（PRI-28）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_086_"],
+      "required_answer_clues_all": ["薛宁"],
+      "required_answer_clues_any": ["后2位", "13分钟", "人工复核"]
+    },
+    {
+      "id": "M19",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "灯塔演练（INC-44）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_091_"],
+      "required_answer_clues_all": ["任栎"],
+      "required_answer_clues_any": ["4分钟", "incident commander", "17分钟"]
+    },
+    {
+      "id": "M20",
+      "category": "single_project_overview",
+      "expected_status": "answered",
+      "query": "海棠看板（BI-16）的内部规定是什么？负责人是谁？",
+      "target_document_prefixes": ["doc_096_"],
+      "required_answer_clues_all": ["白予墨"],
+      "required_answer_clues_any": ["一次性迁移服务费", "NRR", "证据引用率"]
+    },
+    {
+      "id": "M21",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "AUR-17 的北极星指标是什么？一期目标是多少？",
+      "target_document_prefixes": ["doc_001_"],
+      "required_answer_clues_all": ["月度已核销对账单数", "18600"]
+    },
+    {
+      "id": "M22",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "GROW-29 对冷启动用户的定义是什么？暂停投放阈值是多少？",
+      "target_document_prefixes": ["doc_006_"],
+      "required_answer_clues_all": ["14天内访问过但未创建项目", "29%"]
+    },
+    {
+      "id": "M23",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "SEC-41 的轮换窗口和服务端密钥最大存活期分别是多少？",
+      "target_document_prefixes": ["doc_011_"],
+      "required_answer_clues_all": ["22:10-22:35", "43天"]
+    },
+    {
+      "id": "M24",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "ARC-17 的上线冻结窗口是什么？什么情况下才触发自动回滚？",
+      "target_document_prefixes": ["doc_016_"],
+      "required_answer_clues_all": ["19:40-21:10", "0.47%", "6分钟"]
+    },
+    {
+      "id": "M25",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "CS-08 的 P1 升级 SLA 是多少？首次响应满意度目标如何处理？",
+      "target_document_prefixes": ["doc_021_"],
+      "required_answer_clues_all": ["11分钟", "92.4%"],
+      "required_answer_clues_any": ["不纳入月奖", "纳入复盘"]
+    },
+    {
+      "id": "M26",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "FIN-33 的试点期单笔采购上限是多少？审批线按什么口径划分？",
+      "target_document_prefixes": ["doc_026_"],
+      "required_answer_clues_all": ["78000元"],
+      "required_answer_clues_any": ["不是金额固定线", "审批线不是金额固定线"]
+    },
+    {
+      "id": "M27",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "DATA-12 对活跃门店的定义是什么？标签产出延迟 SLO 是多少？",
+      "target_document_prefixes": ["doc_031_"],
+      "required_answer_clues_all": ["10天内完成过库存盘点", "T+38分钟"]
+    },
+    {
+      "id": "M28",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "HR-22 的 L3 晋升必要条件是什么？2026 上半年名额上限是多少？",
+      "target_document_prefixes": ["doc_036_"],
+      "required_answer_clues_all": ["跨部门复盘", "14人"],
+      "required_answer_clues_any": ["技术序列最多占6人", "6人"]
+    },
+    {
+      "id": "M29",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "SCM-17 的 Bin-7 库位黄色和红色预警阈值分别是多少？",
+      "target_document_prefixes": ["doc_041_"],
+      "required_answer_clues_all": ["51台", "23台"]
+    },
+    {
+      "id": "M30",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "MKT-05 的发布禁用词里有什么？发布会目标按什么衡量？",
+      "target_document_prefixes": ["doc_046_"],
+      "required_answer_clues_any": ["颠覆行业", "零成本替代", "全自动合规"],
+      "required_answer_clues_all": ["19家"]
+    },
+    {
+      "id": "M31",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "LAW-19 为什么要求加入 A-3 附件？合同回传时限是多少？",
+      "target_document_prefixes": ["doc_051_"],
+      "required_answer_clues_all": ["本地模型不出域", "A-3", "5个工作日"]
+    },
+    {
+      "id": "M32",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "DEV-26 的强制阻断项是什么？主干构建多快才算绿色？",
+      "target_document_prefixes": ["doc_056_"],
+      "required_answer_clues_all": ["回滚段", "18分钟"]
+    },
+    {
+      "id": "M33",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "PRE-09 的私有化部署默认怎么写？标准演示里知识库问答要控制在多久内？",
+      "target_document_prefixes": ["doc_061_"],
+      "required_answer_clues_all": ["3节点轻量集群", "7分钟"]
+    },
+    {
+      "id": "M34",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "QA-31 对可交付的定义是什么？抽样比例和核心流程覆盖要求分别是多少？",
+      "target_document_prefixes": ["doc_066_"],
+      "required_answer_clues_all": ["9条端到端证据链", "17%", "100%"]
+    },
+    {
+      "id": "M35",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "AUD-14 的抽查样本从哪里来？每次审计至少要追踪哪些角色？",
+      "target_document_prefixes": ["doc_071_"],
+      "required_answer_clues_all": ["最近5次异常回滚", "申请人", "审批人", "执行人", "复核人"]
+    },
+    {
+      "id": "M36",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "KM-07 的过期规则是什么？核心知识卡必须包含哪些内容？",
+      "target_document_prefixes": ["doc_076_"],
+      "required_answer_clues_all": ["75天", "适用场景", "反例", "负责组"]
+    },
+    {
+      "id": "M37",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "CHN-11 的伙伴分级依据是什么？银级、金级、黑松级分别需要几次成功交付？",
+      "target_document_prefixes": ["doc_081_"],
+      "required_answer_clues_all": ["联合交付成功次数", "2次", "5次", "9次"]
+    },
+    {
+      "id": "M38",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "PRI-28 的联系人电话如何保留用于排障？脱敏任务超过多久要进入人工复核？",
+      "target_document_prefixes": ["doc_086_"],
+      "required_answer_clues_all": ["后2位", "13分钟", "人工复核"]
+    },
+    {
+      "id": "M39",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "INC-44 中谁要在多久内声明 incident commander？SEV-2 的同步频率是多少？",
+      "target_document_prefixes": ["doc_091_"],
+      "required_answer_clues_all": ["4分钟", "incident commander", "17分钟"]
+    },
+    {
+      "id": "M40",
+      "category": "single_project_detail",
+      "expected_status": "answered",
+      "query": "BI-16 的营收口径排除了什么？周报必须同时展示哪些指标？",
+      "target_document_prefixes": ["doc_096_"],
+      "required_answer_clues_all": ["一次性迁移服务费", "NRR", "证据引用率"]
+    },
+    {
+      "id": "M41",
+      "category": "multi_project",
+      "expected_status": "answered",
+      "query": "极光账本和雾凇发布的负责人分别是谁？",
+      "target_document_prefixes": ["doc_001_", "doc_046_"],
+      "citation_target_mode": "all",
+      "required_answer_clues_all": ["林知远", "沈乔"]
+    },
+    {
+      "id": "M42",
+      "category": "multi_project",
+      "expected_status": "answered",
+      "query": "赤松预算和晴川验收的核心内部规定分别是什么？",
+      "target_document_prefixes": ["doc_026_", "doc_066_"],
+      "citation_target_mode": "all",
+      "required_answer_clues_all": ["78000元", "9条端到端证据链"]
+    },
+    {
+      "id": "M43",
+      "category": "multi_project",
+      "expected_status": "answered",
+      "query": "AUR-17 和 MKT-05 的关键指标如何判断？",
+      "target_document_prefixes": ["doc_001_", "doc_046_"],
+      "citation_target_mode": "all",
+      "required_answer_clues_all": ["月度已核销对账单数", "19家"]
+    },
+    {
+      "id": "M44",
+      "category": "multi_project",
+      "expected_status": "answered",
+      "query": "银杏-17 和 玄武密钥 的关键时窗分别是什么？",
+      "target_document_prefixes": ["doc_016_", "doc_011_"],
+      "citation_target_mode": "all",
+      "required_answer_clues_all": ["19:40-21:10", "22:10-22:35"]
+    },
+    {
+      "id": "M45",
+      "category": "multi_project",
+      "expected_status": "answered",
+      "query": "云帆模板和蜂巢流水线各自最关键的交付约束是什么？",
+      "target_document_prefixes": ["doc_061_", "doc_056_"],
+      "citation_target_mode": "all",
+      "required_answer_clues_all": ["7分钟", "回滚段"]
+    },
+    {
+      "id": "M46",
+      "category": "refuse",
+      "expected_status": "refused",
+      "query": "霜塔协同（FAKE-01）的负责人是谁？"
+    },
+    {
+      "id": "M47",
+      "category": "refuse",
+      "expected_status": "refused",
+      "query": "请根据内部资料说明 OpenAI 最新 CEO 是谁。"
+    },
+    {
+      "id": "M48",
+      "category": "refuse",
+      "expected_status": "refused",
+      "query": "极光账本项目组今天中午吃什么？"
+    },
+    {
+      "id": "M49",
+      "category": "refuse",
+      "expected_status": "refused",
+      "query": "雾凇发布的食堂补贴标准是多少？"
+    },
+    {
+      "id": "M50",
+      "category": "refuse",
+      "expected_status": "refused",
+      "query": "青梧留存和海棠看板的员工宿舍安排分别是什么？"
+    }
+  ]
+}

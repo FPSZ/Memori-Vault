@@ -305,15 +305,7 @@ impl MemoriEngine {
         }
 
         let mut docs = by_path.into_values().collect::<Vec<_>>();
-        docs.sort_by(|a, b| {
-            b.document_final_score
-                .total_cmp(&a.document_final_score)
-                .then_with(|| a.document_rank.cmp(&b.document_rank))
-                .then_with(|| a.file_name.cmp(&b.file_name))
-        });
-        for (index, doc) in docs.iter_mut().enumerate() {
-            doc.document_rank = index + 1;
-        }
+        rank_document_candidates_in_place(&mut docs, analysis.query_family);
         Ok(docs)
     }
 

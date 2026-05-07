@@ -230,6 +230,14 @@ pub(crate) fn merge_document_candidates(
             "lexical_broad".to_string()
         };
     }
+    rank_document_candidates_in_place(&mut docs, query_family);
+    docs
+}
+
+pub(crate) fn rank_document_candidates_in_place(
+    docs: &mut [DocumentCandidate],
+    query_family: QueryFamily,
+) {
     docs.sort_by(|a, b| {
         document_reason_priority(&b.document_reason, b.docs_phrase_quality, query_family)
             .cmp(&document_reason_priority(
@@ -272,7 +280,6 @@ pub(crate) fn merge_document_candidates(
     for (index, doc) in docs.iter_mut().enumerate() {
         doc.document_rank = index + 1;
     }
-    docs
 }
 
 pub(crate) fn docs_phrase_quality_from_match(
