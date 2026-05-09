@@ -21,9 +21,22 @@ pub(crate) fn score_document_signal_match(
         if term_lower.is_empty() {
             continue;
         }
+        let compact_term = compact_identifier_term(&term_lower);
+        let file_name_compact = compact_identifier_term(&file_name_lower);
+        let relative_path_compact = compact_identifier_term(&relative_path_lower);
+        let heading_compact = compact_identifier_term(&heading_lower);
+        let document_search_compact = compact_identifier_term(&document_search_lower);
 
         if file_name_lower == term_lower || relative_path_lower == term_lower {
             score += 160;
+            push_unique_field(&mut matched_fields, "exact_path");
+            continue;
+        }
+
+        if is_hyphenless_identifier_equivalent(&term_lower, &file_name_lower)
+            || is_hyphenless_identifier_equivalent(&term_lower, &relative_path_lower)
+        {
+            score += 145;
             push_unique_field(&mut matched_fields, "exact_path");
             continue;
         }
@@ -34,6 +47,12 @@ pub(crate) fn score_document_signal_match(
         } else if file_name_lower.contains(&term_lower) {
             score += 55;
             push_unique_field(&mut matched_fields, "file_name");
+        } else if compact_term.len() >= 4
+            && !file_name_compact.is_empty()
+            && file_name_compact.contains(&compact_term)
+        {
+            score += 70;
+            push_unique_field(&mut matched_fields, "file_name");
         }
 
         if relative_path_lower.starts_with(&term_lower) {
@@ -42,10 +61,22 @@ pub(crate) fn score_document_signal_match(
         } else if relative_path_lower.contains(&term_lower) {
             score += 45;
             push_unique_field(&mut matched_fields, "relative_path");
+        } else if compact_term.len() >= 4
+            && !relative_path_compact.is_empty()
+            && relative_path_compact.contains(&compact_term)
+        {
+            score += 58;
+            push_unique_field(&mut matched_fields, "relative_path");
         }
 
         if heading_lower.contains(&term_lower) {
             score += 20;
+            push_unique_field(&mut matched_fields, "heading_catalog");
+        } else if compact_term.len() >= 4
+            && !heading_compact.is_empty()
+            && heading_compact.contains(&compact_term)
+        {
+            score += 18;
             push_unique_field(&mut matched_fields, "heading_catalog");
         }
 
@@ -68,6 +99,13 @@ pub(crate) fn score_document_signal_match(
                 };
                 push_unique_field(&mut matched_fields, "document_search_text");
             }
+        } else if is_specific_document_signal_term(&term_lower)
+            && compact_term.len() >= 4
+            && !document_search_compact.is_empty()
+            && document_search_compact.contains(&compact_term)
+        {
+            score += 36;
+            push_unique_field(&mut matched_fields, "document_search_text");
         }
     }
 
@@ -169,6 +207,26 @@ pub(crate) fn is_code_like_path(relative_path: &str, file_name: &str) -> bool {
             })
             .unwrap_or(false)
     })
+}
+
+pub(crate) fn compact_identifier_term(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || is_cjk_char(*ch))
+        .map(|ch| {
+            if ch.is_ascii_alphabetic() {
+                ch.to_ascii_lowercase()
+            } else {
+                ch
+            }
+        })
+        .collect::<String>()
+}
+
+pub(crate) fn is_hyphenless_identifier_equivalent(term: &str, target: &str) -> bool {
+    let compact_term = compact_identifier_term(term);
+    let compact_target = compact_identifier_term(target);
+    compact_term.len() >= 4 && compact_term == compact_target
 }
 
 pub(crate) fn looks_like_code_symbol_term(term: &str) -> bool {

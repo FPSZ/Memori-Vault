@@ -463,7 +463,7 @@ pub(crate) async fn get_runtime_baseline(state: ServerState) -> Result<JsonValue
 }
 
 pub(crate) async fn rank_settings(
-    state: ServerState,
+    _state: ServerState,
     args: Option<JsonValue>,
 ) -> Result<JsonValue, JsonRpcError> {
     let payload = parse_params::<RankSettingsRequest>(args)?;
@@ -471,21 +471,7 @@ pub(crate) async fn rank_settings(
     if query.is_empty() || payload.candidates.is_empty() {
         return Ok(json!({ "keys": [] }));
     }
-    let engine = engine_from_state(&state).await?;
-    let candidate_lines = payload
-        .candidates
-        .iter()
-        .map(|item| format!("{} => {}", item.key.trim(), item.text.trim()))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let prompt = format!(
-        "You are a settings retrieval assistant.\nQuery: {query}\nCandidates:\n{candidate_lines}\n\nReturn only a JSON array of best-matching keys, max 3. Do not output explanations."
-    );
-    let answer = engine
-        .generate_answer(&prompt, "", "")
-        .await
-        .map_err(|err| JsonRpcError::internal_error(err.to_string()))?;
-    let keys = serde_json::from_str::<Vec<String>>(&answer).unwrap_or_default();
+    let keys = rank_setting_keys(query, &payload.candidates, 3);
     Ok(json!({ "keys": keys }))
 }
 

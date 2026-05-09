@@ -67,6 +67,26 @@ pub fn run() {
             AppSettings::default()
         }
     };
+    unsafe {
+        std::env::set_var(
+            memori_core::MEMORI_RETRIEVAL_GATING_PROFILE_ENV,
+            settings
+                .retrieval_gating_profile
+                .clone()
+                .unwrap_or_else(|| "balanced".to_string()),
+        );
+        std::env::set_var(
+            memori_core::MEMORI_GENERATION_REFUSAL_MODE_ENV,
+            settings
+                .generation_refusal_mode
+                .clone()
+                .unwrap_or_else(|| "balanced".to_string()),
+        );
+        std::env::set_var(
+            memori_core::MEMORI_GATING_RETRY_ON_REFUSAL_ENV,
+            settings.gating_retry_on_refusal.unwrap_or(true).to_string(),
+        );
+    }
 
     let watch_root = match resolve_watch_root_from_settings(&settings) {
         Ok(path) => path,
@@ -380,7 +400,7 @@ fn format_legacy_references(response: &AskResponseStructured) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::is_supported_document_file;
+    use super::{AppSettings, default_indexing_status, is_supported_document_file};
     use std::path::Path;
 
     #[test]
@@ -397,5 +417,12 @@ mod tests {
             let name = format!("sample.{ext}");
             assert!(!is_supported_document_file(Path::new(&name)));
         }
+    }
+
+    #[test]
+    fn default_indexing_status_does_not_claim_ready_when_engine_is_unavailable() {
+        let status = default_indexing_status(&AppSettings::default());
+        assert_eq!(status.rebuild_state, "required");
+        assert_eq!(status.rebuild_reason.as_deref(), Some("engine_unavailable"));
     }
 }

@@ -7,7 +7,8 @@ type UseQueryFlowParams = {
   aiLang: Language;
   retrieveTopK: number;
   selectedScopePaths: string[];
-  modelSetupReady: boolean;
+  modelSetupNotConfigured: boolean;
+  searchBlockedMessage?: string;
   onError: (message: string) => void;
   toUiErrorMessage: (error: unknown) => string;
   onSearchStart?: () => void;
@@ -18,7 +19,8 @@ export function useQueryFlow({
   aiLang,
   retrieveTopK,
   selectedScopePaths,
-  modelSetupReady,
+  modelSetupNotConfigured,
+  searchBlockedMessage,
   onError,
   toUiErrorMessage,
   onSearchStart,
@@ -49,7 +51,12 @@ export function useQueryFlow({
   }, [loading]);
 
   const runSearch = async (overrideScopePaths?: string[]) => {
-    if (query.trim().length === 0 || loading || !modelSetupReady) {
+    if (query.trim().length === 0 || loading) {
+      return;
+    }
+
+    if (modelSetupNotConfigured) {
+      onError(searchBlockedMessage ?? "Model is not configured.");
       return;
     }
 

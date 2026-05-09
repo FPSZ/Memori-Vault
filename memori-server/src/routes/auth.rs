@@ -9,41 +9,37 @@ pub(crate) async fn oidc_login_handler(
         .id_token
         .as_deref()
         .or(payload.access_token.as_deref())
-        .map(str::to_string);
-    let claims = token
-        .as_deref()
-        .and_then(|t| decode_jwt_claims(t).ok())
-        .unwrap_or_default();
+        .ok_or_else(|| ApiError::bad_request("OIDC login requires id_token or access_token"))?;
+    let claims = decode_jwt_claims(token).map_err(ApiError::unauthorized)?;
+    let now = unix_now_secs();
+    validate_oidc_claims(
+        &claims,
+        &policy.auth.issuer,
+        &policy.auth.client_id,
+        now,
+    )
+    .map_err(ApiError::unauthorized)?;
 
-    let subject = payload
-        .subject
-        .map(|s| s.trim().to_string())
+    let subject = claims
+        .get("sub")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
         .filter(|s| !s.is_empty())
-        .or_else(|| {
-            claims
-                .get("sub")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        })
         .or_else(|| {
             claims
                 .get("email")
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
         })
-        .ok_or_else(|| ApiError::bad_request("OIDC 登录缺少 subject"))?;
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| ApiError::bad_request("OIDC token is missing subject"))?;
 
-    let role_from_claim = claims
+    let role = claims
         .get(&policy.auth.roles_claim)
-        .and_then(extract_role_from_claims);
-    let role = payload
-        .role
-        .as_deref()
-        .map(Role::from_value)
-        .or(role_from_claim)
+        .and_then(extract_role_from_claims)
         .unwrap_or(Role::User);
 
-    let now = unix_now_secs();
     let expires_at = now + DEFAULT_SESSION_TTL_SECS;
     let session_token = Uuid::new_v4().to_string();
     {
@@ -69,7 +65,7 @@ pub(crate) async fn oidc_login_handler(
             result: "ok".to_string(),
             metadata: serde_json::json!({
                 "role": role,
-                "issuer": policy.auth.issuer
+                "issuer": claims.get("iss").and_then(|value| value.as_str()).unwrap_or(policy.auth.issuer.as_str())
             }),
         },
     )

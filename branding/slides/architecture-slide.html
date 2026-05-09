@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>总体架构 - Memori-Vault</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: #0B1120;
+      color: #fff;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* 顶部导航 */
+    .nav {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 48px;
+      padding: 24px 40px;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .nav-item {
+      font-size: 15px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.45);
+      cursor: default;
+      transition: color 0.3s;
+      letter-spacing: 0.5px;
+    }
+
+    .nav-item:hover { color: rgba(255,255,255,0.7); }
+    .nav-item.active { color: rgba(255,255,255,0.9); font-weight: 600; }
+
+    /* 主内容区 */
+    .main {
+      padding: 48px 80px 60px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    .section-title {
+      font-size: 52px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #60A5FA 0%, #3B82F6 50%, #8B5CF6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 12px;
+      letter-spacing: 2px;
+    }
+
+    .section-subtitle {
+      font-size: 18px;
+      color: rgba(255,255,255,0.55);
+      margin-bottom: 56px;
+      letter-spacing: 0.5px;
+    }
+
+    /* 2x2 架构网格 */
+    .arch-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 48px 64px;
+    }
+
+    .arch-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 24px;
+      padding: 32px;
+      background: rgba(255,255,255,0.02);
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.04);
+      transition: background 0.3s, border-color 0.3s;
+    }
+
+    .arch-card:hover {
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.08);
+    }
+
+    /* 图标区 */
+    .arch-icon {
+      width: 80px;
+      height: 80px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .arch-icon svg {
+      width: 64px;
+      height: 64px;
+    }
+
+    /* 分隔线 */
+    .arch-divider {
+      width: 2px;
+      align-self: stretch;
+      background: linear-gradient(180deg, transparent, rgba(96,165,250,0.4), transparent);
+      margin: 0 8px;
+      flex-shrink: 0;
+    }
+
+    /* 内容区 */
+    .arch-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .arch-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 16px;
+      letter-spacing: 0.5px;
+    }
+
+    .arch-items {
+      list-style: none;
+    }
+
+    .arch-items li {
+      font-size: 15px;
+      line-height: 2;
+      color: rgba(255,255,255,0.55);
+      position: relative;
+      padding-left: 16px;
+    }
+
+    .arch-items li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 13px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #60A5FA;
+      opacity: 0.7;
+    }
+
+    /* 背景装饰 */
+    .bg-glow {
+      position: fixed;
+      top: -20%;
+      right: -10%;
+      width: 50%;
+      height: 60%;
+      background: radial-gradient(ellipse, rgba(59,130,246,0.06) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .bg-glow-2 {
+      position: fixed;
+      bottom: -20%;
+      left: -10%;
+      width: 40%;
+      height: 50%;
+      background: radial-gradient(ellipse, rgba(139,92,246,0.05) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .main { position: relative; z-index: 1; }
+  </style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="bg-glow-2"></div>
+
+  <nav class="nav">
+    <div class="nav-item">项目背景</div>
+    <div class="nav-item">项目简介</div>
+    <div class="nav-item active">总体架构</div>
+    <div class="nav-item">核心技术</div>
+    <div class="nav-item">产品演示</div>
+    <div class="nav-item">未来规划</div>
+  </nav>
+
+  <main class="main">
+    <h1 class="section-title">总体架构</h1>
+    <p class="section-subtitle">基于 Rust + SQLite + 混合检索 + 分层记忆 + MCP 的本地可信智能检索系统</p>
+
+    <div class="arch-grid">
+      <!-- 系统内核 -->
+      <div class="arch-card">
+        <div class="arch-icon">
+          <svg viewBox="0 0 64 64" fill="none">
+            <defs>
+              <linearGradient id="coreGrad" x1="0" y1="0" x2="64" y2="64">
+                <stop offset="0%" stop-color="#60A5FA"/>
+                <stop offset="100%" stop-color="#3B82F6"/>
+              </linearGradient>
+            </defs>
+            <!-- 3D cube stack -->
+            <path d="M32 4L56 16V40L32 52L8 40V16L32 4Z" stroke="url(#coreGrad)" stroke-width="1.5" fill="none" opacity="0.3"/>
+            <path d="M32 16L44 22V34L32 40L20 34V22L32 16Z" stroke="url(#coreGrad)" stroke-width="1.5" fill="none"/>
+            <path d="M32 28L38 31V37L32 40L26 37V31L32 28Z" fill="url(#coreGrad)" opacity="0.8"/>
+            <line x1="32" y1="4" x2="32" y2="16" stroke="url(#coreGrad)" stroke-width="1" opacity="0.4"/>
+            <line x1="56" y1="16" x2="44" y2="22" stroke="url(#coreGrad)" stroke-width="1" opacity="0.4"/>
+            <line x1="8" y1="16" x2="20" y2="22" stroke="url(#coreGrad)" stroke-width="1" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="arch-divider"></div>
+        <div class="arch-content">
+          <h3 class="arch-title">系统内核</h3>
+          <ul class="arch-items">
+            <li>Rust 异步运行时（Tokio）</li>
+            <li>Axum HTTP 服务器 + WebSocket</li>
+            <li>Tauri 桌面端跨平台封装</li>
+            <li>React 前端 + TypeScript 类型安全</li>
+            <li>模块化插件架构（mcp / tools / graph）</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 存储与索引 -->
+      <div class="arch-card">
+        <div class="arch-icon">
+          <svg viewBox="0 0 64 64" fill="none">
+            <defs>
+              <linearGradient id="storageGrad" x1="0" y1="0" x2="64" y2="64">
+                <stop offset="0%" stop-color="#60A5FA"/>
+                <stop offset="100%" stop-color="#8B5CF6"/>
+              </linearGradient>
+            </defs>
+            <!-- SSD / chip shape -->
+            <rect x="10" y="8" width="44" height="48" rx="4" stroke="url(#storageGrad)" stroke-width="1.5" fill="none"/>
+            <rect x="16" y="14" width="32" height="24" rx="2" stroke="url(#storageGrad)" stroke-width="1" fill="none" opacity="0.4"/>
+            <line x1="16" y1="42" x2="48" y2="42" stroke="url(#storageGrad)" stroke-width="1" opacity="0.3"/>
+            <circle cx="22" cy="48" r="2" fill="url(#storageGrad)" opacity="0.6"/>
+            <circle cx="42" cy="48" r="2" fill="url(#storageGrad)" opacity="0.6"/>
+            <line x1="20" y1="20" x2="28" y2="20" stroke="url(#storageGrad)" stroke-width="1.5" opacity="0.5"/>
+            <line x1="20" y1="26" x2="32" y2="26" stroke="url(#storageGrad)" stroke-width="1.5" opacity="0.5"/>
+            <line x1="20" y1="32" x2="26" y2="32" stroke="url(#storageGrad)" stroke-width="1.5" opacity="0.5"/>
+          </svg>
+        </div>
+        <div class="arch-divider"></div>
+        <div class="arch-content">
+          <h3 class="arch-title">存储与索引</h3>
+          <ul class="arch-items">
+            <li>SQLite 主存储（文档、分块、图谱）</li>
+            <li>本地向量索引（HNSW 近似检索）</li>
+            <li>Graph 边表（chunk_nodes 关系网络）</li>
+            <li>全文检索（FTS5 关键词索引）</li>
+            <li>智能分块（语义边界识别）</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 检索与推理 -->
+      <div class="arch-card">
+        <div class="arch-icon">
+          <svg viewBox="0 0 64 64" fill="none">
+            <defs>
+              <linearGradient id="searchGrad" x1="0" y1="0" x2="64" y2="64">
+                <stop offset="0%" stop-color="#3B82F6"/>
+                <stop offset="100%" stop-color="#60A5FA"/>
+              </linearGradient>
+            </defs>
+            <!-- Magnifying glass with graph nodes -->
+            <circle cx="28" cy="28" r="16" stroke="url(#searchGrad)" stroke-width="2" fill="none"/>
+            <line x1="40" y1="40" x2="54" y2="54" stroke="url(#searchGrad)" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="22" cy="24" r="3" fill="url(#searchGrad)" opacity="0.8"/>
+            <circle cx="32" cy="22" r="2.5" fill="url(#searchGrad)" opacity="0.6"/>
+            <circle cx="30" cy="32" r="2" fill="url(#searchGrad)" opacity="0.5"/>
+            <line x1="22" y1="24" x2="32" y2="22" stroke="url(#searchGrad)" stroke-width="0.8" opacity="0.4"/>
+            <line x1="32" y1="22" x2="30" y2="32" stroke="url(#searchGrad)" stroke-width="0.8" opacity="0.4"/>
+            <line x1="22" y1="24" x2="30" y2="32" stroke="url(#searchGrad)" stroke-width="0.8" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="arch-divider"></div>
+        <div class="arch-content">
+          <h3 class="arch-title">检索与推理</h3>
+          <ul class="arch-items">
+            <li>语义检索（向量相似度 Top-K）</li>
+            <li>关键词检索（BM25 + FTS5）</li>
+            <li>混合检索（语义 × 关键词融合排序）</li>
+            <li>Graph-RAG（子图激活与推理）</li>
+            <li>分层记忆检索（STM / MTM / LTM）</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 治理与扩展 -->
+      <div class="arch-card">
+        <div class="arch-icon">
+          <svg viewBox="0 0 64 64" fill="none">
+            <defs>
+              <linearGradient id="shieldGrad" x1="0" y1="0" x2="64" y2="64">
+                <stop offset="0%" stop-color="#60A5FA"/>
+                <stop offset="100%" stop-color="#3B82F6"/>
+              </linearGradient>
+            </defs>
+            <!-- Shield with check and gear -->
+            <path d="M32 6L52 14V30C52 44 42 54 32 58C22 54 12 44 12 30V14L32 6Z" stroke="url(#shieldGrad)" stroke-width="2" fill="none"/>
+            <path d="M24 32L29 37L40 26" stroke="url(#shieldGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <circle cx="48" cy="16" r="5" stroke="url(#shieldGrad)" stroke-width="1.2" fill="none" opacity="0.5"/>
+            <line x1="48" y1="11" x2="48" y2="13" stroke="url(#shieldGrad)" stroke-width="1" opacity="0.4"/>
+            <line x1="48" y1="19" x2="48" y2="21" stroke="url(#shieldGrad)" stroke-width="1" opacity="0.4"/>
+            <line x1="43" y1="16" x2="45" y2="16" stroke="url(#shieldGrad)" stroke-width="1" opacity="0.4"/>
+            <line x1="51" y1="16" x2="53" y2="16" stroke="url(#shieldGrad)" stroke-width="1" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="arch-divider"></div>
+        <div class="arch-content">
+          <h3 class="arch-title">治理与扩展</h3>
+          <ul class="arch-items">
+            <li>MCP 协议服务（Tools / Resources / Prompts）</li>
+            <li>Agent 工具接口（记忆读写 + 语义搜索）</li>
+            <li>企业策略引擎（审计日志 + 访问控制）</li>
+            <li>模型生命周期管理（本地/远程切换）</li>
+            <li>设置持久化与配置版本控制</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -126,6 +126,30 @@ fn to_response(
     }
 }
 
+pub(crate) async fn engine_from_state(state: &ServerState) -> Result<MemoriEngine, JsonRpcError> {
+    let init_error = state.init_error.lock().await.clone();
+    let engine_guard = state.engine.lock().await;
+    engine_guard.as_ref().cloned().ok_or_else(|| {
+        JsonRpcError::internal_error(match init_error {
+            Some(message) => format!("engine initialization failed: {message}"),
+            None => "engine is still initializing".to_string(),
+        })
+    })
+}
+
+pub(crate) fn parse_params<T: serde::de::DeserializeOwned>(
+    params: Option<serde_json::Value>,
+) -> Result<T, JsonRpcError> {
+    serde_json::from_value(params.unwrap_or_else(|| serde_json::json!({})))
+        .map_err(|err| JsonRpcError::invalid_params(err.to_string()))
+}
+
+pub(crate) fn normalize_mcp_top_k(top_k: Option<usize>, default_value: usize) -> usize {
+    top_k
+        .filter(|value| (1..=50).contains(value))
+        .unwrap_or(default_value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,28 +216,4 @@ mod tests {
         assert!(parsed.capabilities.resources.is_some());
         assert!(parsed.capabilities.prompts.is_some());
     }
-}
-
-pub(crate) async fn engine_from_state(state: &ServerState) -> Result<MemoriEngine, JsonRpcError> {
-    let init_error = state.init_error.lock().await.clone();
-    let engine_guard = state.engine.lock().await;
-    engine_guard.as_ref().cloned().ok_or_else(|| {
-        JsonRpcError::internal_error(match init_error {
-            Some(message) => format!("engine initialization failed: {message}"),
-            None => "engine is still initializing".to_string(),
-        })
-    })
-}
-
-pub(crate) fn parse_params<T: serde::de::DeserializeOwned>(
-    params: Option<serde_json::Value>,
-) -> Result<T, JsonRpcError> {
-    serde_json::from_value(params.unwrap_or_else(|| serde_json::json!({})))
-        .map_err(|err| JsonRpcError::invalid_params(err.to_string()))
-}
-
-pub(crate) fn normalize_mcp_top_k(top_k: Option<usize>, default_value: usize) -> usize {
-    top_k
-        .filter(|value| (1..=50).contains(value))
-        .unwrap_or(default_value)
 }

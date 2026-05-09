@@ -159,6 +159,9 @@ export type MemorySettingsDto = {
   default_context_budget: string;
   complex_context_budget: string;
   graph_ranking_enabled: boolean;
+  retrieval_gating_profile: "strict" | "balanced" | "answer_first" | string;
+  generation_refusal_mode: "strict" | "balanced" | string;
+  gating_retry_on_refusal: boolean;
 };
 
 export type SettingsModalProps = {

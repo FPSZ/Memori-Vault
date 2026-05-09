@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::SocketAddr;
@@ -11,7 +11,6 @@ use axum::extract::{Query, State};
 use axum::http::HeaderMap;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::Engine;
 use memori_core::{
     AskResponseStructured, AskStatus, DEFAULT_CHAT_ENDPOINT, DEFAULT_CHAT_MODEL,
     DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_GRAPH_MODEL, DEFAULT_MODEL_PROVIDER, EgressMode,
@@ -84,6 +83,26 @@ async fn main() {
             AppSettings::default()
         }
     };
+    unsafe {
+        std::env::set_var(
+            memori_core::MEMORI_RETRIEVAL_GATING_PROFILE_ENV,
+            settings
+                .retrieval_gating_profile
+                .clone()
+                .unwrap_or_else(|| "balanced".to_string()),
+        );
+        std::env::set_var(
+            memori_core::MEMORI_GENERATION_REFUSAL_MODE_ENV,
+            settings
+                .generation_refusal_mode
+                .clone()
+                .unwrap_or_else(|| "balanced".to_string()),
+        );
+        std::env::set_var(
+            memori_core::MEMORI_GATING_RETRY_ON_REFUSAL_ENV,
+            settings.gating_retry_on_refusal.unwrap_or(true).to_string(),
+        );
+    }
 
     let watch_root = match resolve_watch_root_from_settings(&settings) {
         Ok(path) => path,
@@ -152,18 +171,6 @@ fn normalize_top_k(top_k: Option<usize>) -> usize {
     match top_k {
         Some(value) if (1..=50).contains(&value) => value,
         _ => DEFAULT_RETRIEVE_TOP_K,
-    }
-}
-
-fn normalize_language(lang: Option<&str>) -> Option<&'static str> {
-    let lang = lang?;
-    let lower = lang.trim().to_ascii_lowercase();
-    if lower.starts_with("zh") {
-        Some("zh-CN")
-    } else if lower.starts_with("en") {
-        Some("en-US")
-    } else {
-        None
     }
 }
 

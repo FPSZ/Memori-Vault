@@ -54,7 +54,6 @@ pub(crate) fn merge_document_candidates(
             .or_insert(DocumentCandidate {
                 file_path: doc.file_path,
                 relative_path: doc.relative_path,
-                file_name: doc.file_name,
                 is_code_document,
                 document_reason: if is_exact_path {
                     "exact_path".to_string()
@@ -108,7 +107,6 @@ pub(crate) fn merge_document_candidates(
             .or_insert(DocumentCandidate {
                 file_path: doc.file_path,
                 relative_path: doc.relative_path,
-                file_name: doc.file_name,
                 is_code_document,
                 document_reason: "docs_phrase".to_string(),
                 document_rank: index + 1,
@@ -147,7 +145,6 @@ pub(crate) fn merge_document_candidates(
             .or_insert(DocumentCandidate {
                 file_path: doc.file_path,
                 relative_path: doc.relative_path,
-                file_name: doc.file_name,
                 is_code_document,
                 document_reason: "lexical_strict".to_string(),
                 document_rank: index + 1,
@@ -189,7 +186,6 @@ pub(crate) fn merge_document_candidates(
             .or_insert(DocumentCandidate {
                 file_path: doc.file_path,
                 relative_path: doc.relative_path,
-                file_name: doc.file_name,
                 is_code_document,
                 document_reason: "lexical_broad".to_string(),
                 document_rank: index + 1,
@@ -615,5 +611,6 @@ pub(crate) fn should_refuse_for_insufficient_evidence(
     analysis: &QueryAnalysis,
     evidence: &[MergedEvidence],
 ) -> bool {
-    evaluate_gating_decision(analysis, evidence).refuse
+    evaluate_gating_decision_with_profile(analysis, evidence, DEFAULT_RETRIEVAL_GATING_PROFILE)
+        .refuse
 }

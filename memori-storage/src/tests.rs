@@ -370,6 +370,69 @@
     }
 
     #[tokio::test]
+    async fn search_documents_signal_matches_hyphenless_business_identifier() {
+        let db_path = unique_db_path("memori_vault_storage_hyphenless_identifier");
+        if db_path.exists() {
+            let _ = std::fs::remove_file(&db_path);
+        }
+
+        let store = SqliteStore::new(&db_path).expect("create sqlite store");
+        let watch_root = std::path::PathBuf::from(".");
+        let target_file = std::path::PathBuf::from("Memory_Test/doc_021_客户成功_白鹭工单_制度.md");
+        let distractor_file = std::path::PathBuf::from("Memory_Test/doc_085_渠道生态_翠微伙伴_问答卡.md");
+
+        store
+            .replace_document_index(
+                &target_file,
+                Some(&watch_root),
+                123,
+                "target_hash",
+                vec![DocumentChunk {
+                    file_path: target_file.clone(),
+                    content: "星衡智能客户成功内部资料：白鹭工单（CS-08）/ 制度。资料编号：XH-CS-08-021。负责部门：客户成功中心。".to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["制度".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                }],
+                vec![vec![1.0_f32, 0.0_f32]],
+            )
+            .await
+            .expect("replace target document");
+
+        store
+            .replace_document_index(
+                &distractor_file,
+                Some(&watch_root),
+                123,
+                "distractor_hash",
+                vec![DocumentChunk {
+                    file_path: distractor_file.clone(),
+                    content: "星衡智能渠道生态内部资料：翠微伙伴（CHN-11）/ 问答卡。资料编号：XH-CHN-11-085。".to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["问答卡".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                }],
+                vec![vec![0.8_f32, 0.2_f32]],
+            )
+            .await
+            .expect("replace distractor document");
+
+        let hits = store
+            .search_documents_signal("CS08", 5, &[])
+            .await
+            .expect("search hyphenless identifier");
+
+        assert!(!hits.is_empty());
+        assert!(
+            hits[0].relative_path.replace('\\', "/").ends_with("doc_021_客户成功_白鹭工单_制度.md"),
+            "hits={hits:?}"
+        );
+
+        drop(store);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
     async fn search_documents_phrase_signal_prefers_docs_phrase_matches() {
         let db_path = unique_db_path("memori_vault_storage_phrase_signal");
         if db_path.exists() {

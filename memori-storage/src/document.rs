@@ -1,6 +1,33 @@
 ﻿use super::*;
 
 impl SqliteStore {
+    pub async fn get_chunks_by_file_path(
+        &self,
+        file_path: &Path,
+    ) -> Result<Vec<ChunkRecord>, StorageError> {
+        let file_path_text = normalize_storage_file_path_text(file_path);
+        let conn_guard = self.lock_conn()?;
+        let mut stmt = conn_guard
+            .prepare(
+                "SELECT c.id, c.doc_id, c.chunk_index, c.content, c.heading_path_json, c.block_kind, c.char_len
+                 FROM chunks c
+                 INNER JOIN documents d ON d.id = c.doc_id
+                 INNER JOIN file_catalog fc ON fc.file_path = d.file_path
+                 WHERE d.file_path = ?1
+                   AND fc.removed_at IS NULL
+                 ORDER BY c.chunk_index ASC",
+            )
+            .map_err(map_sqlite_error)?;
+        let rows = stmt
+            .query_map(params![file_path_text], map_chunk_record)
+            .map_err(map_sqlite_error)?;
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row.map_err(map_sqlite_error)?);
+        }
+        Ok(records)
+    }
+
     /// 通过 file_path + chunk_index 定位 chunks.id。
     pub async fn resolve_chunk_id(
         &self,
@@ -145,7 +172,15 @@ impl SqliteStore {
 
         let mut paths = Vec::new();
         for row in rows {
-            paths.push(PathBuf::from(row.map_err(map_sqlite_error)?));
+            let raw = row.map_err(map_sqlite_error)?;
+            #[cfg(target_os = "windows")]
+            {
+                paths.push(PathBuf::from(raw.replace('/', "\\")));
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                paths.push(PathBuf::from(raw));
+            }
         }
         Ok(paths)
     }

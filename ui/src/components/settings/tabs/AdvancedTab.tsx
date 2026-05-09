@@ -2,7 +2,12 @@ import { motion } from "framer-motion";
 import { LoaderCircle } from "lucide-react";
 import { AnimatedPanel, fadeSlideUpVariants, staggerContainerVariants } from "../../MotionKit";
 import { SelectionChips, SettingCard } from "../controls";
-import type { IndexingMode, IndexingStatusDto, ResourceBudget } from "../types";
+import type {
+  IndexingMode,
+  IndexingStatusDto,
+  LocalModelRuntimeStatusesDto,
+  ResourceBudget
+} from "../types";
 import { useI18n } from "../../../i18n";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
@@ -21,6 +26,7 @@ type AdvancedTabProps = {
   onScheduleStartChange: (value: string) => void;
   onScheduleEndChange: (value: string) => void;
   indexingStatus: IndexingStatusDto | null;
+  localModelRuntimeStatuses: LocalModelRuntimeStatusesDto | null;
   indexingBusy: boolean;
   indexingPhaseLabel: string;
   indexingRebuildLabel: string;
@@ -94,6 +100,7 @@ export function AdvancedTab({
   onScheduleStartChange,
   onScheduleEndChange,
   indexingStatus,
+  localModelRuntimeStatuses,
   indexingBusy,
   indexingPhaseLabel,
   indexingRebuildLabel,
@@ -118,41 +125,80 @@ export function AdvancedTab({
     uiLang,
     t("indexingNoError")
   );
-  const shownProgress = indexingModelBlocked ? 0 : (indexingStatus?.progress_percent ?? 0);
+  const embedRuntime = localModelRuntimeStatuses?.roles.find((role) => role.role === "embed");
   const rebuildState = (indexingStatus?.rebuild_state ?? "ready").toLowerCase();
   const retryableFilesRemaining = Boolean(indexingStatus?.rebuild_reason?.includes("retryable_files_remaining"));
+  const hasIndexedDocs = (indexingStatus?.indexed_docs ?? 0) > 0;
   const hasIndexedChunks = (indexingStatus?.indexed_chunks ?? 0) > 0;
-  const searchReady = (rebuildState === "ready" || (retryableFilesRemaining && hasIndexedChunks)) && !indexingModelBlocked;
+  const hasIndexedGraph = (indexingStatus?.graphed_chunks ?? 0) > 0;
+  const hasSearchableIndex = hasIndexedDocs || hasIndexedChunks || hasIndexedGraph;
+  const searchReady =
+    ((rebuildState === "ready" && hasSearchableIndex) || (retryableFilesRemaining && hasIndexedChunks)) &&
+    !indexingModelBlocked;
   const phase = (indexingStatus?.phase ?? "idle").toLowerCase();
+  const rawProgress = indexingStatus?.progress_percent ?? 0;
+  const graphedChunks = indexingStatus?.graphed_chunks ?? 0;
+  const graphBacklog = indexingStatus?.graph_backlog ?? 0;
+  const graphTotal = graphedChunks + graphBacklog;
   const optimizing = searchReady && (phase === "graphing" || (indexingStatus?.graph_backlog ?? 0) > 0);
-  const progressTone = shownProgress < 66 ? "building" : shownProgress < 100 ? "searchable" : "optimized";
+  const optimizeProgressPercent =
+    graphTotal > 0 ? Math.min(100, 83 + (graphedChunks / graphTotal) * 17) : (searchReady ? 100 : 0);
+  const shownProgress = indexingModelBlocked
+    ? 0
+    : optimizing
+      ? optimizeProgressPercent
+      : Math.max(searchReady ? 83 : 0, rawProgress);
+  const optimizationComplete = searchReady && !optimizing && shownProgress >= 100;
+  const buildFill = searchReady ? 66 : Math.min(shownProgress, 66);
+  const searchFill = searchReady ? 17 : Math.min(Math.max(shownProgress - 66, 0), 17);
+  const optimizeFill = searchReady ? Math.min(Math.max(shownProgress - 83, 0), 17) : 0;
+  const shownProgressLabel = `${shownProgress.toFixed(2)}%`;
+  const progressTone = indexingModelBlocked
+    ? "building"
+    : !searchReady
+      ? "building"
+      : optimizationComplete || optimizing
+        ? "optimized"
+        : "searchable";
   const progressText = indexingModelBlocked
     ? uiLang === "zh-CN"
-      ? "等待向量模型启动"
-      : "Waiting for embedding model"
+      ? embedRuntime?.state?.toLowerCase() === "starting"
+        ? "向量模型启动中，等待恢复索引"
+        : "向量模型离线，等待恢复"
+      : embedRuntime?.state?.toLowerCase() === "starting"
+        ? "Embedding model is starting"
+        : "Embedding model offline"
     : optimizing
       ? uiLang === "zh-CN"
-        ? "可搜索，正在继续优化图谱..."
-        : "Search is available. Optimizing graph..."
+        ? "可搜索，后台正在持续优化图谱"
+        : "Search is available. Optimizing graph in background."
+      : optimizationComplete
+        ? uiLang === "zh-CN"
+          ? "优化完毕，性能最佳"
+          : "Optimization complete. Best performance."
       : searchReady
         ? uiLang === "zh-CN"
-          ? "索引就绪，可以搜索"
-          : "Index ready. Search is available"
+          ? "可搜索，状态监测中"
+          : "Search ready. Monitoring status."
+      : indexingStatus?.paused
+        ? uiLang === "zh-CN"
+          ? "后台构建已暂停"
+          : "Background indexing is paused"
       : phase === "graphing"
         ? uiLang === "zh-CN"
-          ? "向量已完成，等待开放搜索..."
-          : "Vectors are ready. Waiting to enable search..."
+          ? "已进入图谱优化阶段"
+          : "Graph optimization in progress"
         : phase === "embedding"
           ? uiLang === "zh-CN"
-            ? "建立向量索引中...（搜索暂不可用）"
-            : "Building vector index... (search unavailable)"
+            ? "正在构建向量索引，暂不可搜索"
+            : "Building vector index. Search is unavailable."
           : phase === "scanning"
             ? uiLang === "zh-CN"
-              ? "扫描文档中...（搜索暂不可用）"
-              : "Scanning documents... (search unavailable)"
+              ? "正在扫描文档，暂不可搜索"
+              : "Scanning documents. Search is unavailable."
             : uiLang === "zh-CN"
-              ? "索引重建中...（搜索暂不可用）"
-              : "Index rebuild in progress... (search unavailable)";
+              ? "等待继续构建索引"
+              : "Waiting to continue indexing";
 
   return (
     <motion.div
@@ -217,8 +263,7 @@ export function AdvancedTab({
 
         <AnimatedPanel className="glass-panel-infer rounded-lg px-3 py-3">
           <div className="mb-2 text-sm text-[var(--text-primary)]">{t("indexingStatusTitle")}</div>
-          {/* Progress bar */}
-          {indexingStatus && (indexingStatus.phase !== "idle" || indexingModelBlocked || !searchReady) ? (
+          {indexingStatus ? (
             <div className="mb-3">
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className={`font-medium ${
@@ -230,7 +275,7 @@ export function AdvancedTab({
                 }`}>
                   {progressText}
                 </span>
-                <span className="font-mono text-[var(--text-muted)]">{shownProgress}%</span>
+                <span className="font-mono text-[var(--text-muted)]">{shownProgressLabel}</span>
               </div>
               {/* Segmented progress bar with milestone markers */}
               <div className="relative h-2 w-full">
@@ -240,17 +285,25 @@ export function AdvancedTab({
                   <div className="w-[17%] h-full bg-emerald-500/15 border-r border-[var(--bg-surface-1)]" />
                   <div className="w-[17%] h-full bg-sky-500/15" />
                 </div>
-                {/* Fill bar */}
+                {/* Build fill */}
                 <motion.div
-                  className={`absolute top-0 left-0 h-full rounded-full ${
-                    progressTone === "building"
-                        ? "bg-amber-400"
-                      : progressTone === "searchable"
-                          ? "bg-emerald-400"
-                        : "bg-sky-400"
-                  }`}
+                  className="absolute top-0 left-0 h-full rounded-l-full bg-amber-400"
                   initial={{ width: 0 }}
-                  animate={{ width: `${shownProgress}%` }}
+                  animate={{ width: `${buildFill}%` }}
+                  transition={{ duration: 0.35, ease: "easeOut" }}
+                />
+                {/* Search-ready fill */}
+                <motion.div
+                  className="absolute top-0 left-[66%] h-full bg-emerald-400"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${searchFill}%` }}
+                  transition={{ duration: 0.35, ease: "easeOut" }}
+                />
+                {/* Optimize fill */}
+                <motion.div
+                  className="absolute top-0 left-[83%] h-full rounded-r-full bg-sky-400"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${optimizeFill}%` }}
                   transition={{ duration: 0.5, ease: "easeOut" }}
                 />
                 {/* Milestone markers */}
@@ -262,26 +315,32 @@ export function AdvancedTab({
                 <span className={shownProgress < 66 ? "text-amber-400 font-medium" : ""}>
                   {uiLang === "zh-CN" ? "构建" : "Build"}
                 </span>
-                <span className={searchReady ? "text-sky-400 font-medium" : ""}>
+                <span className={searchReady ? "text-emerald-400 font-medium" : ""}>
                   {uiLang === "zh-CN" ? "可搜索" : "Search ready"}
                 </span>
-                <span className={shownProgress >= 100 ? "text-sky-400 font-medium" : ""}>
+                <span className={optimizing || optimizationComplete ? "text-sky-400 font-medium" : ""}>
                   {uiLang === "zh-CN" ? "优化" : "Optimize"}
                 </span>
               </div>
               {!searchReady ? (
                 <div className="mt-2 rounded-md border border-amber-400/25 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-500">
                   {uiLang === "zh-CN"
-                    ? "黄色阶段表示向量索引仍在构建，暂时不能搜索。进入绿色后即可搜索，蓝色阶段会继续做图谱优化。"
-                    : "Yellow means the vector index is still building. Search starts in green; blue continues graph optimization."}
+                    ? "黄色表示主索引仍在构建，暂不可搜索。进入绿色后即可搜索，蓝色阶段会继续做图谱优化。"
+                    : "Yellow means the main index is still building. Search starts in green, and blue continues graph optimization."}
                 </div>
               ) : retryableFilesRemaining ? (
                 <div className="mt-2 rounded-md border border-amber-400/25 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-500">
                   {uiLang === "zh-CN"
-                    ? "已有分块可以搜索；少量失败文件会继续重试，不再阻塞检索。"
-                    : "Search is available from indexed chunks; remaining failed files will be retried without blocking retrieval."}
+                    ? "当前已可搜索；剩余失败文件会继续重试，不再阻塞主检索。"
+                    : "Search is already available. Remaining failed files will retry without blocking retrieval."}
                 </div>
-              ) : null}
+              ) : (
+                <div className="mt-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-1.5 text-[11px] text-[var(--text-secondary)]">
+                  {uiLang === "zh-CN"
+                    ? "进度条会常驻显示当前构建、可搜索和图谱优化状态，并持续监测模型与索引变化。"
+                    : "This bar stays visible and continuously monitors build, search-ready, and graph optimization state."}
+                </div>
+              )}
               <div className="mt-1 flex gap-3 text-[10px] text-[var(--text-muted)]">
                 <span>文档 {indexingStatus.indexed_docs}/{indexingStatus.total_docs}</span>
                 <span>分块 {indexingStatus.indexed_chunks}/{indexingStatus.total_chunks}</span>

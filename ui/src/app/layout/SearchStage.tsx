@@ -2,8 +2,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Check, ChevronDown, ChevronRight, FileText, FolderOpen, LoaderCircle, Search } from "lucide-react";
 import type { RefObject } from "react";
 import { useI18n } from "../../i18n";
-import type { FileMatch, SearchScopeItem } from "../types";
 import type { Language } from "../../i18n";
+import type { FileMatch, SearchScopeItem } from "../types";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
 
@@ -105,9 +105,7 @@ export function SearchStage({
       <div
         ref={scopeMenuRef}
         className={`relative mx-auto w-full transition-all duration-200 ease-out ${
-          isSearching && isSearchBarCompact
-            ? "max-w-3xl"
-            : "max-w-3xl"
+          isSearching && isSearchBarCompact ? "max-w-3xl" : "max-w-3xl"
         }`}
       >
         <div
@@ -127,7 +125,6 @@ export function SearchStage({
             }
           }}
         >
-          {/* Scope selector */}
           <div className="relative shrink-0">
             <button
               type="button"
@@ -253,10 +250,8 @@ export function SearchStage({
             </AnimatePresence>
           </div>
 
-          {/* Search icon */}
           <Search className="h-5 w-5 shrink-0 text-[var(--text-muted)]" />
 
-          {/* Input */}
           <input
             ref={searchInputRef}
             type="text"
@@ -290,7 +285,6 @@ export function SearchStage({
             }`}
           />
 
-          {/* Loading / Done indicators */}
           <AnimatePresence>
             {isSearching && loading && (
               <motion.div
@@ -317,7 +311,6 @@ export function SearchStage({
           </AnimatePresence>
         </div>
 
-        {/* File matches dropdown */}
         <AnimatePresence>
           {fileMatchesOpen && fileMatches.length > 0 && (
             <motion.div

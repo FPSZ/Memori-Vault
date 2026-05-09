@@ -1,5 +1,19 @@
 ﻿use super::*;
 
+pub(crate) fn is_cjk(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0x20000..=0x2A6DF
+            | 0x2A700..=0x2B73F
+            | 0x2B740..=0x2B81F
+            | 0x2B820..=0x2CEAF
+            | 0x2CEB0..=0x2EBEF
+    )
+}
+
 pub(crate) fn is_cjk_or_digit(ch: char) -> bool {
     is_cjk(ch) || ch.is_ascii_digit()
 }
@@ -192,6 +206,35 @@ pub(crate) fn has_ascii_camel_case(token: &str) -> bool {
         };
         left.is_ascii_lowercase() && right.is_ascii_uppercase()
     })
+}
+
+pub(crate) fn is_code_like_identifier_term(term: &str) -> bool {
+    term.contains('.')
+        || term.contains('/')
+        || term.contains('\\')
+        || term.contains('_')
+        || has_ascii_camel_case(term)
+        || term.ends_with("_ms")
+}
+
+pub(crate) fn compact_identifier_text(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || is_cjk(*ch))
+        .map(|ch| {
+            if ch.is_ascii_alphabetic() {
+                ch.to_ascii_lowercase()
+            } else {
+                ch
+            }
+        })
+        .collect::<String>()
+}
+
+pub(crate) fn is_identifier_equivalent_match(term: &str, target: &str) -> bool {
+    let compact_term = compact_identifier_text(term);
+    let compact_target = compact_identifier_text(target);
+    compact_term.len() >= 4 && !compact_target.is_empty() && compact_target.contains(&compact_term)
 }
 
 pub(crate) fn normalize_docs_phrase_token(token: &str) -> String {
@@ -450,8 +493,7 @@ fn normalize_compound_topic_segment(segment: &str) -> String {
 
 fn is_specific_cjk_topic(token: &str) -> bool {
     let cjk_count = token.chars().filter(|ch| is_cjk(*ch)).count();
-    cjk_count >= 3
-        && cjk_count <= 10
+    (3..=10).contains(&cjk_count)
         && !CJK_DOC_NOISE_TERMS.contains(&token)
         && ![
             "负责人",
@@ -577,4 +619,137 @@ pub(crate) fn doc_top_k_for_query_family(query_family: QueryFamily) -> usize {
         QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup => 16,
         QueryFamily::ImplementationLookup => DEFAULT_DOC_TOP_K,
     }
+}
+
+
+pub(crate) fn is_lookup_like_query(query: &str) -> bool {
+    let lower = query.to_ascii_lowercase();
+    lower.contains("/api/")
+        || lower.contains('\\')
+        || lower.contains('/')
+        || lower.contains(".md")
+        || lower.contains(".txt")
+        || lower.contains(".pdf")
+        || lower.contains(".docx")
+        || lower.contains("endpoint")
+        || lower.contains("route")
+}
+
+pub(crate) fn classify_query_intent(query: &str, flags: &QueryFlags) -> QueryIntent {
+    let lower = query.to_ascii_lowercase();
+    if lower.contains("api key")
+        || lower.contains("password")
+        || lower.contains("secret")
+        || lower.contains("token")
+        || query.contains("密钥")
+        || query.contains("密码")
+        || query.contains("令牌")
+    {
+        return QueryIntent::SecretRequest;
+    }
+    if lower.contains("ceo of ")
+        || lower.contains("price today")
+        || lower.contains("weather ")
+        || lower.contains("bitcoin")
+        || lower.contains("president of ")
+    {
+        return QueryIntent::ExternalFact;
+    }
+    if flags.is_lookup_like {
+        QueryIntent::RepoLookup
+    } else {
+        QueryIntent::RepoQuestion
+    }
+}
+
+pub(crate) fn classify_query_family(
+    query: &str,
+    _raw_tokens: &[String],
+    _document_terms: &[String],
+    _filename_terms: &[String],
+    identifier_terms: &[String],
+    flags: &QueryFlags,
+) -> QueryFamily {
+    let lower = query.to_ascii_lowercase();
+    let has_http_verb = lower.starts_with("get ")
+        || lower.starts_with("post ")
+        || lower.starts_with("put ")
+        || lower.starts_with("delete ")
+        || lower.starts_with("patch ");
+    let has_api_route = lower.contains("/api/");
+    let has_route_signature = has_api_route || has_http_verb;
+    let has_fileish_reference = lower.contains('/')
+        || lower.contains('\\')
+        || lower.contains(".rs")
+        || lower.contains(".ts")
+        || lower.contains(".tsx")
+        || lower.contains(".js")
+        || lower.contains(".jsx")
+        || lower.contains(".md")
+        || lower.contains(".txt")
+        || lower.contains(".pdf")
+        || lower.contains(".docx")
+        || lower.contains(".json")
+        || lower.contains(".toml")
+        || lower.contains(".yaml")
+        || lower.contains(".yml");
+    let has_code_symbol = identifier_terms.iter().any(|term| is_code_like_identifier_term(term))
+        || lower.contains('_');
+
+    let has_impl_cue = lower.contains("现在返回什么")
+        || lower.contains("返回什么协议")
+        || lower.contains("哪个入口")
+        || lower.contains("在哪个入口")
+        || lower.contains("在哪实现")
+        || lower.contains("实现在哪")
+        || lower.contains("源码")
+        || lower.contains("处理函数")
+        || lower.contains("handler")
+        || lower.contains("impl")
+        || lower.contains("struct ")
+        || lower.contains("fn ")
+        || lower.contains("class ")
+        || lower.contains("入口");
+
+    if has_route_signature && !has_impl_cue {
+        return QueryFamily::DocsApiLookup;
+    }
+
+    if has_fileish_reference || has_code_symbol || has_impl_cue {
+        return QueryFamily::ImplementationLookup;
+    }
+    let _ = flags;
+    QueryFamily::DocsExplanatory
+}
+
+pub(crate) fn should_mark_missing_file_lookup_intent(analysis: &QueryAnalysis) -> bool {
+    analysis.flags.is_lookup_like
+        && analysis.filename_like_terms.iter().any(|term| {
+            term.contains('.') || term.contains('/') || term.contains('\\')
+        })
+}
+
+pub(crate) fn should_force_missing_file_lookup(
+    analysis: &QueryAnalysis,
+    evidence: &[MergedEvidence],
+) -> bool {
+    should_mark_missing_file_lookup_intent(analysis)
+        && !evidence.iter().any(|item| {
+            item.document_has_exact_signal
+                || item.document_has_filename_signal
+                || item.document_reason == "scope"
+        })
+}
+
+pub(crate) fn chunk_text_contains_term(
+    content: &str,
+    heading: &str,
+    file_path: &str,
+    term: &str,
+) -> bool {
+    let normalized = term.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    content.contains(&normalized) || heading.contains(&normalized) || file_path.contains(&normalized)
 }

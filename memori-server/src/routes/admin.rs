@@ -93,18 +93,7 @@ pub(crate) async fn get_audit_events_handler(
     let _ = require_session(&state, &headers, Role::Operator).await?;
     let page = query.page.unwrap_or(1).max(1);
     let page_size = query.page_size.unwrap_or(50).clamp(1, 200);
-    let all_events = read_audit_events().map_err(ApiError::internal)?;
-    let total = all_events.len();
-    let start = (page - 1) * page_size;
-    let items = if start >= total {
-        Vec::new()
-    } else {
-        all_events
-            .into_iter()
-            .skip(start)
-            .take(page_size)
-            .collect::<Vec<_>>()
-    };
+    let (total, items) = read_audit_events_page(page, page_size).map_err(ApiError::internal)?;
     Ok(Json(AuditListResponse {
         total,
         page,

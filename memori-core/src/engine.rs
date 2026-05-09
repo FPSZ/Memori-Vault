@@ -99,8 +99,9 @@ impl MemoriEngine {
             .count_catalog_entries()
             .await
             .unwrap_or(0);
-        let total_chunks = indexed_chunks.max(1);
-        let model_connection_blocked = {
+        let total_chunks = indexed_chunks;
+        let total_chunks_for_progress = total_chunks.max(1);
+        let suspected_model_connection_blocked = {
             let text = format!(
                 "{} {}",
                 runtime.last_error.as_deref().unwrap_or_default(),
@@ -121,6 +122,11 @@ impl MemoriEngine {
             .iter()
             .any(|pattern| text.contains(pattern))
         };
+        let model_connection_blocked = if suspected_model_connection_blocked {
+            !self.state.embedding_client.is_service_reachable().await
+        } else {
+            false
+        };
         let phase = if model_connection_blocked {
             "idle".to_string()
         } else {
@@ -131,20 +137,31 @@ impl MemoriEngine {
         } else {
             metadata.rebuild_state
         };
+        let retryable_search_ready = metadata
+            .rebuild_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("retryable_files_remaining"))
+            && indexed_chunks > 0;
+        let has_any_indexed_data = indexed_docs > 0 || indexed_chunks > 0 || graphed_chunks > 0;
+        let graph_total = graphed_chunks + graph_backlog;
+        let graph_progress = if graph_total == 0 {
+            if indexed_chunks > 0 { 100 } else { 0 }
+        } else {
+            66 + ((graphed_chunks as f64 / graph_total as f64) * 34.0) as u32
+        };
         let progress_percent = if model_connection_blocked {
             0
         } else {
             match runtime.phase.as_str() {
                 "scanning" => ((indexed_docs as f64 / total_docs.max(1) as f64) * 33.0) as u32,
                 "embedding" => {
-                    33 + ((indexed_chunks as f64 / total_chunks.max(1) as f64) * 33.0) as u32
+                    33 + ((indexed_chunks as f64 / total_chunks_for_progress as f64) * 33.0) as u32
                 }
-                "graphing" => {
-                    let graph_total = graphed_chunks + graph_backlog;
-                    let done = graph_total.saturating_sub(graph_backlog);
-                    66 + ((done as f64 / graph_total.max(1) as f64) * 34.0) as u32
-                }
-                _ if metadata.rebuild_state == memori_storage::RebuildState::Ready => 100,
+                "graphing" => graph_progress,
+                _ if graph_backlog > 0 => graph_progress.min(99),
+                _ if metadata.rebuild_state == memori_storage::RebuildState::Ready && has_any_indexed_data => 100,
+                _ if retryable_search_ready => 83,
+                _ if indexed_chunks > 0 => 66,
                 _ => 0,
             }
             .min(100)
@@ -507,25 +524,59 @@ impl MemoriEngine {
 }
 
 pub(crate) fn answer_indicates_insufficient_evidence(answer: &str) -> bool {
-    let trimmed = answer.trim();
-    if trimmed.is_empty() {
+    answer_indicates_insufficient_evidence_with_mode(
+        answer,
+        DEFAULT_GENERATION_REFUSAL_MODE,
+    )
+}
+
+pub(crate) fn answer_indicates_insufficient_evidence_with_mode(
+    answer: &str,
+    mode: GenerationRefusalMode,
+) -> bool {
+    let cleaned = clean_generation_answer(answer);
+    if cleaned.trim().is_empty() {
         return true;
     }
 
-    let lower = trimmed.to_ascii_lowercase();
-    [
+    let markers = [
         "当前上下文不足",
         "上下文不足",
         "证据不足",
+        "没有足够证据",
+        "无法根据提供的证据回答",
         "insufficient context",
         "not enough context",
         "insufficient evidence",
         "not enough evidence",
         "lack sufficient context",
         "lack sufficient evidence",
-    ]
-    .iter()
-    .any(|marker| trimmed.contains(marker) || lower.contains(marker))
+        "cannot answer based on the provided evidence",
+    ];
+    let prefix = cleaned.chars().take(160).collect::<String>();
+    let prefix_lower = prefix.to_ascii_lowercase();
+    let cleaned_len = cleaned.chars().count();
+    let hits_marker = markers
+        .iter()
+        .any(|marker| prefix.contains(marker) || prefix_lower.contains(&marker.to_ascii_lowercase()));
+
+    match mode {
+        GenerationRefusalMode::Strict => hits_marker,
+        GenerationRefusalMode::Balanced => hits_marker && cleaned_len < 220,
+    }
+}
+
+pub(crate) fn clean_generation_answer(answer: &str) -> String {
+    let mut cleaned = answer.replace("\r\n", "\n").replace('\r', "\n");
+    cleaned = strip_tag_blocks(&cleaned, "think");
+    cleaned = strip_html_like_tags(&cleaned);
+    cleaned = strip_markdown_fences(&cleaned);
+    cleaned
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(crate) fn memory_record_to_evidence(record: MemoryRecord) -> MemoryEvidence {
@@ -635,4 +686,44 @@ pub(crate) fn build_memory_context_for_prompt(
     let context = parts.join("\n\n");
     let tokens = estimate_tokens(&context);
     (context, tokens)
+}
+
+fn strip_tag_blocks(text: &str, tag: &str) -> String {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let mut remaining = text.to_string();
+    loop {
+        let Some(start) = remaining.to_ascii_lowercase().find(&open) else {
+            break;
+        };
+        let lower = remaining.to_ascii_lowercase();
+        let Some(end_rel) = lower[start..].find(&close) else {
+            remaining.replace_range(start..remaining.len(), "");
+            break;
+        };
+        let end = start + end_rel + close.len();
+        remaining.replace_range(start..end, "");
+    }
+    remaining
+}
+
+fn strip_html_like_tags(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut inside_tag = false;
+    for ch in text.chars() {
+        match ch {
+            '<' => inside_tag = true,
+            '>' => inside_tag = false,
+            _ if !inside_tag => output.push(ch),
+            _ => {}
+        }
+    }
+    output
+}
+
+fn strip_markdown_fences(text: &str) -> String {
+    text.replace("```markdown", "")
+        .replace("```text", "")
+        .replace("```md", "")
+        .replace("```", "")
 }

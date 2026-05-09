@@ -481,14 +481,14 @@ impl SqliteStore {
 
         let mut top = {
             let cache_guard = self.cache.read().await;
-            let mut scored: Vec<(i64, f32)> = cache_guard
+            let mut scored = Vec::new();
+            for item in cache_guard
                 .iter()
                 .filter(|item| matches_scopes(&item.file_path, &scope_matchers))
-                .map(|item| {
-                    let score = cosine_similarity(&query_embedding, &item.embedding);
-                    (item.chunk_id, score)
-                })
-                .collect();
+            {
+                let score = cosine_similarity(&query_embedding, &item.embedding)?;
+                scored.push((item.chunk_id, score));
+            }
 
             if scored.len() > top_k {
                 scored.select_nth_unstable_by(top_k, |a, b| b.1.total_cmp(&a.1));

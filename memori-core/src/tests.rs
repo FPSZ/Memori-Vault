@@ -1,7 +1,8 @@
 ﻿
     use super::{
         AppState, AskStatus, EgressMode, EngineError, EnterpriseModelPolicy, MemoriEngine,
-        MemoryEvidence, MemoryLayer, MemoryScope, MemorySourceType, MemoryStatus, MergedEvidence,
+        GenerationRefusalMode, MemoryEvidence, MemoryLayer, MemoryScope, MemorySourceType,
+        MemoryStatus, MergedEvidence, RetrievalGatingProfile,
         ModelProvider, QueryFamily, QueryIntent, RetrievalMetrics, RuntimeModelConfig, WatchEvent,
         WatchEventKind, analyze_query, apply_gating_metrics, build_citations,
         build_memory_context_for_prompt, detect_compound_query, document_signal_query,
@@ -13,7 +14,7 @@
     use memori_storage::RebuildState;
     use memori_storage::VectorStore;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -25,12 +26,12 @@
         std::env::temp_dir().join(format!("memori_vault_core_{name}_{unique}.db"))
     }
 
-    async fn seed_indexed_file(state: &Arc<AppState>, file_path: &PathBuf) {
+    async fn seed_indexed_file(state: &Arc<AppState>, file_path: &Path) {
         state
             .vector_store
             .insert_chunks(
                 vec![DocumentChunk {
-                    file_path: file_path.clone(),
+                    file_path: file_path.to_path_buf(),
                     content: "seed content".to_string(),
                     chunk_index: 0,
                     heading_path: Vec::new(),
@@ -49,7 +50,7 @@
 
     async fn seed_document_chunks(
         state: &Arc<AppState>,
-        file_path: &PathBuf,
+        file_path: &Path,
         chunks: Vec<DocumentChunk>,
     ) {
         let embeddings = vec![vec![0.1_f32, 0.2_f32]; chunks.len()];
@@ -141,6 +142,109 @@
 
         drop(state);
         let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[tokio::test]
+    async fn retrieval_falls_back_to_candidate_doc_chunks_for_compacted_cjk_identifier_query() {
+        let db_path = temp_db_path("cjk_candidate_fallback");
+        let state = Arc::new(AppState::new(&db_path).expect("create app state"));
+        let file_path = PathBuf::from("Memory_Test/doc_017_技术架构_银杏-17_会议纪要.md");
+        seed_document_chunks(
+            &state,
+            &file_path,
+            vec![
+                DocumentChunk {
+                    file_path: file_path.clone(),
+                    content: "会议背景：平台架构组讨论上线安排。".to_string(),
+                    chunk_index: 0,
+                    heading_path: vec!["会议纪要".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                DocumentChunk {
+                    file_path: file_path.clone(),
+                    content: "- 项目代号：银杏-17 / ARC-17\n- 负责人：苏澈（平台架构组）\n- 核心事实：银杏-17 的上线冻结窗口是每周三 19:40-21:10。".to_string(),
+                    chunk_index: 1,
+                    heading_path: vec!["关键结论".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::List,
+                },
+            ],
+        )
+        .await;
+
+        let engine = MemoriEngine::new(state.clone(), memori_vault::create_event_channel().1);
+        let inspection = engine
+            .retrieve_structured_with_embedding("银杏17内容是什么", Vec::new(), None, Some(3))
+            .await
+            .expect("retrieve structured");
+
+        assert_eq!(inspection.status, AskStatus::Answered);
+        assert!(
+            inspection
+                .evidence
+                .iter()
+                .any(|item| item.content.contains("银杏-17") || item.content.contains("负责人：苏澈"))
+        );
+        assert!(inspection.metrics.chunk_candidate_count > 0);
+
+        drop(state);
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    fn build_answer_question_expands_terse_topic_queries() {
+        let prompt = super::build_answer_question("赤松预算", Some("zh-CN"));
+        assert!(prompt.contains("项目名"));
+        assert!(prompt.contains("负责人"));
+        assert!(prompt.contains("核心规定"));
+    }
+
+    #[test]
+    fn select_balanced_final_evidence_preserves_multi_file_coverage() {
+        let make_item = |file_name: &str, document_rank: usize, chunk_index: usize, final_score: f64| {
+            MergedEvidence {
+                chunk: DocumentChunk {
+                    file_path: PathBuf::from(format!("Memory_Test/{file_name}")),
+                    content: format!("content-{file_name}-{chunk_index}"),
+                    chunk_index,
+                    heading_path: vec!["h".to_string()],
+                    block_kind: memori_parser::ChunkBlockKind::Paragraph,
+                },
+                relative_path: file_name.to_string(),
+                document_reason: "filename".to_string(),
+                document_rank,
+                document_raw_score: Some(100.0 - document_rank as f64),
+                document_has_exact_signal: false,
+                document_has_docs_phrase_signal: false,
+                document_docs_phrase_quality: None,
+                document_has_filename_signal: true,
+                document_has_strict_lexical: true,
+                lexical_strict_rank: Some(chunk_index + 1),
+                lexical_broad_rank: None,
+                lexical_raw_score: Some(10.0),
+                dense_rank: None,
+                dense_raw_score: None,
+                final_score,
+            }
+        };
+
+        let evidence = vec![
+            make_item("doc_041_供应链_蓝鲸B17_制度.md", 1, 0, 9.9),
+            make_item("doc_041_供应链_蓝鲸B17_制度.md", 1, 1, 9.8),
+            make_item("doc_041_供应链_蓝鲸B17_制度.md", 1, 2, 9.7),
+            make_item("doc_042_供应链_蓝鲸B17_会议纪要.txt", 2, 0, 8.5),
+            make_item("doc_043_供应链_蓝鲸B17_SOP.docx", 3, 0, 8.0),
+            make_item("doc_044_供应链_蓝鲸B17_复盘.pdf", 4, 0, 7.5),
+        ];
+
+        let selected = super::select_balanced_final_evidence(evidence, 4);
+        let distinct_files = selected
+            .iter()
+            .map(|item| item.relative_path.clone())
+            .collect::<std::collections::HashSet<_>>();
+
+        assert!(distinct_files.len() >= 3);
+        assert!(distinct_files.contains("doc_041_供应链_蓝鲸B17_制度.md"));
+        assert!(distinct_files.contains("doc_042_供应链_蓝鲸B17_会议纪要.txt"));
     }
 
     #[test]
@@ -797,6 +901,29 @@
     }
 
     #[test]
+    fn rebuild_compare_path_normalizes_windows_style_variants() {
+        #[cfg(target_os = "windows")]
+        {
+            let live_path = PathBuf::from(r"\\?\D:\AI\Tool\Memory\Memory_Test\Doc_001.md");
+            let stored_path = PathBuf::from(r"d:\ai\tool\memory\memory_test\doc_001.md");
+            assert_eq!(
+                super::normalize_rebuild_compare_path(&live_path),
+                super::normalize_rebuild_compare_path(&stored_path)
+            );
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let live_path = PathBuf::from("/tmp/memori/doc_001.md/");
+            let stored_path = PathBuf::from("/tmp/memori/doc_001.md");
+            assert_eq!(
+                super::normalize_rebuild_compare_path(&live_path),
+                super::normalize_rebuild_compare_path(&stored_path)
+            );
+        }
+    }
+
+    #[test]
     fn analyze_query_extracts_support_terms_for_descriptive_cjk_questions() {
         let analysis = analyze_query("新增的岗位是什么");
         assert!(analysis.support_terms.iter().any(|term| term == "新增"));
@@ -939,7 +1066,7 @@
             }],
         );
 
-        assert_eq!(merged[0].file_name, "week8_report.md");
+        assert_eq!(merged[0].relative_path, "docs/week8_report.md");
         assert_eq!(merged[0].document_reason, "filename");
     }
 
@@ -1173,6 +1300,44 @@
     }
 
     #[test]
+    fn hyphenless_identifier_query_is_not_treated_as_implementation_lookup() {
+        assert!(!is_implementation_lookup(&analyze_query("CS08的负责部门是")));
+    }
+
+    #[test]
+    fn hyphenless_identifier_evidence_is_not_rejected() {
+        let analysis = analyze_query("CS08的负责部门是");
+        let evidence = vec![super::MergedEvidence {
+            chunk: DocumentChunk {
+                file_path: PathBuf::from("Memory_Test/doc_021_客户成功_白鹭工单_制度.md"),
+                content: "星衡智能客户成功内部资料：白鹭工单（CS-08）/ 制度。负责部门：客户成功中心。资料编号：XH-CS-08-021。".to_string(),
+                chunk_index: 0,
+                heading_path: vec!["制度".to_string()],
+                block_kind: memori_parser::ChunkBlockKind::Paragraph,
+            },
+            relative_path: "Memory_Test/doc_021_客户成功_白鹭工单_制度.md".to_string(),
+            document_reason: "mixed".to_string(),
+            document_rank: 1,
+            document_raw_score: Some(1.2),
+            document_has_exact_signal: false,
+            document_has_docs_phrase_signal: false,
+            document_docs_phrase_quality: None,
+            document_has_filename_signal: true,
+            document_has_strict_lexical: true,
+            lexical_strict_rank: Some(1),
+            lexical_broad_rank: None,
+            lexical_raw_score: Some(1.1),
+            dense_rank: Some(2),
+            dense_raw_score: Some(0.72),
+            final_score: 1.1,
+        }];
+
+        let mut metrics = RetrievalMetrics::default();
+        let refused = apply_gating_metrics(&mut metrics, &analysis, &evidence);
+        assert!(!refused, "metrics={metrics:?}");
+    }
+
+    #[test]
     fn dense_only_long_query_is_rejected() {
         let analysis = analyze_query("请总结 week8_report.md 里的长跳转公式和实现细节");
         let evidence = vec![super::MergedEvidence {
@@ -1394,5 +1559,32 @@
     fn grounded_answer_text_is_not_misclassified_as_insufficient() {
         assert!(!super::engine::answer_indicates_insufficient_evidence(
             "本周主要学习了 FORTIFY 绕过、CANNARY 检查与若干改进事项。"
+        ));
+    }
+
+    #[test]
+    fn gating_profiles_keep_thresholds_stable() {
+        assert_eq!(RetrievalGatingProfile::Strict.threshold(), 70);
+        assert_eq!(RetrievalGatingProfile::Balanced.threshold(), 55);
+        assert_eq!(RetrievalGatingProfile::AnswerFirst.threshold(), 42);
+    }
+
+    #[test]
+    fn answer_cleaner_drops_think_and_html_noise() {
+        let cleaned = super::engine::clean_generation_answer(
+            "<think>ignore</think><p>负责人是马溪。</p>",
+        );
+        assert_eq!(cleaned, "负责人是马溪。");
+    }
+
+    #[test]
+    fn short_refusal_with_evidence_style_text_is_detected() {
+        assert!(super::engine::answer_indicates_insufficient_evidence_with_mode(
+            "基于当前证据不足，无法根据提供的证据回答。",
+            GenerationRefusalMode::Balanced
+        ));
+        assert!(!super::engine::answer_indicates_insufficient_evidence_with_mode(
+            "已确认负责人是马溪，预算信息在会议纪要中未见直接证据，因此这里只回答负责人。",
+            GenerationRefusalMode::Balanced
         ));
     }

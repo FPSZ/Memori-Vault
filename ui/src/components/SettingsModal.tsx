@@ -304,6 +304,11 @@ export function SettingsModal({
   };
 
   const indexingModelBlocked = useMemo(() => {
+    const embedRuntime = localModelRuntimeStatuses?.roles.find((role) => role.role === "embed");
+    const embedRuntimeState = embedRuntime?.state?.toLowerCase() ?? "unknown";
+    if (embedRuntimeState === "running" || embedRuntimeState === "external") {
+      return false;
+    }
     const phase = indexingStatus?.phase?.toLowerCase() ?? "idle";
     if (["scanning", "embedding", "graphing"].includes(phase)) {
       return false;
@@ -322,18 +327,42 @@ export function SettingsModal({
       "向量模型未启动",
       "端口不可连接"
     ].some((pattern) => text.includes(pattern));
-  }, [indexingStatus?.last_error, indexingStatus?.phase, indexingStatus?.rebuild_reason]);
+  }, [indexingStatus?.last_error, indexingStatus?.phase, indexingStatus?.rebuild_reason, localModelRuntimeStatuses]);
 
   const indexingPhaseLabel = useMemo(() => {
     if (indexingModelBlocked) {
       return uiLang === "zh-CN" ? "等待模型启动" : "Waiting for model";
     }
     const normalized = indexingStatus?.phase?.toLowerCase() ?? "idle";
+    const rebuildState = (indexingStatus?.rebuild_state ?? "ready").toLowerCase();
+    const retryableFilesRemaining = Boolean(indexingStatus?.rebuild_reason?.includes("retryable_files_remaining"));
+    const hasIndexedDocs = (indexingStatus?.indexed_docs ?? 0) > 0;
+    const hasIndexedChunks = (indexingStatus?.indexed_chunks ?? 0) > 0;
+    const hasIndexedGraph = (indexingStatus?.graphed_chunks ?? 0) > 0;
+    const hasSearchableIndex = hasIndexedDocs || hasIndexedChunks || hasIndexedGraph;
+    const searchReady =
+      ((rebuildState === "ready" && hasSearchableIndex) || (retryableFilesRemaining && hasIndexedChunks)) &&
+      !indexingModelBlocked;
+    const graphBacklog = indexingStatus?.graph_backlog ?? 0;
+    if (searchReady && (normalized === "graphing" || graphBacklog > 0)) {
+      return t("indexingPhaseOptimizing");
+    }
     if (normalized === "scanning") return t("indexingPhaseScanning");
     if (normalized === "embedding") return t("indexingPhaseEmbedding");
     if (normalized === "graphing") return t("indexingPhaseGraphing");
     return t("indexingPhaseIdle");
-  }, [indexingModelBlocked, indexingStatus?.phase, t, uiLang]);
+  }, [
+    indexingModelBlocked,
+    indexingStatus?.graph_backlog,
+    indexingStatus?.graphed_chunks,
+    indexingStatus?.indexed_chunks,
+    indexingStatus?.indexed_docs,
+    indexingStatus?.phase,
+    indexingStatus?.rebuild_reason,
+    indexingStatus?.rebuild_state,
+    t,
+    uiLang
+  ]);
 
   const indexingRebuildLabel = useMemo(() => {
     if (indexingModelBlocked) {
@@ -645,6 +674,7 @@ export function SettingsModal({
                 onScheduleStartChange={onScheduleStartChange}
                 onScheduleEndChange={onScheduleEndChange}
                 indexingStatus={indexingStatus}
+                localModelRuntimeStatuses={localModelRuntimeStatuses}
                 indexingBusy={indexingBusy}
                 indexingPhaseLabel={indexingPhaseLabel}
                 indexingRebuildLabel={indexingRebuildLabel}

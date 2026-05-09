@@ -82,20 +82,16 @@ pub(crate) fn current_unix_timestamp_secs() -> Result<i64, StorageError> {
     i64::try_from(duration.as_secs()).map_err(|_| StorageError::TimestampOverflow)
 }
 
-pub(crate) fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+pub(crate) fn cosine_similarity(a: &[f32], b: &[f32]) -> Result<f32, StorageError> {
     if a.is_empty() || b.is_empty() {
-        return 0.0;
+        return Ok(0.0);
     }
 
     if a.len() != b.len() {
-        // 维度不匹配意味着索引中混入了不同 embedding 模型的向量，
-        // 必须重建索引后才能切换模型。此处 panic 防止静默错误分数污染排序。
-        panic!(
-            "cosine_similarity dimension mismatch: query={}, stored={}. \
-             Rebuild index after switching embedding models.",
-            a.len(),
-            b.len()
-        );
+        return Err(StorageError::EmbeddingDimensionMismatch {
+            query_dim: a.len(),
+            stored_dim: b.len(),
+        });
     }
 
     let len = a.len();
@@ -111,9 +107,9 @@ pub(crate) fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
     let denominator = norm_a.sqrt() * norm_b.sqrt();
     if denominator == 0.0 {
-        0.0
+        Ok(0.0)
     } else {
-        dot / denominator
+        Ok(dot / denominator)
     }
 }
 

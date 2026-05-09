@@ -98,6 +98,9 @@ pub(crate) struct AppSettings {
     pub(crate) default_context_budget: Option<String>,
     pub(crate) complex_context_budget: Option<String>,
     pub(crate) graph_ranking_enabled: Option<bool>,
+    pub(crate) retrieval_gating_profile: Option<String>,
+    pub(crate) generation_refusal_mode: Option<String>,
+    pub(crate) gating_retry_on_refusal: Option<bool>,
     #[serde(default)]
     pub(crate) index_filter: Option<IndexFilterConfig>,
     // legacy fields for backwards compatibility
@@ -124,6 +127,9 @@ pub(crate) struct AppSettingsDto {
     pub(crate) default_context_budget: String,
     pub(crate) complex_context_budget: String,
     pub(crate) graph_ranking_enabled: bool,
+    pub(crate) retrieval_gating_profile: String,
+    pub(crate) generation_refusal_mode: String,
+    pub(crate) gating_retry_on_refusal: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +141,9 @@ pub(crate) struct MemorySettingsDto {
     pub(crate) default_context_budget: String,
     pub(crate) complex_context_budget: String,
     pub(crate) graph_ranking_enabled: bool,
+    pub(crate) retrieval_gating_profile: String,
+    pub(crate) generation_refusal_mode: String,
+    pub(crate) gating_retry_on_refusal: bool,
 }
 
 impl AppSettingsDto {
@@ -163,6 +172,13 @@ impl AppSettingsDto {
                 .complex_context_budget
                 .unwrap_or_else(|| "32k".to_string()),
             graph_ranking_enabled: false,
+            retrieval_gating_profile: settings
+                .retrieval_gating_profile
+                .unwrap_or_else(|| "balanced".to_string()),
+            generation_refusal_mode: settings
+                .generation_refusal_mode
+                .unwrap_or_else(|| "balanced".to_string()),
+            gating_retry_on_refusal: settings.gating_retry_on_refusal.unwrap_or(true),
         }
     }
 }

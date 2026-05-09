@@ -238,7 +238,8 @@ export default function App() {
     aiLang,
     retrieveTopK,
     selectedScopePaths,
-    modelSetupReady,
+    modelSetupNotConfigured,
+    searchBlockedMessage: t("modelNotConfiguredInline"),
     onError: (message) => setError(message),
     toUiErrorMessage,
     onSearchStart: () => {
@@ -294,10 +295,6 @@ export default function App() {
     ]
       .sort((a, b) => b.value - a.value);
   }, [answerResponse, t]);
-  const canSubmit = useMemo(
-    () => query.trim().length > 0 && !loading && !modelSetupNotConfigured,
-    [loading, modelSetupNotConfigured, query]
-  );
   const showSearchDone = useMemo(
     () => isSearching && !loading && !error && answerResponse !== null,
     [answerResponse, error, isSearching, loading]

@@ -68,13 +68,18 @@ impl MemoriEngine {
         );
 
         let merge_started_at = Instant::now();
-        let evidence = merge_chunk_evidence(
+        let mut evidence = merge_chunk_evidence(
             analysis,
             &candidate_docs,
             strict_lexical_matches,
             lexical_matches,
             dense_matches,
         );
+        if evidence.is_empty() {
+            evidence = self
+                .fallback_candidate_doc_evidence(analysis, &candidate_docs)
+                .await?;
+        }
         metrics.merge_ms += elapsed_ms_u64(merge_started_at);
         metrics.chunk_candidate_count = metrics.chunk_candidate_count.max(evidence.len());
         debug!(
@@ -89,10 +94,74 @@ impl MemoriEngine {
         })
     }
 
+    async fn fallback_candidate_doc_evidence(
+        &self,
+        analysis: &QueryAnalysis,
+        candidate_docs: &[DocumentCandidate],
+    ) -> Result<Vec<MergedEvidence>, EngineError> {
+        let mut evidence = Vec::new();
+        for doc in candidate_docs.iter().take(3) {
+            let chunk_records = self
+                .state
+                .vector_store
+                .get_chunks_by_file_path(Path::new(&doc.file_path))
+                .await?;
+            for chunk in chunk_records.into_iter().take(4) {
+                let document_chunk = DocumentChunk {
+                    file_path: PathBuf::from(&doc.file_path),
+                    content: chunk.content,
+                    chunk_index: chunk.chunk_index,
+                    heading_path: chunk.heading_path,
+                    block_kind: parse_block_kind(&chunk.block_kind),
+                };
+                let lexical_signal = direct_chunk_lexical_signal(analysis, &document_chunk);
+                let (lexical_strict_rank, lexical_broad_rank, lexical_raw_score, bonus_score) =
+                    match lexical_signal {
+                        Some((true, score)) => (Some(doc.document_rank), None, Some(score), 0.75),
+                        Some((false, score)) => (None, Some(doc.document_rank), Some(score), 0.35),
+                        None => {
+                            if evidence.is_empty() && doc.document_rank == 1 {
+                                (Some(DEFAULT_CHUNK_CANDIDATE_K + doc.document_rank), None, Some(0.5), 0.2)
+                            } else {
+                                continue;
+                            }
+                        }
+                    };
+                evidence.push(MergedEvidence {
+                    chunk: document_chunk,
+                    relative_path: doc.relative_path.clone(),
+                    document_reason: doc.document_reason.clone(),
+                    document_rank: doc.document_rank,
+                    document_raw_score: doc.document_raw_score,
+                    document_has_exact_signal: doc.has_exact_signal,
+                    document_has_docs_phrase_signal: doc.has_docs_phrase_signal,
+                    document_docs_phrase_quality: doc.docs_phrase_quality,
+                    document_has_filename_signal: doc.has_filename_signal,
+                    document_has_strict_lexical: doc.has_strict_lexical,
+                    lexical_strict_rank,
+                    lexical_broad_rank,
+                    lexical_raw_score,
+                    dense_rank: None,
+                    dense_raw_score: None,
+                    final_score: doc.document_final_score + bonus_score,
+                });
+            }
+            if !evidence.is_empty() {
+                break;
+            }
+        }
+        evidence.sort_by(|a, b| {
+            a.document_rank
+                .cmp(&b.document_rank)
+                .then_with(|| b.final_score.total_cmp(&a.final_score))
+                .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index))
+        });
+        Ok(evidence)
+    }
+
     pub(crate) async fn retrieve_compound_evidence(
         &self,
         plan: &CompoundQueryPlan,
-        _root_analysis: &QueryAnalysis,
         root_evidence: &[MergedEvidence],
         normalized_scope_paths: &[PathBuf],
         final_answer_k: usize,
@@ -219,7 +288,6 @@ impl MemoriEngine {
                         DocumentCandidate {
                             file_path: record.file_path,
                             relative_path: record.relative_path,
-                            file_name: record.file_name,
                             is_code_document,
                             document_reason: "scope".to_string(),
                             document_rank: index + 1,

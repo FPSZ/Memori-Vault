@@ -69,6 +69,9 @@ pub const MEMORI_MODEL_API_KEY_ENV: &str = "MEMORI_MODEL_API_KEY";
 pub const MEMORI_CHAT_MODEL_ENV: &str = "MEMORI_CHAT_MODEL";
 pub const MEMORI_GRAPH_MODEL_ENV: &str = "MEMORI_GRAPH_MODEL";
 pub const MEMORI_EMBED_MODEL_ENV: &str = "MEMORI_EMBED_MODEL";
+pub const MEMORI_RETRIEVAL_GATING_PROFILE_ENV: &str = "MEMORI_RETRIEVAL_GATING_PROFILE";
+pub const MEMORI_GENERATION_REFUSAL_MODE_ENV: &str = "MEMORI_GENERATION_REFUSAL_MODE";
+pub const MEMORI_GATING_RETRY_ON_REFUSAL_ENV: &str = "MEMORI_GATING_RETRY_ON_REFUSAL";
 pub const MEMORI_CHAT_ENDPOINT_ENV: &str = "MEMORI_CHAT_ENDPOINT";
 pub const MEMORI_GRAPH_ENDPOINT_ENV: &str = "MEMORI_GRAPH_ENDPOINT";
 pub const MEMORI_EMBED_ENDPOINT_ENV: &str = "MEMORI_EMBED_ENDPOINT";
@@ -78,6 +81,11 @@ const DEFAULT_DOC_TOP_K: usize = 12;
 const DEFAULT_CHUNK_CANDIDATE_K: usize = 20;
 const DEFAULT_FINAL_ANSWER_K: usize = 6;
 const RRF_K: f64 = 60.0;
+const DEFAULT_RETRIEVAL_GATING_PROFILE: RetrievalGatingProfile =
+    RetrievalGatingProfile::Balanced;
+const DEFAULT_GENERATION_REFUSAL_MODE: GenerationRefusalMode =
+    GenerationRefusalMode::Balanced;
+const DEFAULT_GATING_RETRY_ON_REFUSAL: bool = true;
 
 fn is_supported_index_file(path: &std::path::Path) -> bool {
     is_supported_content_file(path)
@@ -85,6 +93,38 @@ fn is_supported_index_file(path: &std::path::Path) -> bool {
 
 fn is_likely_directory_path(path: &std::path::Path) -> bool {
     path.extension().is_none()
+}
+
+fn normalize_rebuild_compare_path(path: &Path) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let mut text = path.to_string_lossy().replace('/', "\\");
+
+        if let Some(stripped) = text.strip_prefix(r"\\?\") {
+            text = stripped.to_string();
+        } else if let Some(stripped) = text.strip_prefix(r"\??\") {
+            text = stripped.to_string();
+        }
+
+        while text.len() > 3 && text.ends_with('\\') {
+            text.pop();
+        }
+
+        text.to_ascii_lowercase()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut text = path.to_string_lossy().to_string();
+        while text.len() > 1 && text.ends_with('/') {
+            text.pop();
+        }
+        text
+    }
+}
+
+fn elapsed_ms_u64(started_at: Instant) -> u64 {
+    started_at.elapsed().as_millis() as u64
 }
 
 async fn set_runtime_idle(state: &Arc<AppState>, last_error: Option<String>) {
@@ -277,6 +317,97 @@ pub enum FailureClass {
     None,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetrievalGatingProfile {
+    Strict,
+    #[default]
+    Balanced,
+    AnswerFirst,
+}
+
+impl RetrievalGatingProfile {
+    pub fn from_value(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "strict" => Self::Strict,
+            "answer_first" => Self::AnswerFirst,
+            _ => Self::Balanced,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Balanced => "balanced",
+            Self::AnswerFirst => "answer_first",
+        }
+    }
+
+    pub fn threshold(self) -> i32 {
+        match self {
+            Self::Strict => 70,
+            Self::Balanced => 55,
+            Self::AnswerFirst => 42,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationRefusalMode {
+    Strict,
+    #[default]
+    Balanced,
+}
+
+impl GenerationRefusalMode {
+    pub fn from_value(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "strict" => Self::Strict,
+            _ => Self::Balanced,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Balanced => "balanced",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GatingDecisionStage {
+    HardBlock,
+    SoftGate,
+    Generation,
+    #[default]
+    Answered,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct GatingBreakdown {
+    pub document_signal: i32,
+    pub lexical_grounding: i32,
+    pub coverage: i32,
+    pub multi_chunk: i32,
+    pub cross_source: i32,
+    pub lookup_boost: i32,
+    pub dense_only_penalty: i32,
+    pub docs_query_boost: i32,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct EvidenceGateScore {
+    pub score: i32,
+    pub threshold: i32,
+    pub profile: RetrievalGatingProfile,
+    pub hard_block_reason: Option<String>,
+    pub breakdown: GatingBreakdown,
+    pub decision_stage: GatingDecisionStage,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct ContextBudgetReport {
     pub token_budget: usize,
@@ -319,6 +450,12 @@ pub struct RetrievalMetrics {
     pub top_doc_term_coverage: f64,
     pub gating_decision_reason: String,
     pub docs_phrase_quality: String,
+    pub gating_score: i32,
+    pub gating_threshold: i32,
+    pub gating_profile: String,
+    pub gating_hard_block_reason: Option<String>,
+    pub gating_breakdown: GatingBreakdown,
+    pub decision_stage: GatingDecisionStage,
     pub query_flags: Vec<String>,
 }
 
@@ -398,7 +535,6 @@ struct CompoundQueryPlan {
 struct DocumentCandidate {
     file_path: String,
     relative_path: String,
-    file_name: String,
     is_code_document: bool,
     document_reason: String,
     document_rank: usize,

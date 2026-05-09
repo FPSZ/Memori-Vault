@@ -88,7 +88,10 @@ export const DEFAULT_MEMORY_SETTINGS: MemorySettingsDto = {
   memory_markdown_export_enabled: false,
   default_context_budget: "16k",
   complex_context_budget: "32k",
-  graph_ranking_enabled: false
+  graph_ranking_enabled: false,
+  retrieval_gating_profile: "balanced",
+  generation_refusal_mode: "balanced",
+  gating_retry_on_refusal: true
 };
 
 export const DEFAULT_FILTER_CONFIG: IndexFilterConfigDto = {
@@ -212,7 +215,10 @@ export function settingsToMemorySettings(settings: AppSettingsDto): MemorySettin
     memory_markdown_export_enabled: false,
     default_context_budget: normalizeContextBudget(settings.default_context_budget, "16k"),
     complex_context_budget: normalizeContextBudget(settings.complex_context_budget, "32k"),
-    graph_ranking_enabled: false
+    graph_ranking_enabled: false,
+    retrieval_gating_profile: settings.retrieval_gating_profile || "balanced",
+    generation_refusal_mode: settings.generation_refusal_mode || "balanced",
+    gating_retry_on_refusal: settings.gating_retry_on_refusal ?? true
   };
 }
 

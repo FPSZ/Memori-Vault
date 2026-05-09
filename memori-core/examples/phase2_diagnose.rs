@@ -540,7 +540,7 @@ async fn benchmark_contention(
 
                 let started = Instant::now();
                 let _ = reader_store
-                    .search_documents_fts(&query, top_k, &[dir_scope.clone()])
+                    .search_documents_fts(&query, top_k, std::slice::from_ref(&dir_scope))
                     .await?;
                 let _ = reader_store
                     .search_similar_scoped(embedding, top_k, &[dir_scope])

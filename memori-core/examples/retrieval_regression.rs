@@ -353,7 +353,7 @@ fn load_suite(
 ) -> Result<RegressionSuite, AnyError> {
     let raw = fs::read_to_string(path)?;
     let raw = raw.trim_start_matches('\u{feff}');
-    let mut suite: RegressionSuite = serde_json::from_str(&raw)?;
+    let mut suite: RegressionSuite = serde_json::from_str(raw)?;
     suite.cases.retain(|case| {
         let matches_case_filter = case_filter
             .as_ref()

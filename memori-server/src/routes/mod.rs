@@ -1,3 +1,5 @@
+use axum::http::HeaderValue;
+
 use crate::*;
 
 mod admin;
@@ -76,10 +78,66 @@ pub(crate) fn build_router(app_state: ServerState) -> Router {
         .route("/api/settings/watch-root", post(set_watch_root_handler))
         .route("/api/settings/rank", post(rank_settings_query_handler))
         .with_state(app_state)
-        .layer(
-            CorsLayer::new()
-                .allow_methods(Any)
-                .allow_headers(Any)
-                .allow_origin(Any),
-        )
+        .layer(build_cors_layer())
+}
+
+fn build_cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_methods(Any)
+        .allow_headers(Any)
+        .allow_origin(resolve_allowed_origins())
+}
+
+fn resolve_allowed_origins() -> Vec<HeaderValue> {
+    let configured = std::env::var("MEMORI_ALLOWED_ORIGINS")
+        .ok()
+        .map(|value| {
+            value
+                .split(',')
+                .filter_map(|item| {
+                    let trimmed = item.trim();
+                    (!trimmed.is_empty()).then_some(trimmed)
+                })
+                .filter_map(|item| item.parse::<HeaderValue>().ok())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !configured.is_empty() {
+        return configured;
+    }
+
+    [
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+    ]
+    .into_iter()
+    .filter_map(|origin| origin.parse::<HeaderValue>().ok())
+    .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_allowed_origins_defaults_to_local_only() {
+        unsafe {
+            std::env::remove_var("MEMORI_ALLOWED_ORIGINS");
+        }
+        let origins = resolve_allowed_origins();
+        let texts = origins
+            .into_iter()
+            .filter_map(|origin| origin.to_str().ok().map(str::to_string))
+            .collect::<Vec<_>>();
+        assert!(texts.iter().all(|origin| {
+            origin.contains("localhost")
+                || origin.contains("127.0.0.1")
+                || origin == "tauri://localhost"
+        }));
+    }
 }

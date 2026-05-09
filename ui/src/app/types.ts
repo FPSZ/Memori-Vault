@@ -153,6 +153,21 @@ export type RetrievalMetrics = {
   top_doc_term_coverage?: number;
   gating_decision_reason?: string;
   docs_phrase_quality?: string;
+  gating_score?: number;
+  gating_threshold?: number;
+  gating_profile?: "strict" | "balanced" | "answer_first" | string;
+  gating_hard_block_reason?: string | null;
+  gating_breakdown?: {
+    document_signal: number;
+    lexical_grounding: number;
+    coverage: number;
+    multi_chunk: number;
+    cross_source: number;
+    lookup_boost: number;
+    dense_only_penalty: number;
+    docs_query_boost: number;
+  };
+  decision_stage?: "hard_block" | "soft_gate" | "generation" | "answered";
   query_flags: string[];
 };
 
@@ -185,6 +200,9 @@ export type AppSettingsDto = {
   default_context_budget?: string;
   complex_context_budget?: string;
   graph_ranking_enabled?: boolean;
+  retrieval_gating_profile?: "strict" | "balanced" | "answer_first" | string;
+  generation_refusal_mode?: "strict" | "balanced" | string;
+  gating_retry_on_refusal?: boolean;
 };
 
 export type SearchScopeItem = {

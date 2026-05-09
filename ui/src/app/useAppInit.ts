@@ -275,6 +275,19 @@ export function useAppInit(deps: UseAppInitDeps) {
       }
     };
 
+    const loadLocalModelRuntimeStatuses = async () => {
+      try {
+        const runtime = await getLocalModelRuntimeStatus();
+        if (active) {
+          setLocalModelRuntimeStatuses(runtime);
+        }
+      } catch {
+        if (active) {
+          setLocalModelRuntimeStatuses(null);
+        }
+      }
+    };
+
     void loadStats();
     void loadSettings();
     void loadIndexingStatus();
@@ -287,6 +300,7 @@ export function useAppInit(deps: UseAppInitDeps) {
     const timer = window.setInterval(() => {
       void loadStats();
       void loadIndexingStatus();
+      void loadLocalModelRuntimeStatuses();
     }, 5000);
 
     return () => {

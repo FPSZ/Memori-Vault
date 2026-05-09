@@ -214,8 +214,13 @@ fn graph_worker_batch_size() -> usize {
     std::env::var("MEMORI_GRAPH_CONCURRENCY")
         .ok()
         .and_then(|value| value.trim().parse::<usize>().ok())
+        .or_else(|| {
+            std::env::var("MEMORI_EMBED_CONCURRENCY")
+                .ok()
+                .and_then(|value| value.trim().parse::<usize>().ok())
+        })
         .filter(|value| *value > 0)
-        .map(|value| value.min(8))
+        .map(|value| value.min(16))
         .unwrap_or(2)
 }
 

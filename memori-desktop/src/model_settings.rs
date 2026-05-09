@@ -589,8 +589,8 @@ pub(crate) fn default_indexing_status(settings: &AppSettings) -> IndexingStatus 
         paused: false,
         mode: indexing.mode,
         resource_budget: indexing.resource_budget,
-        rebuild_state: "ready".to_string(),
-        rebuild_reason: None,
+        rebuild_state: "required".to_string(),
+        rebuild_reason: Some("engine_unavailable".to_string()),
         index_format_version: 0,
         parser_format_version: 0,
     }

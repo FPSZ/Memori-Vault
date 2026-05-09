@@ -64,11 +64,14 @@ pub(crate) async fn run_full_rebuild(
         let retryable_left = state.vector_store.list_retryable_file_index_paths().await?;
         if retryable_left.is_empty() {
             if !is_resume {
-                let discovered: std::collections::HashSet<PathBuf> =
-                    existing_files.iter().cloned().collect();
+                let discovered: std::collections::HashSet<String> = existing_files
+                    .iter()
+                    .map(|path| normalize_rebuild_compare_path(path))
+                    .collect();
                 let stale_paths = state.vector_store.list_active_catalog_file_paths().await?;
                 for stale_path in stale_paths {
-                    if !discovered.contains(&stale_path) {
+                    let normalized_stale_path = normalize_rebuild_compare_path(&stale_path);
+                    if !discovered.contains(&normalized_stale_path) {
                         remove_indexed_file(
                             state,
                             &stale_path,

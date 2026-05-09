@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>拓展功能 - Memori-Vault</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: #0B1120;
+      color: #fff;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* 顶部导航 */
+    .nav {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 48px;
+      padding: 24px 40px;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .nav-item {
+      font-size: 15px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.45);
+      cursor: default;
+      transition: color 0.3s;
+      letter-spacing: 0.5px;
+    }
+
+    .nav-item:hover { color: rgba(255,255,255,0.7); }
+    .nav-item.active { color: rgba(255,255,255,0.9); font-weight: 600; }
+
+    /* 主内容区 */
+    .main {
+      padding: 60px 80px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    .section-title {
+      font-size: 52px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #60A5FA 0%, #3B82F6 50%, #8B5CF6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 72px;
+      letter-spacing: 2px;
+    }
+
+    /* 卡片网格 */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 64px;
+    }
+
+    .card {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    /* 图标容器 */
+    .icon-wrap {
+      width: 140px;
+      height: 140px;
+      margin-bottom: 32px;
+      position: relative;
+    }
+
+    .card-title {
+      font-size: 26px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 16px;
+      letter-spacing: -0.3px;
+    }
+
+    .card-desc {
+      font-size: 16px;
+      line-height: 1.7;
+      color: rgba(255,255,255,0.55);
+      max-width: 300px;
+    }
+
+    /* 背景装饰 */
+    .bg-glow {
+      position: fixed;
+      top: -20%;
+      left: -10%;
+      width: 60%;
+      height: 80%;
+      background: radial-gradient(ellipse, rgba(59,130,246,0.08) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .bg-glow-2 {
+      position: fixed;
+      bottom: -30%;
+      right: -10%;
+      width: 50%;
+      height: 70%;
+      background: radial-gradient(ellipse, rgba(139,92,246,0.06) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .main { position: relative; z-index: 1; }
+  </style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="bg-glow-2"></div>
+
+  <nav class="nav">
+    <div class="nav-item">项目背景</div>
+    <div class="nav-item">项目简介</div>
+    <div class="nav-item">总体架构</div>
+    <div class="nav-item active">核心技术</div>
+    <div class="nav-item">产品演示</div>
+    <div class="nav-item">未来规划</div>
+  </nav>
+
+  <main class="main">
+    <h1 class="section-title">拓展功能</h1>
+
+    <div class="cards">
+      <!-- Card 1: Alignment -->
+      <div class="card">
+        <div class="icon-wrap">
+          <svg viewBox="0 0 140 140" width="140" height="140">
+            <defs>
+              <!-- 3D metallic top -->
+              <linearGradient id="metalTop" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#E8E8EC"/>
+                <stop offset="40%" stop-color="#C4C4CF"/>
+                <stop offset="100%" stop-color="#8E8EA0"/>
+              </linearGradient>
+              <!-- 3D blue bottom -->
+              <linearGradient id="blue3D" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#60A5FA"/>
+                <stop offset="50%" stop-color="#3B82F6"/>
+                <stop offset="100%" stop-color="#1D4ED8"/>
+              </linearGradient>
+              <!-- Soft shadow -->
+              <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#3B82F6" flood-opacity="0.25"/>
+              </filter>
+              <!-- Inner highlight -->
+              <linearGradient id="highlight" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="white" stop-opacity="0.4"/>
+                <stop offset="50%" stop-color="white" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+
+            <!-- Base shield shape -->
+            <g filter="url(#softShadow)">
+              <!-- Bottom half (blue) -->
+              <path d="M 20 70 L 20 75 C 20 105, 50 125, 70 130 C 90 125, 120 105, 120 75 L 120 70 Z" fill="url(#blue3D)"/>
+              <!-- Top half (metallic) -->
+              <path d="M 20 70 L 20 55 C 20 35, 40 20, 70 15 C 100 20, 120 35, 120 55 L 120 70 Z" fill="url(#metalTop)"/>
+            </g>
+
+            <!-- Center seam line -->
+            <line x1="20" y1="70" x2="120" y2="70" stroke="rgba(0,0,0,0.15)" stroke-width="1"/>
+
+            <!-- Vertical center fold -->
+            <line x1="70" y1="15" x2="70" y2="130" stroke="rgba(0,0,0,0.08)" stroke-width="1"/>
+
+            <!-- Highlight overlay -->
+            <ellipse cx="55" cy="45" rx="25" ry="18" fill="url(#highlight)" opacity="0.6"/>
+          </svg>
+        </div>
+        <h3 class="card-title">Alignment</h3>
+        <p class="card-desc">多模态嵌入对齐，统一文本、图像与图谱的向量空间，实现跨模态语义检索。</p>
+      </div>
+
+      <!-- Card 2: Activation -->
+      <div class="card">
+        <div class="icon-wrap">
+          <svg viewBox="0 0 140 140" width="140" height="140">
+            <defs>
+              <linearGradient id="cubeFront" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#93C5FD"/>
+                <stop offset="100%" stop-color="#3B82F6"/>
+              </linearGradient>
+              <linearGradient id="cubeSide" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#60A5FA"/>
+                <stop offset="100%" stop-color="#2563EB"/>
+              </linearGradient>
+              <linearGradient id="cubeTop" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#BFDBFE"/>
+                <stop offset="100%" stop-color="#60A5FA"/>
+              </linearGradient>
+              <linearGradient id="sphereGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#DBEAFE"/>
+                <stop offset="50%" stop-color="#60A5FA"/>
+                <stop offset="100%" stop-color="#1E40AF"/>
+              </linearGradient>
+              <filter id="cubeShadow" x="-20%" y="-10%" width="150%" height="150%">
+                <feDropShadow dx="4" dy="12" stdDeviation="10" flood-color="#1E40AF" flood-opacity="0.3"/>
+              </filter>
+            </defs>
+
+            <g filter="url(#cubeShadow)">
+              <!-- 3D Cube structure -->
+              <!-- Back face -->
+              <rect x="45" y="25" width="55" height="75" rx="6" fill="#1E3A5F" opacity="0.4"/>
+
+              <!-- Sphere / cylinder left -->
+              <ellipse cx="42" cy="62" rx="22" ry="32" fill="url(#sphereGrad)"/>
+              <ellipse cx="42" cy="35" rx="22" ry="10" fill="#DBEAFE" opacity="0.5"/>
+              <ellipse cx="42" cy="89" rx="22" ry="10" fill="#1E40AF" opacity="0.3"/>
+
+              <!-- Front cube face -->
+              <rect x="58" y="38" width="50" height="65" rx="6" fill="url(#cubeFront)"/>
+              <!-- Top face -->
+              <path d="M 58 38 L 72 22 L 122 22 L 108 38 Z" fill="url(#cubeTop)"/>
+              <!-- Right face -->
+              <path d="M 108 38 L 122 22 L 122 87 L 108 103 Z" fill="url(#cubeSide)"/>
+
+              <!-- Inner cutout highlight -->
+              <rect x="70" y="50" width="26" height="40" rx="3" fill="rgba(0,0,0,0.15)"/>
+            </g>
+          </svg>
+        </div>
+        <h3 class="card-title">Activation</h3>
+        <p class="card-desc">Graph-RAG 激活引擎，动态构建知识子图，激活相关记忆节点以提升检索精度。</p>
+      </div>
+
+      <!-- Card 3: MCP / Agent -->
+      <div class="card">
+        <div class="icon-wrap">
+          <svg viewBox="0 0 140 140" width="140" height="140">
+            <defs>
+              <linearGradient id="arcLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#93C5FD"/>
+                <stop offset="100%" stop-color="#3B82F6"/>
+              </linearGradient>
+              <linearGradient id="arcRight" x1="100%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#60A5FA"/>
+                <stop offset="100%" stop-color="#1D4ED8"/>
+              </linearGradient>
+              <filter id="arcShadow" x="-20%" y="-10%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#1E40AF" flood-opacity="0.25"/>
+              </filter>
+              <linearGradient id="arcHighlight" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="white" stop-opacity="0.5"/>
+                <stop offset="100%" stop-color="white" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+
+            <g filter="url(#arcShadow)">
+              <!-- Left arc (facing right) -->
+              <path d="M 20 30 C 20 80, 45 110, 70 110 L 70 85 C 55 85, 42 65, 42 30 Z" fill="url(#arcLeft)"/>
+              <path d="M 20 30 C 20 80, 45 110, 70 110 L 70 85 C 55 85, 42 65, 42 30 Z" fill="url(#arcHighlight)" opacity="0.3"/>
+
+              <!-- Right arc (facing left) -->
+              <path d="M 120 30 C 120 80, 95 110, 70 110 L 70 85 C 85 85, 98 65, 98 30 Z" fill="url(#arcRight)"/>
+              <path d="M 120 30 C 120 80, 95 110, 70 110 L 70 85 C 85 85, 98 65, 98 30 Z" fill="url(#arcHighlight)" opacity="0.2"/>
+
+              <!-- Top connecting bridge -->
+              <rect x="42" y="22" width="56" height="14" rx="7" fill="#60A5FA"/>
+              <rect x="46" y="24" width="48" height="6" rx="3" fill="white" opacity="0.25"/>
+
+              <!-- Bottom center dot (connection point) -->
+              <circle cx="70" cy="95" r="8" fill="#BFDBFE"/>
+              <circle cx="70" cy="93" r="4" fill="white" opacity="0.6"/>
+            </g>
+          </svg>
+        </div>
+        <h3 class="card-title">MCP、Agent 接口</h3>
+        <p class="card-desc">标准 MCP 协议与 Agent 工具接口，支持记忆读写、语义搜索、图谱查询等外部调用。</p>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

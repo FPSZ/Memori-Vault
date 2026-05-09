@@ -169,6 +169,55 @@ export function MemoryTab({
           />
         </SettingCard>
 
+        <SettingCard title={t("gatingProfile")} description={t("gatingProfileDesc")}>
+          <SelectionChips
+            value={memorySettings.retrieval_gating_profile}
+            onChange={(value) =>
+              onMemorySettingsChange({
+                ...memorySettings,
+                retrieval_gating_profile: value
+              })
+            }
+            options={[
+              { value: "balanced", label: t("resourceBudgetBalanced") },
+              { value: "answer_first", label: t("gatingAnswerFirst") },
+              { value: "strict", label: t("gatingStrict") }
+            ]}
+          />
+        </SettingCard>
+
+        <SettingCard title={t("generationRefusal")} description={t("generationRefusalDesc")}>
+          <SelectionChips
+            value={memorySettings.generation_refusal_mode}
+            onChange={(value) =>
+              onMemorySettingsChange({
+                ...memorySettings,
+                generation_refusal_mode: value
+              })
+            }
+            options={[
+              { value: "balanced", label: t("resourceBudgetBalanced") },
+              { value: "strict", label: t("gatingStrict") }
+            ]}
+          />
+        </SettingCard>
+
+        <SettingCard title={t("gatingRetry")} description={t("gatingRetryDesc")}>
+          <SelectionChips
+            value={memorySettings.gating_retry_on_refusal ? "enabled" : "disabled"}
+            onChange={(value) =>
+              onMemorySettingsChange({
+                ...memorySettings,
+                gating_retry_on_refusal: value === "enabled"
+              })
+            }
+            options={[
+              { value: "enabled", label: t("mcpEnabled") },
+              { value: "disabled", label: t("mcpDisabled") }
+            ]}
+          />
+        </SettingCard>
+
         <AnimatedPanel className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-3 text-xs text-amber-100">
           {t("memoryEvidenceFirewall")}
         </AnimatedPanel>

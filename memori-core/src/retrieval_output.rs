@@ -103,6 +103,66 @@ pub(crate) fn build_evidence_items(evidence: &[MergedEvidence]) -> Vec<EvidenceI
         .collect()
 }
 
+pub(crate) fn select_balanced_final_evidence(
+    evidence: Vec<MergedEvidence>,
+    final_answer_k: usize,
+) -> Vec<MergedEvidence> {
+    if evidence.len() <= final_answer_k {
+        return evidence;
+    }
+
+    let mut by_group = std::collections::BTreeMap::<String, Vec<MergedEvidence>>::new();
+    for item in evidence {
+        let group_key = source_group_id(&item.relative_path, &item.chunk.file_path.to_string_lossy());
+        by_group.entry(group_key).or_default().push(item);
+    }
+
+    for items in by_group.values_mut() {
+        items.sort_by(|a, b| {
+            a.document_rank
+                .cmp(&b.document_rank)
+                .then_with(|| b.final_score.total_cmp(&a.final_score))
+                .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index))
+        });
+    }
+
+    let mut selected = Vec::new();
+    let mut group_keys = by_group.keys().cloned().collect::<Vec<_>>();
+    group_keys.sort();
+
+    for key in &group_keys {
+        if selected.len() >= final_answer_k {
+            break;
+        }
+        if let Some(items) = by_group.get_mut(key) {
+            if let Some(item) = items.first().cloned() {
+                selected.push(item);
+                items.remove(0);
+            }
+        }
+    }
+
+    if selected.len() < final_answer_k {
+        let mut remaining = by_group.into_values().flatten().collect::<Vec<_>>();
+        remaining.sort_by(|a, b| {
+            a.document_rank
+                .cmp(&b.document_rank)
+                .then_with(|| b.final_score.total_cmp(&a.final_score))
+                .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index))
+        });
+        selected.extend(remaining.into_iter().take(final_answer_k - selected.len()));
+    }
+
+    selected.sort_by(|a, b| {
+        a.document_rank
+            .cmp(&b.document_rank)
+            .then_with(|| b.final_score.total_cmp(&a.final_score))
+            .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index))
+    });
+    selected.truncate(final_answer_k);
+    selected
+}
+
 pub(crate) fn build_merged_evidence_from_items(items: &[EvidenceItem]) -> Vec<MergedEvidence> {
     items
         .iter()
@@ -366,10 +426,41 @@ pub(crate) fn build_reference_excerpt(file_path: &Path, chunk_content: &str) -> 
 }
 
 pub(crate) fn build_answer_question(query: &str, lang: Option<&str>) -> String {
+    let trimmed = query.trim();
+    let terse_topic_query = trimmed.chars().count() <= 16
+        && !trimmed.contains('？')
+        && !trimmed.contains('?')
+        && !trimmed.contains('。')
+        && !trimmed.contains('.')
+        && !trimmed.contains('\n')
+        && !trimmed.contains("是什么")
+        && !trimmed.contains("多少")
+        && !trimmed.contains("谁")
+        && !trimmed.contains("如何")
+        && !trimmed.contains("怎么");
+
     match normalize_language(lang) {
-        Some("zh-CN") => format!("{query}\n\n请仅使用中文回答。"),
-        Some("en-US") => format!("{query}\n\nPlease answer in English only."),
-        _ => query.to_string(),
+        Some("zh-CN") => {
+            if terse_topic_query {
+                format!("{query}\n\n请仅使用中文回答。若这只是一个项目名、代号或主题名，请直接概述该主题在证据中的核心内容，优先回答负责人、核心规定、关键指标或时间窗口。")
+            } else {
+                format!("{query}\n\n请仅使用中文回答。")
+            }
+        }
+        Some("en-US") => {
+            if terse_topic_query {
+                format!("{query}\n\nPlease answer in English only. If this is only a project name, code, or topic label, give a direct evidence-grounded overview first, prioritizing owner, rule, KPI, or key time window.")
+            } else {
+                format!("{query}\n\nPlease answer in English only.")
+            }
+        }
+        _ => {
+            if terse_topic_query {
+                format!("{query}\n\nIf this is only a project name, code, or topic label, give a direct evidence-grounded overview first, prioritizing owner, rule, KPI, or key time window.")
+            } else {
+                query.to_string()
+            }
+        }
     }
 }
 

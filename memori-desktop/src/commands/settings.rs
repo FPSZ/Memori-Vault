@@ -48,6 +48,12 @@ fn apply_memory_settings(settings: &mut AppSettings, payload: MemorySettingsDto)
     // ADR-003/P1 keeps graph as explanation context only; it must not affect
     // the main retrieval ranking until an explicit ranking experiment ships.
     settings.graph_ranking_enabled = Some(false);
+    settings.retrieval_gating_profile = Some(normalize_gating_profile(&payload.retrieval_gating_profile));
+    settings.generation_refusal_mode = Some(normalize_generation_refusal_mode(
+        &payload.generation_refusal_mode,
+    ));
+    settings.gating_retry_on_refusal = Some(payload.gating_retry_on_refusal);
+    apply_runtime_gating_settings(settings);
 }
 
 fn normalize_auto_memory_write(value: &str) -> String {
@@ -68,6 +74,50 @@ fn normalize_context_budget(value: &str, fallback: &str) -> String {
         _ => fallback,
     }
     .to_string()
+}
+
+fn normalize_gating_profile(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "strict" => "strict",
+        "answer_first" => "answer_first",
+        _ => "balanced",
+    }
+    .to_string()
+}
+
+fn normalize_generation_refusal_mode(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "strict" => "strict",
+        _ => "balanced",
+    }
+    .to_string()
+}
+
+fn apply_runtime_gating_settings(settings: &AppSettings) {
+    // SAFETY: desktop runtime uses process env as current config source.
+    unsafe {
+        std::env::set_var(
+            memori_core::MEMORI_RETRIEVAL_GATING_PROFILE_ENV,
+            settings
+                .retrieval_gating_profile
+                .clone()
+                .unwrap_or_else(|| "balanced".to_string()),
+        );
+        std::env::set_var(
+            memori_core::MEMORI_GENERATION_REFUSAL_MODE_ENV,
+            settings
+                .generation_refusal_mode
+                .clone()
+                .unwrap_or_else(|| "balanced".to_string()),
+        );
+        std::env::set_var(
+            memori_core::MEMORI_GATING_RETRY_ON_REFUSAL_ENV,
+            settings
+                .gating_retry_on_refusal
+                .unwrap_or(true)
+                .to_string(),
+        );
+    }
 }
 
 #[tauri::command]

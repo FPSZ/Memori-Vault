@@ -1,6 +1,5 @@
-﻿use super::*;
-use std::collections::HashSet;
-
+use super::*;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub(crate) struct GatingDecision {
@@ -9,211 +8,325 @@ pub(crate) struct GatingDecision {
     top_doc_distinct_term_hits: usize,
     top_doc_term_coverage: f64,
     top_doc_phrase_quality: Option<PhraseQuality>,
+    gate_score: EvidenceGateScore,
 }
 
-impl GatingDecision {
-    fn allow(
-        reason: &'static str,
-        top_doc_distinct_term_hits: usize,
-        top_doc_term_coverage: f64,
-        top_doc_phrase_quality: Option<PhraseQuality>,
-    ) -> Self {
+#[derive(Debug, Clone)]
+struct HardBlockDecision {
+    refuse: bool,
+    reason: Option<&'static str>,
+}
+
+impl HardBlockDecision {
+    fn allow() -> Self {
         Self {
             refuse: false,
-            reason,
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
+            reason: None,
         }
     }
 
-    fn refuse(
-        reason: &'static str,
-        top_doc_distinct_term_hits: usize,
-        top_doc_term_coverage: f64,
-        top_doc_phrase_quality: Option<PhraseQuality>,
-    ) -> Self {
+    fn refuse(reason: &'static str) -> Self {
         Self {
             refuse: true,
-            reason,
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
+            reason: Some(reason),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EvidenceScoreInputs {
+    pub(crate) top_doc_distinct_term_hits: usize,
+    pub(crate) top_doc_term_coverage: f64,
+    pub(crate) top_doc_phrase_quality: Option<PhraseQuality>,
+    pub(crate) has_grounding_signal: bool,
 }
 
 pub(crate) fn evaluate_gating_decision(
     analysis: &QueryAnalysis,
     evidence: &[MergedEvidence],
 ) -> GatingDecision {
+    evaluate_gating_decision_with_profile(analysis, evidence, DEFAULT_RETRIEVAL_GATING_PROFILE)
+}
+
+pub(crate) fn evaluate_gating_decision_with_profile(
+    analysis: &QueryAnalysis,
+    evidence: &[MergedEvidence],
+    profile: RetrievalGatingProfile,
+) -> GatingDecision {
     if evidence.is_empty() {
-        return GatingDecision::refuse("empty_evidence", 0, 0.0, None);
+        return GatingDecision {
+            refuse: true,
+            reason: "empty_evidence",
+            top_doc_distinct_term_hits: 0,
+            top_doc_term_coverage: 0.0,
+            top_doc_phrase_quality: None,
+            gate_score: EvidenceGateScore {
+                score: 0,
+                threshold: profile.threshold(),
+                profile,
+                hard_block_reason: Some("empty_evidence".to_string()),
+                breakdown: GatingBreakdown::default(),
+                decision_stage: GatingDecisionStage::SoftGate,
+            },
+        };
     }
+
+    let hard_block = evaluate_hard_block(analysis, evidence);
+    if hard_block.refuse {
+        return GatingDecision {
+            refuse: true,
+            reason: hard_block.reason.unwrap_or("hard_block"),
+            top_doc_distinct_term_hits: 0,
+            top_doc_term_coverage: 0.0,
+            top_doc_phrase_quality: None,
+            gate_score: EvidenceGateScore {
+                score: 0,
+                threshold: profile.threshold(),
+                profile,
+                hard_block_reason: hard_block.reason.map(ToOwned::to_owned),
+                breakdown: GatingBreakdown::default(),
+                decision_stage: GatingDecisionStage::HardBlock,
+            },
+        };
+    }
+
+    let inputs = score_evidence_gate(analysis, evidence, profile);
+    let decision = decide_with_profile(analysis, evidence, profile, inputs);
+    decision
+}
+
+fn evaluate_hard_block(
+    analysis: &QueryAnalysis,
+    evidence: &[MergedEvidence],
+) -> HardBlockDecision {
+    if evidence.is_empty() {
+        return HardBlockDecision::refuse("empty_evidence");
+    }
+
     if matches!(
         analysis.query_intent,
-        QueryIntent::ExternalFact | QueryIntent::SecretRequest | QueryIntent::MissingFileLookup
+        QueryIntent::ExternalFact | QueryIntent::SecretRequest
     ) {
-        return GatingDecision::refuse("intent_blocked", 0, 0.0, None);
+        return HardBlockDecision::refuse("intent_blocked");
     }
+
+    if matches!(analysis.query_intent, QueryIntent::MissingFileLookup)
+        && !evidence.iter().any(has_document_level_grounding)
+    {
+        return HardBlockDecision::refuse("missing_file_without_document_signal");
+    }
+
     if should_force_missing_file_lookup(analysis, evidence) {
-        return GatingDecision::refuse("forced_missing_file_lookup", 0, 0.0, None);
+        return HardBlockDecision::refuse("forced_missing_file_lookup");
     }
 
+    HardBlockDecision::allow()
+}
+
+pub(crate) fn score_evidence_gate(
+    analysis: &QueryAnalysis,
+    evidence: &[MergedEvidence],
+    profile: RetrievalGatingProfile,
+) -> EvidenceScoreInputs {
     let Some(top) = evidence.first() else {
-        return GatingDecision::refuse("empty_evidence", 0, 0.0, None);
-    };
-    let top_doc_path = top.chunk.file_path.to_string_lossy().to_string();
-    let top_doc_evidence = evidence
-        .iter()
-        .filter(|item| item.chunk.file_path.to_string_lossy() == top_doc_path)
-        .collect::<Vec<_>>();
-    let top_doc_count = top_doc_evidence.len();
-    let (top_doc_distinct_term_hits, top_doc_term_coverage) =
-        compute_top_doc_term_coverage(analysis, &top_doc_evidence);
-    let top_doc_strict_lexical = top_doc_evidence
-        .iter()
-        .filter(|item| item.lexical_strict_rank.is_some())
-        .count();
-    let query_is_long =
-        analysis.normalized_query.chars().count() >= 8 || analysis.flags.token_count >= 3;
-    let top_doc_phrase_quality = top.document_docs_phrase_quality;
-    let top_doc_has_multiple_chunks = top_doc_count >= 2;
-
-    if matches!(
-        analysis.query_family,
-        QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup
-    ) && top.document_rank <= 3
-        && top_doc_has_multiple_chunks
-        && top_doc_distinct_term_hits >= 2
-        && top_doc_term_coverage >= 0.4
-        && evidence
-            .iter()
-            .take(3)
-            .filter(|item| item.chunk.file_path == top.chunk.file_path)
-            .any(has_any_chunk_lexical)
-    {
-        return GatingDecision::allow(
-            "docs_family_multi_chunk_release",
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
-        );
-    }
-
-    if top.document_rank == 1
-        && has_strong_document_signal(top)
-        && has_any_chunk_lexical(top)
-        && evidence.len() >= 2
-    {
-        let reason = if matches!(
-            analysis.query_family,
-            QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup
-        ) && top_doc_has_multiple_chunks
-            && top_doc_distinct_term_hits >= 1
-        {
-            "docs_family_multi_chunk_release"
-        } else {
-            "top_ranked_document_signal"
+        return EvidenceScoreInputs {
+            top_doc_distinct_term_hits: 0,
+            top_doc_term_coverage: 0.0,
+            top_doc_phrase_quality: None,
+            has_grounding_signal: false,
         };
-        return GatingDecision::allow(
-            reason,
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
-        );
+    };
+    let top_group = source_group_key(&top.relative_path, &top.chunk.file_path.to_string_lossy());
+    let top_group_items = evidence
+        .iter()
+        .filter(|item| source_group_key(&item.relative_path, &item.chunk.file_path.to_string_lossy()) == top_group)
+        .collect::<Vec<_>>();
+    let (hits, coverage) = compute_top_doc_term_coverage(analysis, &top_group_items);
+    let _ = profile;
+    EvidenceScoreInputs {
+        top_doc_distinct_term_hits: hits,
+        top_doc_term_coverage: coverage,
+        top_doc_phrase_quality: top.document_docs_phrase_quality,
+        has_grounding_signal: evidence.iter().any(has_any_grounding_signal),
     }
+}
 
-    if top.lexical_strict_rank.is_some() && top_doc_count >= 2 && has_strong_document_signal(top) {
-        return GatingDecision::allow(
-            "strict_lexical_with_document_signal",
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
-        );
-    }
+pub(crate) fn decide_with_profile(
+    analysis: &QueryAnalysis,
+    evidence: &[MergedEvidence],
+    profile: RetrievalGatingProfile,
+    inputs: EvidenceScoreInputs,
+) -> GatingDecision {
+    let Some(top) = evidence.first() else {
+        return GatingDecision {
+            refuse: true,
+            reason: "empty_evidence",
+            top_doc_distinct_term_hits: 0,
+            top_doc_term_coverage: 0.0,
+            top_doc_phrase_quality: None,
+            gate_score: EvidenceGateScore::default(),
+        };
+    };
 
-    if matches!(
+    let mut breakdown = GatingBreakdown::default();
+    let top_group_id = source_group_key(&top.relative_path, &top.chunk.file_path.to_string_lossy());
+    let grouped = evidence
+        .iter()
+        .fold(HashMap::<String, Vec<&MergedEvidence>>::new(), |mut acc, item| {
+            let group_id = source_group_key(&item.relative_path, &item.chunk.file_path.to_string_lossy());
+            acc.entry(group_id).or_default().push(item);
+            acc
+        });
+    let top_group_items = grouped.get(&top_group_id).cloned().unwrap_or_default();
+    let top_group_chunk_count = top_group_items.len();
+    let lexical_count = top_group_items.iter().filter(|item| has_any_chunk_lexical(item)).count();
+    let has_strict_lexical = top_group_items
+        .iter()
+        .any(|item| item.lexical_strict_rank.is_some());
+    let has_grounding_signal = inputs.has_grounding_signal;
+    let has_doc_signal = top_group_items.iter().any(|item| has_document_level_grounding(item));
+    let cross_source = grouped.len();
+    let query_is_lookup = analysis.flags.is_lookup_like
+        || matches!(analysis.query_family, QueryFamily::ImplementationLookup);
+
+    breakdown.document_signal = if top_group_items.iter().any(|item| item.document_reason == "scope") {
+        18
+    } else if has_doc_signal {
+        10
+    } else {
+        0
+    };
+
+    breakdown.lexical_grounding = if has_strict_lexical && lexical_count >= 2 {
+        24
+    } else if has_strict_lexical || lexical_count >= 1 {
+        16
+    } else if top_group_items.iter().any(|item| item.lexical_broad_rank.is_some()) {
+        12
+    } else {
+        0
+    };
+
+    breakdown.coverage = if inputs.top_doc_distinct_term_hits >= 3 && inputs.top_doc_term_coverage >= 0.65 {
+        22
+    } else if inputs.top_doc_distinct_term_hits >= 2 && inputs.top_doc_term_coverage >= 0.4 {
+        22
+    } else if inputs.top_doc_distinct_term_hits >= 1 && inputs.top_doc_term_coverage >= 0.2 {
+        8
+    } else {
+        0
+    };
+
+    breakdown.multi_chunk = if top_group_chunk_count >= 3 {
+        14
+    } else if top_group_chunk_count >= 2 {
+        10
+    } else {
+        0
+    };
+
+    breakdown.cross_source = if cross_source >= 3 {
+        8
+    } else if cross_source >= 2 {
+        4
+    } else {
+        0
+    };
+
+    breakdown.lookup_boost = if query_is_lookup && (has_doc_signal || has_strict_lexical) {
+        6
+    } else {
+        0
+    };
+
+    let dense_only_top = top.dense_rank.is_some() && !has_any_chunk_lexical(top);
+    breakdown.dense_only_penalty = if dense_only_top && analysis.flags.token_count >= 3 {
+        -18
+    } else if dense_only_top {
+        -10
+    } else {
+        0
+    };
+
+    breakdown.docs_query_boost = if matches!(
         analysis.query_family,
         QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup
-    ) && top.document_rank <= 3
-        && (matches!(
-            top.document_docs_phrase_quality,
-            Some(PhraseQuality::Specific)
-        ) || top.document_has_strict_lexical)
-        && evidence.iter().take(2).any(has_any_chunk_lexical)
+    ) && top_group_chunk_count >= 2
+        && has_grounding_signal
     {
-        return GatingDecision::allow(
-            "docs_family_signal",
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
-        );
-    }
+        6
+    } else {
+        0
+    };
 
-    if analysis.flags.is_lookup_like
-        && top.document_has_filename_signal
-        && has_any_chunk_lexical(top)
-        && top_doc_count >= 2
+    let total_score = breakdown.document_signal
+        + breakdown.lexical_grounding
+        + breakdown.coverage
+        + breakdown.multi_chunk
+        + breakdown.cross_source
+        + breakdown.lookup_boost
+        + breakdown.dense_only_penalty
+        + breakdown.docs_query_boost;
+    let threshold = profile.threshold();
+    let has_grounded_single_chunk_release = has_grounded_single_chunk_release(
+        analysis,
+        &top_group_items,
+        &inputs,
+        &breakdown,
+    );
+    let effective_score = if has_grounded_single_chunk_release && total_score < threshold {
+        threshold
+    } else {
+        total_score
+    };
+    let passes_threshold = effective_score >= threshold;
+    let refuse = !passes_threshold || !has_grounding_signal;
+    let reason = if !passes_threshold {
+        "score_below_threshold"
+    } else if !has_grounding_signal {
+        "missing_grounding_signal"
+    } else if has_grounded_single_chunk_release
+        && matches!(analysis.query_family, QueryFamily::DocsExplanatory)
+        && !analysis.flags.is_lookup_like
     {
-        return GatingDecision::allow(
-            "lookup_filename_signal",
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
-        );
-    }
-
-    if !analysis.flags.is_lookup_like
-        && top.document_rank <= 3
-        && top_doc_distinct_term_hits >= 2
-        && top_doc_term_coverage >= 0.4
+        "coverage_release"
+    } else if has_grounded_single_chunk_release && analysis.flags.is_lookup_like {
+        "high_coverage_lexical_release"
+    } else if matches!(
+        analysis.query_family,
+        QueryFamily::DocsExplanatory | QueryFamily::DocsApiLookup
+    ) && top_group_chunk_count >= 2
     {
-        return GatingDecision::allow(
-            "coverage_release",
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
-        );
-    }
-
-    if top.document_rank <= 3
-        && has_any_chunk_lexical(top)
-        && top_doc_distinct_term_hits >= 3
-        && top_doc_term_coverage >= 0.65
+        "docs_family_multi_chunk_release"
+    } else if analysis.flags.is_lookup_like
+        && inputs.top_doc_term_coverage >= 0.65
+        && top_group_items.iter().any(|item| item.lexical_broad_rank.is_some())
     {
-        return GatingDecision::allow(
-            "high_coverage_lexical_release",
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
-        );
-    }
+        "high_coverage_lexical_release"
+    } else if !analysis.flags.is_lookup_like
+        && inputs.top_doc_distinct_term_hits >= 2
+        && inputs.top_doc_term_coverage >= 0.4
+    {
+        "coverage_release"
+    } else {
+        "score_release"
+    };
 
-    if top_doc_count >= 2 && top_doc_strict_lexical >= 1 && has_strong_document_signal(top) {
-        return GatingDecision::allow(
-            "strict_lexical_document_consensus",
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
-        );
+    GatingDecision {
+        refuse,
+        reason,
+        top_doc_distinct_term_hits: inputs.top_doc_distinct_term_hits,
+        top_doc_term_coverage: inputs.top_doc_term_coverage,
+        top_doc_phrase_quality: inputs.top_doc_phrase_quality,
+        gate_score: EvidenceGateScore {
+            score: effective_score.clamp(0, 100),
+            threshold,
+            profile,
+            hard_block_reason: None,
+            breakdown,
+            decision_stage: GatingDecisionStage::SoftGate,
+        },
     }
-
-    if !has_any_chunk_lexical(top) && top.dense_rank.is_some() && query_is_long {
-        return GatingDecision::refuse(
-            "dense_only_long_query",
-            top_doc_distinct_term_hits,
-            top_doc_term_coverage,
-            top_doc_phrase_quality,
-        );
-    }
-
-    GatingDecision::refuse(
-        "insufficient_evidence",
-        top_doc_distinct_term_hits,
-        top_doc_term_coverage,
-        top_doc_phrase_quality,
-    )
 }
 
 pub(crate) fn apply_gating_metrics(
@@ -221,7 +334,21 @@ pub(crate) fn apply_gating_metrics(
     analysis: &QueryAnalysis,
     evidence: &[MergedEvidence],
 ) -> bool {
-    let decision = evaluate_gating_decision(analysis, evidence);
+    apply_gating_metrics_with_profile(
+        metrics,
+        analysis,
+        evidence,
+        DEFAULT_RETRIEVAL_GATING_PROFILE,
+    )
+}
+
+pub(crate) fn apply_gating_metrics_with_profile(
+    metrics: &mut RetrievalMetrics,
+    analysis: &QueryAnalysis,
+    evidence: &[MergedEvidence],
+    profile: RetrievalGatingProfile,
+) -> bool {
+    let decision = evaluate_gating_decision_with_profile(analysis, evidence, profile);
     metrics.top_doc_distinct_term_hits = decision.top_doc_distinct_term_hits;
     metrics.top_doc_term_coverage = decision.top_doc_term_coverage;
     metrics.gating_decision_reason = decision.reason.to_string();
@@ -230,6 +357,12 @@ pub(crate) fn apply_gating_metrics(
         .map(PhraseQuality::as_str)
         .unwrap_or("none")
         .to_string();
+    metrics.gating_score = decision.gate_score.score;
+    metrics.gating_threshold = decision.gate_score.threshold;
+    metrics.gating_profile = decision.gate_score.profile.as_str().to_string();
+    metrics.gating_hard_block_reason = decision.gate_score.hard_block_reason.clone();
+    metrics.gating_breakdown = decision.gate_score.breakdown.clone();
+    metrics.decision_stage = decision.gate_score.decision_stage;
     decision.refuse
 }
 
@@ -277,12 +410,12 @@ pub(crate) fn compound_part_has_grounded_evidence(
     if has_strong_document_signal(top) {
         return true;
     }
-    let top_doc_path = top.chunk.file_path.to_string_lossy().to_string();
-    let top_doc_evidence = evidence
+    let top_group = source_group_key(&top.relative_path, &top.chunk.file_path.to_string_lossy());
+    let top_group_items = evidence
         .iter()
-        .filter(|item| item.chunk.file_path.to_string_lossy() == top_doc_path)
+        .filter(|item| source_group_key(&item.relative_path, &item.chunk.file_path.to_string_lossy()) == top_group)
         .collect::<Vec<_>>();
-    let (hits, coverage) = compute_top_doc_term_coverage(analysis, &top_doc_evidence);
+    let (hits, coverage) = compute_top_doc_term_coverage(analysis, &top_group_items);
     hits >= 2 && coverage >= 0.4
 }
 
@@ -322,9 +455,61 @@ pub(crate) fn has_strong_document_signal(item: &MergedEvidence) -> bool {
         || item.document_has_filename_signal
         || item.document_has_strict_lexical
         || item.document_reason == "scope"
-    // NOTE: docs_phrase 被故意排除在外。
-    // meta-analysis 文档（如 docs/AI.md）容易产生虚假的 Specific docs_phrase 信号，
-    // 如果算 strong signal 会污染 rankings 并错误穿透 gating。
+}
+
+pub(crate) fn has_document_level_grounding(item: &MergedEvidence) -> bool {
+    item.document_has_exact_signal
+        || item.document_has_filename_signal
+        || item.document_has_strict_lexical
+        || item.document_reason == "scope"
+}
+
+pub(crate) fn has_any_grounding_signal(item: &MergedEvidence) -> bool {
+    has_document_level_grounding(item) || has_any_chunk_lexical(item)
+}
+
+fn has_grounded_single_chunk_release(
+    analysis: &QueryAnalysis,
+    top_group_items: &[&MergedEvidence],
+    inputs: &EvidenceScoreInputs,
+    breakdown: &GatingBreakdown,
+) -> bool {
+    if top_group_items.is_empty() {
+        return false;
+    }
+
+    let has_lexical = top_group_items.iter().any(|item| has_any_chunk_lexical(item));
+    let has_doc_signal = top_group_items.iter().any(|item| has_document_level_grounding(item));
+    if !(has_lexical || has_doc_signal) {
+        return false;
+    }
+
+    if breakdown.dense_only_penalty < 0 {
+        return false;
+    }
+
+    if matches!(analysis.query_family, QueryFamily::ImplementationLookup) {
+        return has_doc_signal
+            && breakdown.lookup_boost > 0
+            && inputs.top_doc_term_coverage >= 0.25;
+    }
+
+    if analysis.flags.is_lookup_like {
+        if has_doc_signal
+            && breakdown.lookup_boost > 0
+            && inputs.top_doc_distinct_term_hits >= 2
+            && inputs.top_doc_term_coverage >= 0.5
+        {
+            return true;
+        }
+        return inputs.top_doc_term_coverage >= 0.6
+            && inputs.top_doc_distinct_term_hits >= 2
+            && (breakdown.lexical_grounding >= 12 || breakdown.document_signal > 0);
+    }
+
+    inputs.top_doc_term_coverage >= 0.4
+        && inputs.top_doc_distinct_term_hits >= 2
+        && breakdown.lexical_grounding >= 12
 }
 
 pub(crate) fn direct_chunk_lexical_signal(
@@ -338,33 +523,19 @@ pub(crate) fn direct_chunk_lexical_signal(
     let mut broad_hits = 0_u32;
 
     for term in analysis
-        .identifier_terms
+        .chunk_terms
         .iter()
+        .chain(analysis.identifier_terms.iter())
         .chain(analysis.filename_like_terms.iter())
     {
-        if chunk_text_contains_term(&content, &heading, &file_path, term) {
-            strict_hits += 1;
-        }
-    }
-
-    for term in &analysis.chunk_terms {
-        if !is_direct_lexical_support_term(term) {
+        let normalized = term.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
             continue;
         }
-        if chunk_text_contains_term(&content, &heading, &file_path, term) {
-            let is_noise = term.chars().any(is_cjk) && CJK_DOC_NOISE_TERMS.contains(&term.as_str());
-            if is_noise {
-                // 高频 CJK 噪声词只算 broad hit，防止无关文档被拉入 rankings
-                broad_hits += 1;
-            } else if term.chars().any(is_cjk)
-                || term.chars().any(|ch| ch.is_ascii_digit())
-                || term
-                    .chars()
-                    .any(|ch| matches!(ch, '.' | '/' | '\\' | '_' | '-'))
-            {
+        if chunk_text_contains_term(&content, &heading, &file_path, &normalized) {
+            broad_hits += 1;
+            if normalized.len() >= 4 || normalized.contains('/') || normalized.contains('\\') {
                 strict_hits += 1;
-            } else {
-                broad_hits += 1;
             }
         }
     }
@@ -378,410 +549,28 @@ pub(crate) fn direct_chunk_lexical_signal(
     }
 }
 
-pub(crate) fn is_direct_lexical_support_term(term: &str) -> bool {
-    term.chars().any(is_cjk)
-        || term.chars().any(|ch| ch.is_ascii_digit())
-        || term
-            .chars()
-            .any(|ch| matches!(ch, '.' | '/' | '\\' | '_' | '-'))
-        || term.chars().count() >= 6
-}
-
-pub(crate) fn chunk_text_contains_term(
-    content: &str,
-    heading: &str,
-    file_path: &str,
-    term: &str,
-) -> bool {
-    let needle = term.trim().to_ascii_lowercase();
-    !needle.is_empty()
-        && (content.contains(&needle) || heading.contains(&needle) || file_path.contains(&needle))
-}
-
-pub(crate) fn should_force_missing_file_lookup(
-    analysis: &QueryAnalysis,
-    evidence: &[MergedEvidence],
-) -> bool {
-    if !analysis.flags.is_lookup_like {
-        return false;
-    }
-
-    let has_document_signal = evidence.iter().any(has_strong_document_signal);
-    let lower = analysis.normalized_query.to_ascii_lowercase();
-    let asks_for_content = is_direct_content_request_query(&analysis.normalized_query);
-    let mentions_scope_exclusion = lower.contains("scope")
-        && (analysis.normalized_query.contains("不包含")
-            || lower.contains("not include")
-            || lower.contains("outside scope"));
-    let has_named_file_term = analysis
-        .identifier_terms
-        .iter()
-        .chain(analysis.filename_like_terms.iter())
-        .any(|term| is_named_file_lookup_term(term));
-    let has_requested_path_match = evidence_matches_requested_file(analysis, evidence);
-
-    (mentions_scope_exclusion || (asks_for_content && has_named_file_term))
-        && !has_requested_path_match
-        || (!has_document_signal
-            && asks_for_content
-            && analysis
-                .identifier_terms
-                .iter()
-                .any(|term| term.contains('.') || term.contains('/') || term.contains('\\')))
-}
-
-pub(crate) fn is_direct_content_request_query(query: &str) -> bool {
-    let lower = query.to_ascii_lowercase();
-    [
-        "summarize",
-        "summary",
-        "content",
-        "contents",
-        "帮我总结",
-        "总结",
-        "概括",
-        "内容",
-        "解释",
-        "from my vault",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker) || query.contains(marker))
-}
-
-pub(crate) fn should_mark_missing_file_lookup_intent(analysis: &QueryAnalysis) -> bool {
-    is_direct_content_request_query(&analysis.normalized_query)
-        && analysis
-            .identifier_terms
-            .iter()
-            .chain(analysis.filename_like_terms.iter())
-            .any(|term| is_named_file_lookup_term(term))
-}
-
-pub(crate) fn is_named_file_lookup_term(term: &str) -> bool {
-    term.chars().any(is_cjk)
-        || term.chars().any(|ch| ch.is_ascii_digit())
-        || term
-            .chars()
-            .any(|ch| matches!(ch, '.' | '/' | '\\' | '_' | '-'))
-}
-
-pub(crate) fn evidence_matches_requested_file(
-    analysis: &QueryAnalysis,
-    evidence: &[MergedEvidence],
-) -> bool {
-    let requested_terms = analysis
-        .identifier_terms
-        .iter()
-        .chain(analysis.filename_like_terms.iter())
-        .filter(|term| is_named_file_lookup_term(term))
-        .map(|term| term.trim().to_ascii_lowercase())
-        .collect::<Vec<_>>();
-
-    if requested_terms.is_empty() {
-        return false;
-    }
-
-    evidence.iter().any(|item| {
-        let relative = item.relative_path.to_ascii_lowercase();
-        let file_name = item
-            .chunk
-            .file_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        requested_terms.iter().any(|term| {
-            relative.contains(term)
-                || file_name == *term
-                || file_name
-                    .strip_suffix(".md")
-                    .is_some_and(|stem| stem == term)
-        })
-    })
-}
-
-pub(crate) fn classify_query_intent(query: &str, flags: &QueryFlags) -> QueryIntent {
-    if is_secret_request_query(query) {
-        return QueryIntent::SecretRequest;
-    }
-    if is_external_fact_query(query) {
-        return QueryIntent::ExternalFact;
-    }
-    if flags.is_lookup_like {
-        QueryIntent::RepoLookup
+fn source_group_key(relative_path: &str, file_path: &str) -> String {
+    let source = if relative_path.trim().is_empty() {
+        file_path
     } else {
-        QueryIntent::RepoQuestion
+        relative_path
+    };
+    let normalized = source.replace('\\', "/").to_ascii_lowercase();
+    let parent = normalized
+        .rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .unwrap_or("");
+    let file_name = normalized.rsplit('/').next().unwrap_or(&normalized);
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    let canonical_stem = stem
+        .trim_start_matches(|ch: char| ch.is_ascii_digit() || ch == '_' || ch == '-')
+        .to_string();
+    if parent.is_empty() {
+        canonical_stem
+    } else {
+        format!("{parent}/{canonical_stem}")
     }
-}
-
-pub(crate) fn is_external_fact_query(query: &str) -> bool {
-    let lower = query.trim().to_ascii_lowercase();
-    if lower.is_empty() {
-        return false;
-    }
-
-    let role_fact_patterns = ["ceo of", "president of", "capital of", "founder of"];
-    let time_sensitive_patterns = [
-        "price today",
-        "stock price",
-        "bitcoin price",
-        "btc price",
-        "weather today",
-        "news today",
-        "today's news",
-    ];
-
-    role_fact_patterns
-        .iter()
-        .any(|pattern| lower.contains(pattern))
-        || time_sensitive_patterns
-            .iter()
-            .any(|pattern| lower.contains(pattern))
-        || query.contains("今天比特币价格")
-        || query.contains("今天新闻")
-}
-
-pub(crate) fn is_secret_request_query(query: &str) -> bool {
-    let lower = query.trim().to_ascii_lowercase();
-    if lower.is_empty() {
-        return false;
-    }
-
-    let sensitive_markers = [
-        "api key",
-        "apikey",
-        "secret",
-        "password",
-        "credential",
-        "credentials",
-        "token",
-        "密钥",
-        "密码",
-        "凭据",
-    ];
-    let request_markers = [
-        "hidden",
-        "show",
-        "reveal",
-        "export",
-        "dump",
-        "what is",
-        "local settings",
-        "显示",
-        "导出",
-        "隐藏",
-        "本地设置",
-    ];
-
-    sensitive_markers
-        .iter()
-        .any(|marker| lower.contains(marker) || query.contains(marker))
-        && request_markers
-            .iter()
-            .any(|marker| lower.contains(marker) || query.contains(marker))
-}
-
-pub(crate) fn is_lookup_like_query(query: &str) -> bool {
-    let trimmed = query.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if trimmed.contains('.')
-        || trimmed.contains('/')
-        || trimmed.contains('\\')
-        || trimmed.contains('_')
-    {
-        return true;
-    }
-    // CJK-only queries are never lookup-like (no spaces, token count is misleading)
-    if trimmed.chars().all(|ch| is_cjk(ch) || ch.is_whitespace()) {
-        return false;
-    }
-    if trimmed.chars().any(|ch| ch.is_ascii_digit()) && query_token_count(trimmed) <= 6 {
-        return true;
-    }
-    query_token_count(trimmed) <= 3 && trimmed.chars().count() <= 48
-}
-
-pub(crate) fn classify_query_family(
-    query: &str,
-    raw_tokens: &[String],
-    document_terms: &[String],
-    filename_terms: &[String],
-    identifier_terms: &[String],
-    flags: &QueryFlags,
-) -> QueryFamily {
-    if looks_like_docs_api_lookup(query, raw_tokens) {
-        return QueryFamily::DocsApiLookup;
-    }
-
-    if looks_like_implementation_lookup(
-        query,
-        document_terms,
-        filename_terms,
-        identifier_terms,
-        flags,
-    ) {
-        return QueryFamily::ImplementationLookup;
-    }
-
-    QueryFamily::DocsExplanatory
-}
-
-pub(crate) fn looks_like_docs_api_lookup(query: &str, raw_tokens: &[String]) -> bool {
-    let lower = query.to_ascii_lowercase();
-    let has_http_path = has_http_method_and_path(raw_tokens);
-    let docs_api_markers = [
-        "return",
-        "returns",
-        "response",
-        "responses",
-        "metrics",
-        "api",
-        "返回",
-        "返回什么",
-        "返回哪些",
-        "指标",
-    ];
-    let implementation_markers = [
-        "which file",
-        "which entry",
-        "protocol",
-        "struct",
-        "enum",
-        "type",
-        "哪个文件",
-        "哪个入口",
-        "属于哪类查询",
-        "怎么处理",
-        "协议",
-        "结构体",
-        "枚举",
-        "类型",
-    ];
-
-    has_http_path
-        && docs_api_markers
-            .iter()
-            .any(|marker| lower.contains(marker) || query.contains(marker))
-        && !implementation_markers
-            .iter()
-            .any(|marker| lower.contains(marker) || query.contains(marker))
-}
-
-pub(crate) fn looks_like_implementation_lookup(
-    query: &str,
-    document_terms: &[String],
-    filename_terms: &[String],
-    identifier_terms: &[String],
-    flags: &QueryFlags,
-) -> bool {
-    let lower = query.to_ascii_lowercase();
-    let has_enterprise_docs_markers = looks_like_enterprise_docs_question(query, &lower);
-    let has_code_like_identifier = identifier_terms.iter().any(|term| {
-        term.contains('.')
-            || term.contains('/')
-            || term.contains('\\')
-            || term.contains('_')
-            || has_ascii_camel_case(term)
-    });
-    let implementation_markers = [
-        "which file",
-        "which entry",
-        "implementation",
-        "field",
-        "fields",
-        "symbol",
-        "test",
-        "tests",
-        "query",
-        "哪个文件",
-        "哪个入口",
-        "属于哪类查询",
-        "怎么处理",
-        "实现",
-        "字段",
-        "符号",
-        "测试",
-        "入口",
-        "协议",
-    ];
-
-    if has_enterprise_docs_markers {
-        return implementation_markers
-            .iter()
-            .any(|marker| lower.contains(marker) || query.contains(marker))
-            || has_code_like_identifier
-            || (!filename_terms.is_empty() && flags.has_path_like_token && document_terms.len() <= 8);
-    }
-
-    implementation_markers
-        .iter()
-        .any(|marker| lower.contains(marker) || query.contains(marker))
-        || !identifier_terms.is_empty()
-        || (!filename_terms.is_empty() && flags.has_path_like_token && document_terms.len() <= 8)
-        || (flags.has_ascii_identifier && flags.is_lookup_like)
-}
-
-pub(crate) fn looks_like_enterprise_docs_question(query: &str, lower: &str) -> bool {
-    let enterprise_markers = [
-        "负责人",
-        "内部规定",
-        "北极星指标",
-        "核心规定",
-        "关键指标",
-        "验收要求",
-        "验收",
-        "风险",
-        "阈值",
-        "定义",
-        "时限",
-        "窗口",
-        "目标",
-        "口径",
-        "sla",
-        "nrr",
-        "incident commander",
-    ];
-    enterprise_markers
-        .iter()
-        .any(|marker| lower.contains(marker) || query.contains(marker))
-}
-
-pub(crate) fn has_http_method_and_path(raw_tokens: &[String]) -> bool {
-    let has_method = raw_tokens.iter().any(|token| {
-        matches!(
-            token.to_ascii_lowercase().as_str(),
-            "get" | "post" | "put" | "patch" | "delete"
-        )
-    });
-    let has_path = raw_tokens.iter().any(|token| token.contains('/'));
-    has_method && has_path
-}
-
-pub(crate) fn query_token_count(query: &str) -> usize {
-    let mut count = 0;
-    let mut in_token = false;
-    for ch in query.chars() {
-        let is_token = ch.is_alphanumeric() || is_cjk(ch);
-        if is_token && !in_token {
-            count += 1;
-        }
-        in_token = is_token;
-    }
-    count
-}
-
-pub(crate) fn is_cjk(ch: char) -> bool {
-    ('\u{4E00}'..='\u{9FFF}').contains(&ch)
-        || ('\u{3400}'..='\u{4DBF}').contains(&ch)
-        || ('\u{3040}'..='\u{30FF}').contains(&ch)
-}
-
-pub(crate) fn elapsed_ms_u64(started_at: Instant) -> u64 {
-    started_at
-        .elapsed()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX)
 }

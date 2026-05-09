@@ -1,7 +1,29 @@
 ﻿use super::*;
-use crate::engine::answer_indicates_insufficient_evidence;
+use crate::engine::{
+    answer_indicates_insufficient_evidence_with_mode, clean_generation_answer,
+};
 
 impl MemoriEngine {
+    fn retrieval_gating_profile(&self) -> RetrievalGatingProfile {
+        std::env::var(MEMORI_RETRIEVAL_GATING_PROFILE_ENV)
+            .ok()
+            .map(|value| RetrievalGatingProfile::from_value(&value))
+            .unwrap_or(DEFAULT_RETRIEVAL_GATING_PROFILE)
+    }
+
+    fn generation_refusal_mode(&self) -> GenerationRefusalMode {
+        std::env::var(MEMORI_GENERATION_REFUSAL_MODE_ENV)
+            .ok()
+            .map(|value| GenerationRefusalMode::from_value(&value))
+            .unwrap_or(DEFAULT_GENERATION_REFUSAL_MODE)
+    }
+
+    fn gating_retry_on_refusal(&self) -> bool {
+        std::env::var(MEMORI_GATING_RETRY_ON_REFUSAL_ENV)
+            .ok()
+            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(DEFAULT_GATING_RETRY_ON_REFUSAL)
+    }
 
     pub async fn search(
         &self,
@@ -121,7 +143,34 @@ impl MemoriEngine {
             }
         };
 
-        if answer_indicates_insufficient_evidence(&answer) {
+        let refusal_mode = self.generation_refusal_mode();
+        let should_retry = self.gating_retry_on_refusal()
+            && !inspection.citations.is_empty()
+            && !inspection.evidence.is_empty()
+            && inspection.metrics.gating_score >= inspection.metrics.gating_threshold;
+        let answer = if answer_indicates_insufficient_evidence_with_mode(&answer, refusal_mode)
+            && should_retry
+        {
+            let retry_started_at = Instant::now();
+            let retry_question = format!(
+                "{answer_question}\n\n仅基于已给证据作答；如果只能确认 1-2 个事实，就只回答已确认事实，不要泛化，不要说证据不足，除非证据真的为空。"
+            );
+            match self
+                .generate_answer(&retry_question, &text_context, &graph_context)
+                .await
+            {
+                Ok(retried) => {
+                    inspection.metrics.answer_ms += elapsed_ms_u64(retry_started_at);
+                    retried
+                }
+                Err(_) => answer,
+            }
+        } else {
+            answer
+        };
+
+        if answer_indicates_insufficient_evidence_with_mode(&answer, refusal_mode) {
+            inspection.metrics.decision_stage = GatingDecisionStage::Generation;
             return Ok(AskResponseStructured {
                 status: AskStatus::InsufficientEvidence,
                 answer: String::new(),
@@ -138,9 +187,10 @@ impl MemoriEngine {
             });
         }
 
+        inspection.metrics.decision_stage = GatingDecisionStage::Answered;
         Ok(AskResponseStructured {
             status: AskStatus::Answered,
-            answer,
+            answer: clean_generation_answer(&answer),
             question: inspection.question,
             scope_paths: inspection.scope_paths,
             citations: inspection.citations.clone(),
@@ -240,7 +290,6 @@ impl MemoriEngine {
             let compound_result = self
                 .retrieve_compound_evidence(
                     plan,
-                    &analysis,
                     &merged,
                     &normalized_scope_paths,
                     final_answer_k,
@@ -261,7 +310,7 @@ impl MemoriEngine {
                     } else {
                         "compound_partial_release".to_string()
                     };
-                let final_evidence = merged.into_iter().take(final_answer_k).collect::<Vec<_>>();
+                let final_evidence = select_balanced_final_evidence(merged, final_answer_k);
                 metrics.final_evidence_count = final_evidence.len();
                 let citations = build_citations(&final_evidence);
                 let evidence_items = build_evidence_items(&final_evidence);
@@ -325,7 +374,8 @@ impl MemoriEngine {
             });
         }
 
-        if apply_gating_metrics(&mut metrics, &analysis, &merged) {
+        let profile = self.retrieval_gating_profile();
+        if apply_gating_metrics_with_profile(&mut metrics, &analysis, &merged, profile) {
             info!(reason = %metrics.gating_decision_reason, "gating blocked answer as insufficient evidence");
             let citations = build_citations(&merged);
             let evidence_items = build_evidence_items(&merged);
@@ -358,7 +408,7 @@ impl MemoriEngine {
             });
         }
 
-        let final_evidence = merged.into_iter().take(final_answer_k).collect::<Vec<_>>();
+        let final_evidence = select_balanced_final_evidence(merged, final_answer_k);
         metrics.final_evidence_count = final_evidence.len();
         info!(
             final_count = final_evidence.len(),

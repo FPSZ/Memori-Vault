@@ -59,13 +59,11 @@ impl VectorStore for InMemoryStore {
         }
 
         let guard = self.records.read().await;
-        let mut scored: Vec<(DocumentChunk, f32)> = guard
-            .iter()
-            .map(|record| {
-                let score = cosine_similarity(&query_embedding, &record.embedding);
-                (record.chunk.clone(), score)
-            })
-            .collect();
+        let mut scored = Vec::with_capacity(guard.len());
+        for record in guard.iter() {
+            let score = cosine_similarity(&query_embedding, &record.embedding)?;
+            scored.push((record.chunk.clone(), score));
+        }
 
         scored.sort_by(|a, b| b.1.total_cmp(&a.1));
         scored.truncate(top_k);

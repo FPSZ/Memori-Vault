@@ -42,6 +42,19 @@ impl LocalEmbeddingClient {
         &self.model
     }
 
+    pub async fn is_service_reachable(&self) -> bool {
+        let url = format!("{}/v1/models", self.base_url.trim_end_matches('/'));
+        let mut request = self.http.get(url);
+        if let Some(key) = self.api_key.as_ref() {
+            request = request.bearer_auth(key);
+        }
+
+        match request.send().await {
+            Ok(response) => response.status().is_success(),
+            Err(_) => false,
+        }
+    }
+
     pub async fn embed_text(&self, prompt: &str) -> Result<Vec<f32>, LocalModelClientError> {
         let mut embeddings = self.embed_batch(&[prompt.to_string()]).await?;
         Ok(embeddings.pop().unwrap_or_default())

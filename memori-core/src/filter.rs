@@ -222,9 +222,11 @@ mod tests {
 
     #[test]
     fn test_should_index_file_basic() {
-        let mut filter = IndexFilterConfig::default();
-        filter.enabled = true;
-        filter.exclude_extensions = vec!["tmp".to_string()];
+        let filter = IndexFilterConfig {
+            enabled: true,
+            exclude_extensions: vec!["tmp".to_string()],
+            ..Default::default()
+        };
         assert!(!should_index_file(
             Path::new("/root/test.tmp"),
             Some(&filter),
@@ -243,10 +245,12 @@ mod tests {
 
     #[test]
     fn test_should_index_file_include_paths() {
-        let mut filter = IndexFilterConfig::default();
-        filter.enabled = true;
-        filter.exclude_paths = vec!["drafts".to_string()];
-        filter.include_paths = vec!["drafts/important.md".to_string()];
+        let filter = IndexFilterConfig {
+            enabled: true,
+            exclude_paths: vec!["drafts".to_string()],
+            include_paths: vec!["drafts/important.md".to_string()],
+            ..Default::default()
+        };
         // include_paths 优先于 exclude_paths
         assert!(should_index_file(
             Path::new("/root/drafts/important.md"),

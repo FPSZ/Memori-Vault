@@ -9,6 +9,8 @@ impl SqliteStore {
         }
 
         let conn = Connection::open(db_path).map_err(map_sqlite_error)?;
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(map_sqlite_error)?;
         initialize_schema(&conn)?;
 
         Ok(Self {
@@ -229,7 +231,17 @@ impl SqliteStore {
     pub async fn count_nodes(&self) -> Result<u64, StorageError> {
         let conn_guard = self.lock_conn()?;
         let count: i64 = conn_guard
-            .query_row("SELECT COUNT(*) FROM nodes", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(DISTINCT n.id)
+                 FROM nodes n
+                 INNER JOIN chunk_nodes cn ON cn.node_id = n.id
+                 INNER JOIN chunks c ON c.id = cn.chunk_id
+                 INNER JOIN documents d ON d.id = c.doc_id
+                 INNER JOIN file_catalog fc ON fc.file_path = d.file_path
+                 WHERE fc.removed_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
             .map_err(map_sqlite_error)?;
         u64::try_from(count).map_err(|_| StorageError::NegativeCount {
             table: "nodes",
