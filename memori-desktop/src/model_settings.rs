@@ -238,12 +238,20 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
         })
         .and_then(|value| normalize_optional_text(Some(value)));
 
+    // 自愈：历史配置可能把三个本地角色塌缩到同一端口（共享的 local_endpoint 回退导致）。
+    // 读取时检测冲突并把 graph/embed 重置为各自默认端口，避免“三个角色都指向 18001”。
+    let (local_chat_endpoint, local_graph_endpoint, local_embed_endpoint) = dedupe_local_endpoints(
+        normalize_endpoint(ModelProvider::LlamaCppLocal, &local_chat_endpoint),
+        normalize_endpoint(ModelProvider::LlamaCppLocal, &local_graph_endpoint),
+        normalize_endpoint(ModelProvider::LlamaCppLocal, &local_embed_endpoint),
+    );
+
     ModelSettingsDto {
         active_provider: provider_to_string(active_provider),
         local_profile: LocalModelProfileDto {
-            chat_endpoint: normalize_endpoint(ModelProvider::LlamaCppLocal, &local_chat_endpoint),
-            graph_endpoint: normalize_endpoint(ModelProvider::LlamaCppLocal, &local_graph_endpoint),
-            embed_endpoint: normalize_endpoint(ModelProvider::LlamaCppLocal, &local_embed_endpoint),
+            chat_endpoint: local_chat_endpoint,
+            graph_endpoint: local_graph_endpoint,
+            embed_endpoint: local_embed_endpoint,
             models_root: normalize_optional_text(settings.local_models_root.clone()),
             llama_server_path: normalize_optional_text(settings.local_llama_server_path.clone()),
             chat_model: local_chat_model,
@@ -314,18 +322,19 @@ pub(crate) fn normalize_model_settings_payload(
     payload: ModelSettingsDto,
 ) -> Result<ModelSettingsDto, String> {
     let active_provider = ModelProvider::from_value(&payload.active_provider);
-    let local_chat_endpoint = normalize_endpoint(
-        ModelProvider::LlamaCppLocal,
-        &payload.local_profile.chat_endpoint,
-    );
-    let local_graph_endpoint = normalize_endpoint(
-        ModelProvider::LlamaCppLocal,
-        &payload.local_profile.graph_endpoint,
-    );
-    let local_embed_endpoint = normalize_endpoint(
-        ModelProvider::LlamaCppLocal,
-        &payload.local_profile.embed_endpoint,
-    );
+    // 空端口按角色填默认（18001/18002/18003），而不是统一回退到对话端口。
+    let local_chat_endpoint =
+        normalize_local_endpoint_for_role("chat", &payload.local_profile.chat_endpoint);
+    let local_graph_endpoint =
+        normalize_local_endpoint_for_role("graph", &payload.local_profile.graph_endpoint);
+    let local_embed_endpoint =
+        normalize_local_endpoint_for_role("embed", &payload.local_profile.embed_endpoint);
+    // 拒绝把多个角色配到同一端口（保存时硬校验，杜绝再次塌缩）。
+    ensure_distinct_local_endpoints(
+        &local_chat_endpoint,
+        &local_graph_endpoint,
+        &local_embed_endpoint,
+    )?;
     let remote_chat_endpoint = normalize_endpoint(
         ModelProvider::OpenAiCompatible,
         &payload.remote_profile.chat_endpoint,
@@ -638,6 +647,81 @@ pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> Str
     }
 }
 
+/// 每个本地模型角色的默认 endpoint。三个角色的端口必须互不相同，
+/// 否则一个 llama-server 进程无法同时服务多个角色（且 embed 需独立的 `--embedding` 服务）。
+pub(crate) fn default_local_endpoint_for_role(role: &str) -> &'static str {
+    match role {
+        "graph" => DEFAULT_GRAPH_ENDPOINT,
+        "embed" => DEFAULT_EMBED_ENDPOINT,
+        _ => DEFAULT_CHAT_ENDPOINT,
+    }
+}
+
+/// 保存时按角色归一化本地 endpoint：为空则填入该角色的默认端口，
+/// 而不是统一回退到对话端口（历史 bug 会把三个角色塌缩到同一端口）。
+pub(crate) fn normalize_local_endpoint_for_role(role: &str, endpoint: &str) -> String {
+    let trimmed = endpoint.trim();
+    if trimmed.is_empty() {
+        default_local_endpoint_for_role(role).to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 解析 endpoint 的 (host, port)，用于判断两个角色是否落在同一个服务实例上。
+pub(crate) fn endpoint_host_port(endpoint: &str) -> Option<(String, u16)> {
+    let url = reqwest::Url::parse(endpoint.trim()).ok()?;
+    let host = url.host_str()?.to_ascii_lowercase();
+    let port = url.port_or_known_default()?;
+    Some((host, port))
+}
+
+/// 两个 endpoint 是否指向同一个 host:port（无法解析时退化为字符串比较）。
+fn same_endpoint_target(a: &str, b: &str) -> bool {
+    match (endpoint_host_port(a), endpoint_host_port(b)) {
+        (Some(x), Some(y)) => x == y,
+        _ => a.trim() == b.trim(),
+    }
+}
+
+/// 自愈：本地三角色端口塌缩到同一个时，把冲突的 graph/embed 重置为各自默认端口。
+/// 用于读取可能已损坏的历史配置（例如三个角色都被写成 18001）。
+pub(crate) fn dedupe_local_endpoints(
+    chat: String,
+    graph: String,
+    embed: String,
+) -> (String, String, String) {
+    let graph = if same_endpoint_target(&chat, &graph) {
+        default_local_endpoint_for_role("graph").to_string()
+    } else {
+        graph
+    };
+    let embed = if same_endpoint_target(&chat, &embed) || same_endpoint_target(&graph, &embed) {
+        default_local_endpoint_for_role("embed").to_string()
+    } else {
+        embed
+    };
+    (chat, graph, embed)
+}
+
+/// 校验本地三角色端口互不相同。保存时调用，拒绝把多个角色配到同一端口。
+pub(crate) fn ensure_distinct_local_endpoints(
+    chat: &str,
+    graph: &str,
+    embed: &str,
+) -> Result<(), String> {
+    let collision = same_endpoint_target(chat, graph)
+        || same_endpoint_target(chat, embed)
+        || same_endpoint_target(graph, embed);
+    if collision {
+        return Err(
+            "对话/图谱/向量三个本地模型必须使用不同的端口：一个 llama-server 进程只能服务一个角色，向量模型还需要独立的 --embedding 服务。请为每个角色设置不同的端口（默认 18001 / 18002 / 18003）。"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) {
     // SAFETY: set_var affects process env; desktop runtime is single process and this is used as runtime config source.
     unsafe {
@@ -730,4 +814,69 @@ pub(crate) fn chrono_like_now_token() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     now.to_string()
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::{
+        dedupe_local_endpoints, ensure_distinct_local_endpoints, normalize_local_endpoint_for_role,
+    };
+
+    #[test]
+    fn collapsed_local_endpoints_self_heal_to_role_defaults() {
+        // 历史 bug：三个角色都被塌缩到 18001。读取时应自愈成各自默认端口。
+        let (chat, graph, embed) = dedupe_local_endpoints(
+            "http://localhost:18001".to_string(),
+            "http://localhost:18001".to_string(),
+            "http://localhost:18001".to_string(),
+        );
+        assert_eq!(chat, "http://localhost:18001");
+        assert_eq!(graph, "http://localhost:18002");
+        assert_eq!(embed, "http://localhost:18003");
+    }
+
+    #[test]
+    fn distinct_local_endpoints_are_left_untouched() {
+        let (chat, graph, embed) = dedupe_local_endpoints(
+            "http://localhost:18001".to_string(),
+            "http://localhost:18002".to_string(),
+            "http://localhost:18003".to_string(),
+        );
+        assert_eq!((chat.as_str(), graph.as_str(), embed.as_str()), (
+            "http://localhost:18001",
+            "http://localhost:18002",
+            "http://localhost:18003",
+        ));
+    }
+
+    #[test]
+    fn empty_local_endpoint_falls_back_to_role_default_not_chat() {
+        assert_eq!(
+            normalize_local_endpoint_for_role("graph", "   "),
+            "http://localhost:18002"
+        );
+        assert_eq!(
+            normalize_local_endpoint_for_role("embed", ""),
+            "http://localhost:18003"
+        );
+    }
+
+    #[test]
+    fn saving_same_port_for_multiple_roles_is_rejected() {
+        let err = ensure_distinct_local_endpoints(
+            "http://localhost:18001",
+            "http://localhost:18001",
+            "http://localhost:18003",
+        )
+        .unwrap_err();
+        assert!(err.contains("不同的端口"));
+        assert!(
+            ensure_distinct_local_endpoints(
+                "http://localhost:18001",
+                "http://localhost:18002",
+                "http://localhost:18003",
+            )
+            .is_ok()
+        );
+    }
 }

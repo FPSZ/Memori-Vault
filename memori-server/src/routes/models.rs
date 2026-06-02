@@ -1,14 +1,20 @@
 use crate::*;
 
-pub(crate) async fn get_model_settings_handler() -> Result<Json<ModelSettingsDto>, ApiError> {
+pub(crate) async fn get_model_settings_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<ModelSettingsDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let settings = load_app_settings().map_err(ApiError::internal)?;
     Ok(Json(resolve_model_settings(&settings)))
 }
 
 pub(crate) async fn set_model_settings_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<ModelSettingsDto>,
 ) -> Result<Json<ModelSettingsDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let mut settings = load_app_settings().map_err(ApiError::internal)?;
     let normalized = normalize_model_settings_payload(payload).map_err(ApiError::bad_request)?;
     let policy = resolve_enterprise_policy(&settings);
@@ -83,7 +89,9 @@ pub(crate) async fn set_model_settings_handler(
 
 pub(crate) async fn validate_model_setup_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<ModelAvailabilityDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let settings = load_app_settings().map_err(ApiError::internal)?;
     let model_settings = resolve_model_settings(&settings);
     let active = resolve_active_runtime_settings(&model_settings);
@@ -153,8 +161,10 @@ pub(crate) async fn validate_model_setup_handler(
 
 pub(crate) async fn list_provider_models_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<ListProviderModelsRequest>,
 ) -> Result<Json<ProviderModelsDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let settings = load_app_settings().map_err(ApiError::internal)?;
     let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&payload.provider);
@@ -202,8 +212,10 @@ pub(crate) async fn list_provider_models_handler(
 
 pub(crate) async fn probe_model_provider_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<ProbeProviderRequest>,
 ) -> Result<Json<ModelAvailabilityDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let settings = load_app_settings().map_err(ApiError::internal)?;
     let policy = resolve_enterprise_policy(&settings);
     let provider = ModelProvider::from_value(&payload.provider);
@@ -255,8 +267,10 @@ pub(crate) async fn probe_model_provider_handler(
 
 pub(crate) async fn pull_model_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<PullModelRequest>,
 ) -> Result<Json<ModelAvailabilityDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let model = payload.model.trim().to_string();
     if model.is_empty() {
         return Err(ApiError::bad_request("model name cannot be empty"));
@@ -283,12 +297,15 @@ pub(crate) async fn pull_model_handler(
     pull_llama_cpp_model(&endpoint, &model, api_key.as_deref())
         .await
         .map_err(ApiError::bad_request)?;
-    validate_model_setup_handler(State(state)).await
+    validate_model_setup_handler(State(state), headers).await
 }
 
 pub(crate) async fn set_local_models_root_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<SetLocalModelsRootRequest>,
 ) -> Result<Json<ModelSettingsDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let mut settings = load_app_settings().map_err(ApiError::internal)?;
     let path = normalize_optional_text(Some(payload.path));
     if let Some(root_path) = path.as_deref() {
@@ -319,8 +336,11 @@ pub(crate) async fn set_local_models_root_handler(
 }
 
 pub(crate) async fn scan_local_model_files_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<ScanLocalModelFilesRequest>,
 ) -> Result<Json<Vec<String>>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let root = normalize_optional_text(payload.root);
     if let Some(root) = root {
         let models = scan_local_model_files_from_root(&PathBuf::from(root))

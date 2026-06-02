@@ -5,7 +5,7 @@ pub(crate) async fn admin_trigger_reindex_handler(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let session = require_session(&state, &headers, Role::Operator).await?;
-    let response = trigger_reindex_handler(State(state.clone())).await?;
+    let response = trigger_reindex_handler(State(state.clone()), headers.clone()).await?;
     append_audit_event(
         &state,
         AuditEventDto {
@@ -26,7 +26,7 @@ pub(crate) async fn admin_pause_indexing_handler(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let session = require_session(&state, &headers, Role::Operator).await?;
-    let response = pause_indexing_handler(State(state.clone())).await?;
+    let response = pause_indexing_handler(State(state.clone()), headers.clone()).await?;
     append_audit_event(
         &state,
         AuditEventDto {
@@ -47,7 +47,7 @@ pub(crate) async fn admin_resume_indexing_handler(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let session = require_session(&state, &headers, Role::Operator).await?;
-    let response = resume_indexing_handler(State(state.clone())).await?;
+    let response = resume_indexing_handler(State(state.clone()), headers.clone()).await?;
     append_audit_event(
         &state,
         AuditEventDto {
@@ -65,7 +65,9 @@ pub(crate) async fn admin_resume_indexing_handler(
 
 pub(crate) async fn get_vault_stats_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<VaultStats>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Viewer).await?;
     let init_error_message = state.init_error.lock().await.clone();
     let engine_guard = state.engine.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
@@ -83,7 +85,9 @@ pub(crate) async fn get_vault_stats_handler(
 
 pub(crate) async fn get_indexing_status_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<IndexingStatus>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Viewer).await?;
     let init_error_message = state.init_error.lock().await.clone();
     let engine_guard = state.engine.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
@@ -101,8 +105,10 @@ pub(crate) async fn get_indexing_status_handler(
 
 pub(crate) async fn set_indexing_mode_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<SetIndexingModePayload>,
 ) -> Result<Json<AppSettingsDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let mut settings = load_app_settings().map_err(ApiError::internal)?;
     let mode = IndexingMode::from_value(&payload.indexing_mode);
     let budget = ResourceBudget::from_value(&payload.resource_budget);
@@ -149,7 +155,9 @@ pub(crate) async fn set_indexing_mode_handler(
 
 pub(crate) async fn trigger_reindex_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let init_error_message = state.init_error.lock().await.clone();
     let engine_guard = state.engine.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
@@ -169,7 +177,9 @@ pub(crate) async fn trigger_reindex_handler(
 
 pub(crate) async fn pause_indexing_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let init_error_message = state.init_error.lock().await.clone();
     let engine_guard = state.engine.lock().await;
     let Some(engine) = engine_guard.as_ref() else {
@@ -184,7 +194,9 @@ pub(crate) async fn pause_indexing_handler(
 
 pub(crate) async fn resume_indexing_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let init_error_message = state.init_error.lock().await.clone();
     let engine_guard = state.engine.lock().await;
     let Some(engine) = engine_guard.as_ref() else {

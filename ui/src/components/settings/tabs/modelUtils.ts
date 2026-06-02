@@ -121,6 +121,17 @@ function endpointHasUsablePort(endpoint: string): boolean {
   }
 }
 
+/** 返回 endpoint 的 host:port 目标标识，用于判断两个角色是否落在同一服务上。 */
+function endpointTarget(endpoint: string): string | null {
+  try {
+    const url = new URL(endpoint.trim());
+    const port = url.port || (url.protocol === "https:" ? "443" : "80");
+    return `${url.hostname.toLowerCase()}:${port}`;
+  } catch {
+    return null;
+  }
+}
+
 function optionalNumber(value: string, min?: number): number | null {
   if (value.trim() === "") return null;
   const parsed = Number(value);
@@ -154,6 +165,22 @@ function validateLocalRoles(
     }
     if (!endpoint || !endpointHasUsablePort(endpoint)) {
       roleErrors[role] = `${label}端口/endpoint 无效，请检查端口号。`;
+    }
+  }
+
+  // 端口不可重复：一个 llama-server 进程只能服务一个角色，向量模型还需独立的 --embedding 服务。
+  const seenTargets = new Map<string, ModelRoleKey>();
+  for (const role of roles) {
+    if (roleErrors[role]) continue;
+    const target = endpointTarget(roleEndpoint(profile, role));
+    if (!target) continue;
+    const previous = seenTargets.get(target);
+    if (previous) {
+      const message = `${ROLE_META[previous].label}与${ROLE_META[role].label}使用了相同的端口（${target}）。三个角色必须使用不同的端口（默认 18001 / 18002 / 18003）。`;
+      roleErrors[previous] = roleErrors[previous] ?? message;
+      roleErrors[role] = message;
+    } else {
+      seenTargets.set(target, role);
     }
   }
 

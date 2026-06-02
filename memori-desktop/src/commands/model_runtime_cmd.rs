@@ -611,6 +611,20 @@ pub(crate) async fn stop_local_model_role(
             .ok()
             .map(|settings| resolve_model_settings(&settings).local_profile)
             .and_then(|profile| endpoint_port(&role_endpoint(&profile, role)).ok());
+        // 防止误杀：如果该端口其实是 app 启动的另一个角色（端口配置相同时），
+        // 按端口杀进程会把那个角色一并杀掉。此时拒绝并提示用户先把端口配置成各不相同。
+        if let Some(port) = port {
+            let guard = state.local_models.lock().await;
+            if let Some(other_role) = guard
+                .iter()
+                .find(|(_, p)| p.port == port)
+                .map(|(r, _)| r.clone())
+            {
+                return Err(format!(
+                    "端口 {port} 正由本会话启动的「{other_role}」模型占用，无法作为「{role}」的外部进程关闭——多个角色配置了相同端口。请先在设置里为每个角色设置不同的端口（默认 18001 / 18002 / 18003），再分别停止。"
+                ));
+            }
+        }
         return stop_external_model_on_port(role, port);
     };
     let pid = process.child.id();

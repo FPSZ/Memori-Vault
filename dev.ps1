@@ -1,4 +1,4 @@
-# 一键启动：同时拉起 服务端(memori-server) + 桌面端(memori-desktop, 自动带起前端 UI)
+﻿# 一键启动：同时拉起 服务端(memori-server) + 桌面端(memori-desktop, 自动带起前端 UI)
 #
 # 用法：
 #   .\dev.ps1                 # 同时启动服务端 + 桌面端，各开一个窗口看日志

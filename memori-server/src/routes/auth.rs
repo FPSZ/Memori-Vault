@@ -4,6 +4,11 @@ pub(crate) async fn oidc_login_handler(
     State(state): State<ServerState>,
     Json(payload): Json<OidcLoginRequest>,
 ) -> Result<Json<OidcLoginResponse>, ApiError> {
+    if !allow_insecure_oidc_dev_login() {
+        return Err(ApiError::service_unavailable(
+            "OIDC login is disabled until signed token verification is configured. Use MEMORI_SERVER_ADMIN_TOKEN for server administration or set MEMORI_INSECURE_OIDC_DEV_LOGIN=1 only for local development.",
+        ));
+    }
     let policy = resolve_enterprise_policy(&load_app_settings().map_err(ApiError::internal)?);
     let token = payload
         .id_token
@@ -12,13 +17,8 @@ pub(crate) async fn oidc_login_handler(
         .ok_or_else(|| ApiError::bad_request("OIDC login requires id_token or access_token"))?;
     let claims = decode_jwt_claims(token).map_err(ApiError::unauthorized)?;
     let now = unix_now_secs();
-    validate_oidc_claims(
-        &claims,
-        &policy.auth.issuer,
-        &policy.auth.client_id,
-        now,
-    )
-    .map_err(ApiError::unauthorized)?;
+    validate_oidc_claims(&claims, &policy.auth.issuer, &policy.auth.client_id, now)
+        .map_err(ApiError::unauthorized)?;
 
     let subject = claims
         .get("sub")

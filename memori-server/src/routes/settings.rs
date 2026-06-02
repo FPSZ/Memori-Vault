@@ -1,6 +1,10 @@
 use crate::*;
 
-pub(crate) async fn get_app_settings_handler() -> Result<Json<AppSettingsDto>, ApiError> {
+pub(crate) async fn get_app_settings_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<AppSettingsDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Viewer).await?;
     let settings = load_app_settings().map_err(ApiError::internal)?;
     let watch_root = resolve_watch_root_from_settings(&settings).map_err(ApiError::internal)?;
     let indexing = resolve_indexing_config(&settings);
@@ -12,8 +16,11 @@ pub(crate) async fn get_app_settings_handler() -> Result<Json<AppSettingsDto>, A
 }
 
 pub(crate) async fn set_memory_settings_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<MemorySettingsDto>,
 ) -> Result<Json<AppSettingsDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let mut settings = load_app_settings().map_err(ApiError::internal)?;
     apply_memory_settings(&mut settings, payload);
     save_app_settings(&settings).map_err(ApiError::internal)?;
@@ -44,7 +51,8 @@ fn apply_memory_settings(settings: &mut AppSettings, payload: MemorySettingsDto)
     // ADR-003/P1 keeps graph as explanation context only; it must not affect
     // the main retrieval ranking until an explicit ranking experiment ships.
     settings.graph_ranking_enabled = Some(false);
-    settings.retrieval_gating_profile = Some(normalize_gating_profile(&payload.retrieval_gating_profile));
+    settings.retrieval_gating_profile =
+        Some(normalize_gating_profile(&payload.retrieval_gating_profile));
     settings.generation_refusal_mode = Some(normalize_generation_refusal_mode(
         &payload.generation_refusal_mode,
     ));
@@ -108,18 +116,17 @@ fn apply_runtime_gating_settings(settings: &AppSettings) {
         );
         std::env::set_var(
             memori_core::MEMORI_GATING_RETRY_ON_REFUSAL_ENV,
-            settings
-                .gating_retry_on_refusal
-                .unwrap_or(true)
-                .to_string(),
+            settings.gating_retry_on_refusal.unwrap_or(true).to_string(),
         );
     }
 }
 
 pub(crate) async fn set_watch_root_handler(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<SetWatchRootRequest>,
 ) -> Result<Json<AppSettingsDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
     let trimmed = payload.path.trim();
     if trimmed.is_empty() {
         return Err(ApiError::bad_request("watch root path is empty"));
@@ -139,9 +146,9 @@ pub(crate) async fn set_watch_root_handler(
         )));
     }
 
-    let canonical = watch_root
-        .canonicalize()
-        .map_err(|err| ApiError::bad_request(format!("failed to canonicalize watch root: {err}")))?;
+    let canonical = watch_root.canonicalize().map_err(|err| {
+        ApiError::bad_request(format!("failed to canonicalize watch root: {err}"))
+    })?;
 
     let mut settings = load_app_settings().map_err(ApiError::internal)?;
     settings.watch_root = Some(canonical.to_string_lossy().to_string());
@@ -244,7 +251,11 @@ fn score_setting_candidate(query: &str, query_terms: &[String], key: &str, text:
         }
     }
 
-    if query_terms.len() > 1 && query_terms.iter().all(|term| normalized_text.contains(term)) {
+    if query_terms.len() > 1
+        && query_terms
+            .iter()
+            .all(|term| normalized_text.contains(term))
+    {
         score += 40;
     }
 

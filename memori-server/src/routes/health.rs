@@ -15,7 +15,7 @@ pub(crate) async fn admin_health_handler(
     drop(engine_guard);
 
     let indexing_status = if ready {
-        get_indexing_status_handler(State(state.clone()))
+        get_indexing_status_handler(State(state.clone()), headers.clone())
             .await
             .ok()
             .map(|r| r.0)

@@ -167,6 +167,13 @@ impl MemoriEngine {
             .min(100)
         };
 
+        // run_full_rebuild 期间会把 runtime.paused 置为 true 作为内部互斥锁，
+        // 阻止增量守护任务与图谱 worker 抢占正在进行的重建——它不是用户发起的暂停。
+        // 因此重建进行中不应在状态里上报为“已暂停”，否则 UI 会出现
+        // “后台构建已暂停 + 重建中 + 向量化中”自相矛盾的展示。
+        let paused_reported =
+            runtime.paused && metadata.rebuild_state != memori_storage::RebuildState::Rebuilding;
+
         Ok(IndexingStatus {
             phase,
             indexed_docs,
@@ -178,7 +185,7 @@ impl MemoriEngine {
             progress_percent,
             last_scan_at: runtime.last_scan_at,
             last_error: runtime.last_error.clone(),
-            paused: runtime.paused,
+            paused: paused_reported,
             mode: runtime.config.mode,
             resource_budget: runtime.config.resource_budget,
             rebuild_state: rebuild_state.as_str().to_string(),

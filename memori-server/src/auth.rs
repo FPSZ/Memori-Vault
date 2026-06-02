@@ -12,6 +12,15 @@ pub(crate) async fn require_session(
             "missing bearer token, please log in first",
         ));
     };
+    if is_configured_admin_token(&session_token) {
+        let now = unix_now_secs();
+        return Ok(SessionInfo {
+            subject: "server-admin-token".to_string(),
+            role: Role::Admin,
+            issued_at: now,
+            expires_at: now + DEFAULT_SESSION_TTL_SECS,
+        });
+    }
     let now = unix_now_secs();
     let mut sessions = state.sessions.lock().await;
     sessions.retain(|_, session| session.expires_at > now);
@@ -24,13 +33,6 @@ pub(crate) async fn require_session(
         return Err(ApiError::forbidden("insufficient permissions"));
     }
     Ok(session)
-}
-
-pub(crate) async fn resolve_actor_subject(state: &ServerState, headers: &HeaderMap) -> String {
-    match require_session(state, headers, Role::Viewer).await {
-        Ok(session) => session.subject,
-        Err(_) => "anonymous".to_string(),
-    }
 }
 
 pub(crate) fn decode_jwt_claims(token: &str) -> Result<serde_json::Value, String> {
@@ -61,6 +63,38 @@ pub(crate) fn decode_jwt_claims(token: &str) -> Result<serde_json::Value, String
     }
 
     decode_jwt_segment(payload, "payload")
+}
+
+pub(crate) fn allow_insecure_oidc_dev_login() -> bool {
+    std::env::var("MEMORI_INSECURE_OIDC_DEV_LOGIN")
+        .ok()
+        .is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+}
+
+fn is_configured_admin_token(token: &str) -> bool {
+    let configured = std::env::var("MEMORI_SERVER_ADMIN_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| value.len() >= 24);
+    configured
+        .as_deref()
+        .is_some_and(|expected| constant_time_eq(token.trim().as_bytes(), expected.as_bytes()))
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (a, b) in left.iter().zip(right.iter()) {
+        diff |= a ^ b;
+    }
+    diff == 0
 }
 
 fn decode_jwt_segment(segment: &str, segment_name: &str) -> Result<serde_json::Value, String> {
@@ -96,16 +130,21 @@ pub(crate) fn validate_oidc_claims(
     }
 
     let expected_audience = audience.trim();
-    if !expected_audience.is_empty() && !claim_matches_audience(claims.get("aud"), expected_audience)
+    if !expected_audience.is_empty()
+        && !claim_matches_audience(claims.get("aud"), expected_audience)
     {
         return Err("OIDC token audience does not match policy".to_string());
     }
 
-    if let Some(exp) = claims.get("exp").and_then(json_i64) && exp <= now {
+    if let Some(exp) = claims.get("exp").and_then(json_i64)
+        && exp <= now
+    {
         return Err("OIDC token has expired".to_string());
     }
 
-    if let Some(nbf) = claims.get("nbf").and_then(json_i64) && nbf > now {
+    if let Some(nbf) = claims.get("nbf").and_then(json_i64)
+        && nbf > now
+    {
         return Err("OIDC token is not active yet".to_string());
     }
 
@@ -168,10 +207,8 @@ mod tests {
 
     #[test]
     fn decode_jwt_claims_rejects_alg_none() {
-        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(r#"{"alg":"none"}"#);
-        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(r#"{"sub":"demo"}"#);
+        let header = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"none"}"#);
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"sub":"demo"}"#);
         let token = format!("{header}.{payload}.sig");
         let err = decode_jwt_claims(&token).unwrap_err();
         assert!(err.contains("invalid JWT"));
@@ -184,7 +221,20 @@ mod tests {
             "aud": ["memori-client", "other"],
             "exp": unix_now_secs() + 60,
         });
-        validate_oidc_claims(&claims, "https://issuer.test", "memori-client", unix_now_secs())
-            .unwrap();
+        validate_oidc_claims(
+            &claims,
+            "https://issuer.test",
+            "memori-client",
+            unix_now_secs(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn insecure_oidc_dev_login_defaults_to_disabled() {
+        unsafe {
+            std::env::remove_var("MEMORI_INSECURE_OIDC_DEV_LOGIN");
+        }
+        assert!(!allow_insecure_oidc_dev_login());
     }
 }

@@ -32,7 +32,8 @@ pub(crate) async fn ask_handler(
         }));
     }
 
-    let actor = resolve_actor_subject(&state, &headers).await;
+    let session = require_session(&state, &headers, Role::Viewer).await?;
+    let actor = session.subject;
     let policy = resolve_enterprise_policy(&load_app_settings().map_err(ApiError::internal)?);
     if let Err(violation) = validate_runtime_model_settings(
         &to_model_policy(&policy),

@@ -211,6 +211,14 @@ pub(crate) async fn probe_model_provider(
         ),
     };
 
+    let mut errors: Vec<ModelErrorItem> = errors
+        .into_iter()
+        .map(|err| ModelErrorItem {
+            code: err.code,
+            message: err.message,
+        })
+        .collect();
+
     if !chat_model.is_empty() && !model_exists(&merged, chat_model) {
         missing_roles.push("chat".to_string());
     }
@@ -221,6 +229,21 @@ pub(crate) async fn probe_model_provider(
         missing_roles.push("embed".to_string());
     }
 
+    // 向量模型必须真正能产出 embedding 才算就绪：发一次真实 /v1/embeddings 探测，
+    // 避免没带 --embedding 启动的对话服务器被误判为就绪（查询时才报 HTTP 501）。
+    if !embed_model.is_empty()
+        && !missing_roles.iter().any(|role| role == "embed")
+        && let Err(err) =
+            probe_openai_compatible_embedding(&embed_endpoint, api_key.as_deref(), embed_model)
+                .await
+    {
+        missing_roles.push("embed".to_string());
+        errors.push(ModelErrorItem {
+            code: err.code,
+            message: err.message,
+        });
+    }
+
     let reachable = errors.is_empty();
 
     Ok(ModelAvailabilityDto {
@@ -228,13 +251,7 @@ pub(crate) async fn probe_model_provider(
         reachable,
         models: merged,
         missing_roles,
-        errors: errors
-            .into_iter()
-            .map(|err| ModelErrorItem {
-                code: err.code,
-                message: err.message,
-            })
-            .collect(),
+        errors,
         checked_provider: Some(provider_to_string(provider)),
         status_code: None,
         status_message: None,
@@ -294,8 +311,10 @@ pub(crate) async fn validate_model_setup() -> Result<ModelAvailabilityDto, Strin
     if !model_exists(&merged, &active.embed_model) {
         missing_roles.push("embed".to_string());
     }
-    if provider == ModelProvider::OpenAiCompatible
-        && !missing_roles.iter().any(|role| role == "embed")
+    // 向量模型必须真正能产出 embedding 才算就绪。无论本地还是远程，都发一次真实
+    // /v1/embeddings 探测——否则一个没带 --embedding 启动的对话服务器也会被误判为就绪，
+    // 直到查询时才报 HTTP 501。
+    if !missing_roles.iter().any(|role| role == "embed")
         && let Err(err) = probe_openai_compatible_embedding(
             &active.embed_endpoint,
             active.api_key.as_deref(),
