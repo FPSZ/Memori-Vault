@@ -15,7 +15,8 @@ pub(crate) fn load_app_settings() -> Result<AppSettings, String> {
 
     let content = fs::read_to_string(&settings_file)
         .map_err(|err| format!("读取配置失败({}): {err}", settings_file.display()))?;
-    serde_json::from_str(&content)
+    let content = content.trim_start_matches('\u{feff}');
+    serde_json::from_str(content)
         .map_err(|err| format!("解析配置失败({}): {err}", settings_file.display()))
 }
 
