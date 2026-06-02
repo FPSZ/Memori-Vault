@@ -261,14 +261,6 @@ export function ModelsTab({
     });
   };
 
-  const syncRemoteEndpointToAllRoles = () => {
-    const endpoint = modelSettings.remote_profile.chat_endpoint;
-    updateProfile({
-      graph_endpoint: endpoint,
-      embed_endpoint: endpoint
-    });
-  };
-
   const handlePickLlamaServer = async () => {
     const path = await pickLlamaServerFile();
     if (path) {
@@ -736,7 +728,7 @@ export function ModelsTab({
               <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-500">
                 {remoteFullUrl
                   ? "已开启完整 URL：可以填写带 /v1 的兼容接口地址，系统会自动避免重复拼接 /v1。"
-                  : "填写兼容 OpenAI Response 格式的服务端点地址；系统会自动请求 /v1/models、/v1/chat/completions 和 /v1/embeddings。"}
+                  : "填写兼容 OpenAI Response / Chat 格式的服务端点地址；系统会自动请求 /v1/models，并按协议使用 /v1/chat/completions 或 /v1/responses。"}
               </div>
             </div>
 
@@ -806,13 +798,6 @@ export function ModelsTab({
               >
                 保存当前配置
               </button>
-              <button
-                type="button"
-                onClick={syncRemoteEndpointToAllRoles}
-                className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-surface-1)] hover:text-[var(--text-primary)]"
-              >
-                三角色共用 URL
-              </button>
             </div>
 
             {remoteModels.length > 0 ? (
@@ -820,27 +805,6 @@ export function ModelsTab({
                 已获取 {remoteModels.length} 个远端模型。展开下面任意模型卡片，可以从“模型名称”输入框的候选列表中选择，也可以继续手动填写。
               </div>
             ) : null}
-
-            <details className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
-              <summary className="cursor-pointer text-xs font-medium text-[var(--text-secondary)]">
-                高级：分别设置对话 / 图谱 / 向量 URL
-              </summary>
-              <div className="mt-3 grid gap-3">
-                {(["chat", "graph", "embed"] as const).map((role) => (
-                  <div key={role} className="space-y-1">
-                    <label className="text-[11px] font-medium text-[var(--text-muted)]">
-                      {ROLE_META[role].label} URL
-                    </label>
-                    <input
-                      type="text"
-                      value={endpointToApiUrl(modelSettings.remote_profile[`${role}_endpoint`], remoteFullUrl)}
-                      onChange={(e) => updateProfile({ [`${role}_endpoint`]: apiUrlToEndpoint(e.target.value, remoteFullUrl) })}
-                      className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-3 py-1.5 font-mono text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                    />
-                  </div>
-                ))}
-              </div>
-            </details>
 
             <details className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2">
               <summary className="cursor-pointer text-xs font-medium text-[var(--text-secondary)]">

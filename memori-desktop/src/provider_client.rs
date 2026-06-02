@@ -60,11 +60,9 @@ pub(crate) async fn fetch_models_all_endpoints(
         }
         ModelProvider::OpenAiCompatible => {
             let mut from_service = Vec::new();
-            for endpoint in [chat_endpoint, graph_endpoint, embed_endpoint] {
-                match list_openai_compatible_models(endpoint, api_key).await {
-                    Ok(models) => from_service.extend(models),
-                    Err(err) => errors.push(err),
-                }
+            match list_openai_compatible_models(chat_endpoint, api_key).await {
+                Ok(models) => from_service.extend(models),
+                Err(err) => errors.push(err),
             }
 
             let mut service_set = BTreeSet::new();

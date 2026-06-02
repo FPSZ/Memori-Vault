@@ -84,7 +84,7 @@ export function ModelCard({
             {model ? <span className="truncate text-xs text-[var(--text-secondary)]">{model}</span> : null}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
-            {port ? <span className="font-mono">端口 {port}</span> : null}
+            {isLocal && port ? <span className="font-mono">端口 {port}</span> : null}
             {isLocal ? (
               <span className={running || external ? "text-emerald-400" : starting ? "text-amber-400" : runtimeStatus?.state === "error" ? "text-red-400" : ""}>
                 {stateLabel}{runtimeStatus?.pid ? ` · PID ${runtimeStatus.pid}` : ""}
@@ -209,16 +209,18 @@ export function ModelCard({
                 </div>
               ) : null}
 
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-[var(--text-muted)]">端口号</label>
-                <input
-                  type="text"
-                  value={port}
-                  onChange={(e) => onEndpointChange(replacePort(endpoint, e.target.value))}
-                  className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 font-mono text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                  placeholder={meta.defaultPort}
-                />
-              </div>
+              {isLocal ? (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-[var(--text-muted)]">端口号</label>
+                  <input
+                    type="text"
+                    value={port}
+                    onChange={(e) => onEndpointChange(replacePort(endpoint, e.target.value))}
+                    className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 font-mono text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                    placeholder={meta.defaultPort}
+                  />
+                </div>
+              ) : null}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">

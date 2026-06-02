@@ -76,9 +76,9 @@ const REMOTE_PROVIDER_PRESETS: RemoteProviderPreset[] = [
       chat_endpoint: "https://api.deepseek.com",
       graph_endpoint: "https://api.deepseek.com",
       embed_endpoint: "https://api.deepseek.com",
-      chat_model: "deepseek-chat",
-      graph_model: "deepseek-chat",
-      embed_model: "text-embedding-3-small"
+      chat_model: "deepseek-v4-flash",
+      graph_model: "deepseek-v4-flash",
+      embed_model: "deepseek-v4-flash"
     }
   },
   {

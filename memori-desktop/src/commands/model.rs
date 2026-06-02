@@ -95,6 +95,11 @@ pub(crate) async fn set_model_settings(
     settings.local_chat_concurrency = normalized.local_profile.chat_concurrency;
     settings.local_graph_concurrency = normalized.local_profile.graph_concurrency;
     settings.local_embed_concurrency = normalized.local_profile.embed_concurrency;
+    settings.local_rerank_endpoint = Some(normalized.local_profile.rerank_endpoint.clone());
+    settings.local_rerank_model = Some(normalized.local_profile.rerank_model.clone());
+    settings.local_rerank_model_path = normalized.local_profile.rerank_model_path.clone();
+    settings.local_rerank_context_length = normalized.local_profile.rerank_context_length;
+    settings.local_rerank_concurrency = normalized.local_profile.rerank_concurrency;
     settings.local_performance_preset = normalized.local_profile.performance_preset.clone();
     settings.local_n_gpu_layers = normalized.local_profile.n_gpu_layers;
     settings.local_batch_size = normalized.local_profile.batch_size;
@@ -229,9 +234,10 @@ pub(crate) async fn probe_model_provider(
         missing_roles.push("embed".to_string());
     }
 
-    // 向量模型必须真正能产出 embedding 才算就绪：发一次真实 /v1/embeddings 探测，
-    // 避免没带 --embedding 启动的对话服务器被误判为就绪（查询时才报 HTTP 501）。
-    if !embed_model.is_empty()
+    // 本地 llama.cpp 的向量角色必须真正能产出 embedding 才算就绪。
+    // 远程 OpenAI-compatible 配置页只验证对话协议和模型列表，避免把远端对话服务误当成向量服务探测。
+    if provider == ModelProvider::LlamaCppLocal
+        && !embed_model.is_empty()
         && !missing_roles.iter().any(|role| role == "embed")
         && let Err(err) =
             probe_openai_compatible_embedding(&embed_endpoint, api_key.as_deref(), embed_model)
@@ -311,10 +317,10 @@ pub(crate) async fn validate_model_setup() -> Result<ModelAvailabilityDto, Strin
     if !model_exists(&merged, &active.embed_model) {
         missing_roles.push("embed".to_string());
     }
-    // 向量模型必须真正能产出 embedding 才算就绪。无论本地还是远程，都发一次真实
-    // /v1/embeddings 探测——否则一个没带 --embedding 启动的对话服务器也会被误判为就绪，
-    // 直到查询时才报 HTTP 501。
-    if !missing_roles.iter().any(|role| role == "embed")
+    // 本地 llama.cpp 的向量角色必须真正能产出 embedding 才算就绪。
+    // 远程 provider 在配置阶段只验证模型服务协议；是否提供 embeddings 由实际索引流程处理。
+    if provider == ModelProvider::LlamaCppLocal
+        && !missing_roles.iter().any(|role| role == "embed")
         && let Err(err) = probe_openai_compatible_embedding(
             &active.embed_endpoint,
             active.api_key.as_deref(),
