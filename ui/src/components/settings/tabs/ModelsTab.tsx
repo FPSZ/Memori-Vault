@@ -36,6 +36,11 @@ import {
   validateLocalRoles,
   describeAvailabilityError,
   ROLE_META,
+  REMOTE_PRESET_STORAGE_KEY,
+  REMOTE_PROVIDER_PRESETS,
+  applyRemotePreset,
+  parseRemotePresets,
+  type RemoteProviderPreset,
 } from "./modelUtils";
 import { ModelCard } from "./ModelCard";
 
@@ -89,6 +94,13 @@ export function ModelsTab({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [localRoleErrors, setLocalRoleErrors] = useState<RoleErrorMap>({});
   const [localConfigMessages, setLocalConfigMessages] = useState<string[]>([]);
+  const [customPresetName, setCustomPresetName] = useState("");
+  const [customRemotePresets, setCustomRemotePresets] = useState<RemoteProviderPreset[]>(() =>
+    typeof window === "undefined"
+      ? []
+      : parseRemotePresets(window.localStorage.getItem(REMOTE_PRESET_STORAGE_KEY))
+  );
+  const allRemotePresets = [...REMOTE_PROVIDER_PRESETS, ...customRemotePresets];
 
   const setRoleExpanded = (role: ModelRoleKey, expanded: boolean) => {
     setExpandedRoles((prev) => ({ ...prev, [role]: expanded }));
@@ -143,6 +155,45 @@ export function ModelsTab({
         remote_profile: { ...modelSettings.remote_profile, ...patch }
       });
     }
+  };
+
+  const applyRemoteProviderPreset = (preset: RemoteProviderPreset) => {
+    onModelSettingsChange({
+      ...modelSettings,
+      active_provider: "openai_compatible",
+      remote_profile: applyRemotePreset(modelSettings.remote_profile, preset)
+    });
+  };
+
+  const saveRemotePreset = () => {
+    const label = customPresetName.trim();
+    if (!label) return;
+    const nextPreset: RemoteProviderPreset = {
+      id: `custom-${Date.now()}`,
+      label,
+      description: "Saved remote profile",
+      profile: {
+        chat_endpoint: modelSettings.remote_profile.chat_endpoint,
+        graph_endpoint: modelSettings.remote_profile.graph_endpoint,
+        embed_endpoint: modelSettings.remote_profile.embed_endpoint,
+        chat_model: modelSettings.remote_profile.chat_model,
+        graph_model: modelSettings.remote_profile.graph_model,
+        embed_model: modelSettings.remote_profile.embed_model
+      }
+    };
+    const next = [
+      nextPreset,
+      ...customRemotePresets.filter((preset) => preset.label !== label)
+    ].slice(0, 20);
+    setCustomRemotePresets(next);
+    window.localStorage.setItem(REMOTE_PRESET_STORAGE_KEY, JSON.stringify(next));
+    setCustomPresetName("");
+  };
+
+  const deleteRemotePreset = (id: string) => {
+    const next = customRemotePresets.filter((preset) => preset.id !== id);
+    setCustomRemotePresets(next);
+    window.localStorage.setItem(REMOTE_PRESET_STORAGE_KEY, JSON.stringify(next));
   };
 
   const handlePickLlamaServer = async () => {
@@ -546,6 +597,84 @@ export function ModelsTab({
                   </motion.div>
                 ) : null}
               </AnimatePresence>
+            </div>
+          </div>
+        ) : null}
+
+        {!isLocal ? (
+          <div className="space-y-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium text-[var(--text-primary)]">Remote presets</div>
+                <div className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                  Select a common OpenAI-compatible provider, or save the current remote profile for reuse.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const endpoint = modelSettings.remote_profile.chat_endpoint;
+                  updateProfile({
+                    graph_endpoint: endpoint,
+                    embed_endpoint: endpoint
+                  });
+                }}
+                className="shrink-0 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-surface-1)] hover:text-[var(--text-primary)]"
+              >
+                Use chat endpoint for all
+              </button>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              {allRemotePresets.map((preset) => {
+                const isCustom = preset.id.startsWith("custom-");
+                return (
+                  <div
+                    key={preset.id}
+                    className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => applyRemoteProviderPreset(preset)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="truncate text-xs font-medium text-[var(--text-primary)]">{preset.label}</div>
+                        <div className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                          {preset.description}
+                        </div>
+                      </button>
+                      {isCustom ? (
+                        <button
+                          type="button"
+                          onClick={() => deleteRemotePreset(preset.id)}
+                          className="rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] transition hover:text-red-400"
+                        >
+                          Delete
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customPresetName}
+                onChange={(e) => setCustomPresetName(e.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                placeholder="Preset name"
+              />
+              <button
+                type="button"
+                onClick={saveRemotePreset}
+                disabled={!customPresetName.trim()}
+                className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--bg-surface-1)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Save current
+              </button>
             </div>
           </div>
         ) : null}

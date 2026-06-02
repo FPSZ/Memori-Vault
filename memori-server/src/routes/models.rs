@@ -60,7 +60,11 @@ pub(crate) async fn set_model_settings_handler(
     settings.local_flash_attn = normalized.local_profile.flash_attn;
     settings.local_cache_type_k = normalized.local_profile.cache_type_k.clone();
     settings.local_cache_type_v = normalized.local_profile.cache_type_v.clone();
-    settings.remote_endpoint = Some(normalized.remote_profile.endpoint.clone());
+    settings.stop_local_models_on_exit = Some(normalized.stop_local_models_on_exit);
+    settings.remote_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
+    settings.remote_chat_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
+    settings.remote_graph_endpoint = Some(normalized.remote_profile.graph_endpoint.clone());
+    settings.remote_embed_endpoint = Some(normalized.remote_profile.embed_endpoint.clone());
     settings.remote_api_key = normalized.remote_profile.api_key.clone();
     settings.remote_chat_model = Some(normalized.remote_profile.chat_model.clone());
     settings.remote_graph_model = Some(normalized.remote_profile.graph_model.clone());

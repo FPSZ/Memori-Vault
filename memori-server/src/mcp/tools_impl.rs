@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
 
-use crate::*;
 use crate::mcp::protocol::*;
 use crate::mcp::{engine_from_state, normalize_mcp_top_k, parse_params};
+use crate::*;
 
 #[derive(Debug, Deserialize)]
 struct GraphContextArgs {
@@ -281,7 +281,11 @@ pub(crate) async fn set_model_settings(
     settings.local_flash_attn = normalized.local_profile.flash_attn;
     settings.local_cache_type_k = normalized.local_profile.cache_type_k.clone();
     settings.local_cache_type_v = normalized.local_profile.cache_type_v.clone();
-    settings.remote_endpoint = Some(normalized.remote_profile.endpoint.clone());
+    settings.stop_local_models_on_exit = Some(normalized.stop_local_models_on_exit);
+    settings.remote_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
+    settings.remote_chat_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
+    settings.remote_graph_endpoint = Some(normalized.remote_profile.graph_endpoint.clone());
+    settings.remote_embed_endpoint = Some(normalized.remote_profile.embed_endpoint.clone());
     settings.remote_api_key = normalized.remote_profile.api_key.clone();
     settings.remote_chat_model = Some(normalized.remote_profile.chat_model.clone());
     settings.remote_graph_model = Some(normalized.remote_profile.graph_model.clone());
@@ -337,7 +341,9 @@ pub(crate) async fn validate_model_setup() -> Result<JsonValue, JsonRpcError> {
     }))
 }
 
-pub(crate) async fn list_provider_models(args: Option<JsonValue>) -> Result<JsonValue, JsonRpcError> {
+pub(crate) async fn list_provider_models(
+    args: Option<JsonValue>,
+) -> Result<JsonValue, JsonRpcError> {
     let payload = parse_params::<ListProviderModelsRequest>(args)?;
     let provider = ModelProvider::from_value(&payload.provider);
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
@@ -352,7 +358,9 @@ pub(crate) async fn list_provider_models(args: Option<JsonValue>) -> Result<Json
     Ok(json!(models))
 }
 
-pub(crate) async fn probe_model_provider(args: Option<JsonValue>) -> Result<JsonValue, JsonRpcError> {
+pub(crate) async fn probe_model_provider(
+    args: Option<JsonValue>,
+) -> Result<JsonValue, JsonRpcError> {
     let payload = parse_params::<ProbeProviderRequest>(args)?;
     let provider = ModelProvider::from_value(&payload.provider);
     let endpoint = normalize_endpoint(provider, &payload.endpoint);
@@ -583,7 +591,6 @@ pub(crate) fn schema(required: &[&str]) -> JsonValue {
     })
 }
 
-
 pub(crate) fn optional_scope_refs(scope_paths: &[PathBuf]) -> Option<&[PathBuf]> {
     if scope_paths.is_empty() {
         None
@@ -617,8 +624,10 @@ pub(crate) fn open_source_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-
-pub(crate) async fn ask(state: ServerState, args: Option<JsonValue>) -> Result<JsonValue, JsonRpcError> {
+pub(crate) async fn ask(
+    state: ServerState,
+    args: Option<JsonValue>,
+) -> Result<JsonValue, JsonRpcError> {
     let args = parse_params::<AskArgs>(args)?;
     if args.query.trim().is_empty() {
         return Err(JsonRpcError::invalid_params("query is required"));
@@ -637,7 +646,10 @@ pub(crate) async fn ask(state: ServerState, args: Option<JsonValue>) -> Result<J
     Ok(json!(response))
 }
 
-pub(crate) async fn search(state: ServerState, args: Option<JsonValue>) -> Result<JsonValue, JsonRpcError> {
+pub(crate) async fn search(
+    state: ServerState,
+    args: Option<JsonValue>,
+) -> Result<JsonValue, JsonRpcError> {
     let args = parse_params::<SearchArgs>(args)?;
     if args.query.trim().is_empty() {
         return Err(JsonRpcError::invalid_params("query is required"));
@@ -908,4 +920,3 @@ pub(crate) fn parse_memory_status(
         })
         .transpose()
 }
-

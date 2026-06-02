@@ -5,11 +5,132 @@ import type {
   LocalModelProfileDto,
   LocalModelRuntimeStatusDto,
   LocalModelRuntimeStatusesDto,
+  RemoteModelProfileDto,
 } from "../types";
 import { useI18n } from "../../../i18n";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
 type ModelRoleKey = "chat" | "graph" | "embed";
+type RemoteProviderPreset = {
+  id: string;
+  label: string;
+  description: string;
+  profile: Omit<RemoteModelProfileDto, "api_key">;
+};
+
+const REMOTE_PRESET_STORAGE_KEY = "memori-remote-model-presets";
+
+const REMOTE_PROVIDER_PRESETS: RemoteProviderPreset[] = [
+  {
+    id: "openai",
+    label: "OpenAI",
+    description: "Official OpenAI API, chat and embedding on one base URL.",
+    profile: {
+      chat_endpoint: "https://api.openai.com",
+      graph_endpoint: "https://api.openai.com",
+      embed_endpoint: "https://api.openai.com",
+      chat_model: "gpt-4o-mini",
+      graph_model: "gpt-4o-mini",
+      embed_model: "text-embedding-3-small"
+    }
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    description: "DeepSeek OpenAI-compatible chat endpoint.",
+    profile: {
+      chat_endpoint: "https://api.deepseek.com",
+      graph_endpoint: "https://api.deepseek.com",
+      embed_endpoint: "https://api.deepseek.com",
+      chat_model: "deepseek-chat",
+      graph_model: "deepseek-chat",
+      embed_model: "text-embedding-3-small"
+    }
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    description: "One OpenAI-compatible gateway for many hosted models.",
+    profile: {
+      chat_endpoint: "https://openrouter.ai/api",
+      graph_endpoint: "https://openrouter.ai/api",
+      embed_endpoint: "https://openrouter.ai/api",
+      chat_model: "openai/gpt-4o-mini",
+      graph_model: "openai/gpt-4o-mini",
+      embed_model: "openai/text-embedding-3-small"
+    }
+  },
+  {
+    id: "siliconflow",
+    label: "SiliconFlow",
+    description: "China-hosted OpenAI-compatible model service.",
+    profile: {
+      chat_endpoint: "https://api.siliconflow.cn",
+      graph_endpoint: "https://api.siliconflow.cn",
+      embed_endpoint: "https://api.siliconflow.cn",
+      chat_model: "Qwen/Qwen2.5-7B-Instruct",
+      graph_model: "Qwen/Qwen2.5-7B-Instruct",
+      embed_model: "BAAI/bge-m3"
+    }
+  },
+  {
+    id: "dashscope",
+    label: "DashScope",
+    description: "Alibaba DashScope compatible-mode endpoint.",
+    profile: {
+      chat_endpoint: "https://dashscope.aliyuncs.com/compatible-mode",
+      graph_endpoint: "https://dashscope.aliyuncs.com/compatible-mode",
+      embed_endpoint: "https://dashscope.aliyuncs.com/compatible-mode",
+      chat_model: "qwen-plus",
+      graph_model: "qwen-plus",
+      embed_model: "text-embedding-v3"
+    }
+  },
+  {
+    id: "moonshot",
+    label: "Moonshot / Kimi",
+    description: "Moonshot AI OpenAI-compatible endpoint.",
+    profile: {
+      chat_endpoint: "https://api.moonshot.cn",
+      graph_endpoint: "https://api.moonshot.cn",
+      embed_endpoint: "https://api.moonshot.cn",
+      chat_model: "moonshot-v1-8k",
+      graph_model: "moonshot-v1-8k",
+      embed_model: "text-embedding-3-small"
+    }
+  }
+];
+
+function applyRemotePreset(
+  current: RemoteModelProfileDto,
+  preset: RemoteProviderPreset
+): RemoteModelProfileDto {
+  return {
+    ...current,
+    ...preset.profile
+  };
+}
+
+function parseRemotePresets(raw: string | null): RemoteProviderPreset[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is RemoteProviderPreset =>
+      typeof item?.id === "string" &&
+      typeof item?.label === "string" &&
+      typeof item?.description === "string" &&
+      typeof item?.profile?.chat_endpoint === "string" &&
+      typeof item?.profile?.graph_endpoint === "string" &&
+      typeof item?.profile?.embed_endpoint === "string" &&
+      typeof item?.profile?.chat_model === "string" &&
+      typeof item?.profile?.graph_model === "string" &&
+      typeof item?.profile?.embed_model === "string"
+    );
+  } catch {
+    return [];
+  }
+}
 
 const PERFORMANCE_PRESETS: Array<{
   value: LocalPerformancePreset;
@@ -236,8 +357,13 @@ const ROLE_META: Record<
 export {
   type TranslateFn,
   type ModelRoleKey,
+  type RemoteProviderPreset,
   type RoleErrorMap,
   PERFORMANCE_PRESETS,
+  REMOTE_PRESET_STORAGE_KEY,
+  REMOTE_PROVIDER_PRESETS,
+  applyRemotePreset,
+  parseRemotePresets,
   extractPort,
   replacePort,
   pickModelFile,

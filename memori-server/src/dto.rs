@@ -33,7 +33,11 @@ pub(crate) struct AppSettings {
     pub(crate) local_flash_attn: Option<bool>,
     pub(crate) local_cache_type_k: Option<String>,
     pub(crate) local_cache_type_v: Option<String>,
+    pub(crate) stop_local_models_on_exit: Option<bool>,
     pub(crate) remote_endpoint: Option<String>,
+    pub(crate) remote_chat_endpoint: Option<String>,
+    pub(crate) remote_graph_endpoint: Option<String>,
+    pub(crate) remote_embed_endpoint: Option<String>,
     pub(crate) remote_api_key: Option<String>,
     pub(crate) remote_chat_model: Option<String>,
     pub(crate) remote_graph_model: Option<String>,
@@ -222,6 +226,7 @@ pub(crate) struct SetIndexingModePayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct LocalModelProfileDto {
+    #[serde(default)]
     pub(crate) endpoint: String,
     pub(crate) models_root: Option<String>,
     pub(crate) chat_model: String,
@@ -261,7 +266,14 @@ pub(crate) struct LocalModelProfileDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct RemoteModelProfileDto {
-    pub(crate) endpoint: String,
+    #[serde(default)]
+    pub(crate) chat_endpoint: String,
+    #[serde(default)]
+    pub(crate) graph_endpoint: String,
+    #[serde(default)]
+    pub(crate) embed_endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) endpoint: Option<String>,
     pub(crate) api_key: Option<String>,
     pub(crate) chat_model: String,
     pub(crate) graph_model: String,
@@ -285,6 +297,12 @@ pub(crate) struct ModelSettingsDto {
     pub(crate) active_provider: String,
     pub(crate) local_profile: LocalModelProfileDto,
     pub(crate) remote_profile: RemoteModelProfileDto,
+    #[serde(default = "default_stop_local_models_on_exit")]
+    pub(crate) stop_local_models_on_exit: bool,
+}
+
+fn default_stop_local_models_on_exit() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize)]

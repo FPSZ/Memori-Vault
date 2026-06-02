@@ -1,4 +1,4 @@
-﻿use crate::*;
+use crate::*;
 
 pub(crate) async fn replace_engine(
     engine_slot: &Arc<Mutex<Option<MemoriEngine>>>,
@@ -167,9 +167,10 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
         })
         .unwrap_or_else(|| DEFAULT_CHAT_ENDPOINT.to_string());
 
-    let remote_endpoint = settings
-        .remote_endpoint
+    let remote_chat_endpoint = settings
+        .remote_chat_endpoint
         .clone()
+        .or_else(|| settings.remote_endpoint.clone())
         .or_else(|| {
             if ModelProvider::from_value(
                 settings
@@ -185,7 +186,63 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
         })
         .or_else(|| {
             if env_provider == ModelProvider::OpenAiCompatible {
-                std::env::var(MEMORI_MODEL_ENDPOINT_ENV).ok()
+                std::env::var(MEMORI_CHAT_ENDPOINT_ENV)
+                    .or_else(|_| std::env::var(MEMORI_MODEL_ENDPOINT_ENV))
+                    .ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| memori_core::DEFAULT_MODEL_ENDPOINT_OPENAI.to_string());
+    let remote_graph_endpoint = settings
+        .remote_graph_endpoint
+        .clone()
+        .or_else(|| settings.remote_endpoint.clone())
+        .or_else(|| {
+            if ModelProvider::from_value(
+                settings
+                    .provider
+                    .as_deref()
+                    .unwrap_or(fallback_provider.as_str()),
+            ) == ModelProvider::OpenAiCompatible
+            {
+                settings.endpoint.clone()
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            if env_provider == ModelProvider::OpenAiCompatible {
+                std::env::var(MEMORI_GRAPH_ENDPOINT_ENV)
+                    .or_else(|_| std::env::var(MEMORI_MODEL_ENDPOINT_ENV))
+                    .ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| memori_core::DEFAULT_MODEL_ENDPOINT_OPENAI.to_string());
+    let remote_embed_endpoint = settings
+        .remote_embed_endpoint
+        .clone()
+        .or_else(|| settings.remote_endpoint.clone())
+        .or_else(|| {
+            if ModelProvider::from_value(
+                settings
+                    .provider
+                    .as_deref()
+                    .unwrap_or(fallback_provider.as_str()),
+            ) == ModelProvider::OpenAiCompatible
+            {
+                settings.endpoint.clone()
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            if env_provider == ModelProvider::OpenAiCompatible {
+                std::env::var(MEMORI_EMBED_ENDPOINT_ENV)
+                    .or_else(|_| std::env::var(MEMORI_MODEL_ENDPOINT_ENV))
+                    .ok()
             } else {
                 None
             }
@@ -394,7 +451,19 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             cache_type_v: normalize_optional_text(settings.local_cache_type_v.clone()),
         },
         remote_profile: RemoteModelProfileDto {
-            endpoint: normalize_endpoint(ModelProvider::OpenAiCompatible, &remote_endpoint),
+            chat_endpoint: normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &remote_chat_endpoint,
+            ),
+            graph_endpoint: normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &remote_graph_endpoint,
+            ),
+            embed_endpoint: normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &remote_embed_endpoint,
+            ),
+            endpoint: None,
             api_key: remote_api_key,
             chat_model: remote_chat_model,
             graph_model: remote_graph_model,
@@ -406,6 +475,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             graph_concurrency: settings.remote_graph_concurrency,
             embed_concurrency: settings.remote_embed_concurrency,
         },
+        stop_local_models_on_exit: settings.stop_local_models_on_exit.unwrap_or(true),
     }
 }
 
@@ -417,9 +487,30 @@ pub(crate) fn normalize_model_settings_payload(
         ModelProvider::LlamaCppLocal,
         &payload.local_profile.endpoint,
     );
-    let remote_endpoint = normalize_endpoint(
+    let legacy_remote_endpoint = payload.remote_profile.endpoint.as_deref().unwrap_or("");
+    let remote_chat_endpoint = normalize_endpoint(
         ModelProvider::OpenAiCompatible,
-        &payload.remote_profile.endpoint,
+        if payload.remote_profile.chat_endpoint.trim().is_empty() {
+            legacy_remote_endpoint
+        } else {
+            &payload.remote_profile.chat_endpoint
+        },
+    );
+    let remote_graph_endpoint = normalize_endpoint(
+        ModelProvider::OpenAiCompatible,
+        if payload.remote_profile.graph_endpoint.trim().is_empty() {
+            legacy_remote_endpoint
+        } else {
+            &payload.remote_profile.graph_endpoint
+        },
+    );
+    let remote_embed_endpoint = normalize_endpoint(
+        ModelProvider::OpenAiCompatible,
+        if payload.remote_profile.embed_endpoint.trim().is_empty() {
+            legacy_remote_endpoint
+        } else {
+            &payload.remote_profile.embed_endpoint
+        },
     );
 
     let local_chat_model = payload.local_profile.chat_model.trim().to_string();
@@ -474,7 +565,10 @@ pub(crate) fn normalize_model_settings_payload(
             cache_type_v: local_cache_type_v,
         },
         remote_profile: RemoteModelProfileDto {
-            endpoint: remote_endpoint,
+            chat_endpoint: remote_chat_endpoint,
+            graph_endpoint: remote_graph_endpoint,
+            embed_endpoint: remote_embed_endpoint,
+            endpoint: None,
             api_key: normalize_optional_text(payload.remote_profile.api_key),
             chat_model: remote_chat_model,
             graph_model: remote_graph_model,
@@ -486,6 +580,7 @@ pub(crate) fn normalize_model_settings_payload(
             graph_concurrency: payload.remote_profile.graph_concurrency,
             embed_concurrency: payload.remote_profile.embed_concurrency,
         },
+        stop_local_models_on_exit: payload.stop_local_models_on_exit,
     })
 }
 
@@ -529,23 +624,41 @@ pub(crate) fn resolve_active_runtime_settings(
     settings: &ModelSettingsDto,
 ) -> ActiveRuntimeModelSettings {
     let active_provider = ModelProvider::from_value(&settings.active_provider);
-    let single_endpoint = if active_provider == ModelProvider::OpenAiCompatible {
-        normalize_endpoint(
-            ModelProvider::OpenAiCompatible,
-            &settings.remote_profile.endpoint,
-        )
-    } else {
-        normalize_endpoint(
-            ModelProvider::LlamaCppLocal,
-            &settings.local_profile.endpoint,
-        )
-    };
-
     ActiveRuntimeModelSettings {
         provider: active_provider,
-        chat_endpoint: single_endpoint.clone(),
-        graph_endpoint: single_endpoint.clone(),
-        embed_endpoint: single_endpoint,
+        chat_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &settings.remote_profile.chat_endpoint,
+            )
+        } else {
+            normalize_endpoint(
+                ModelProvider::LlamaCppLocal,
+                &settings.local_profile.endpoint,
+            )
+        },
+        graph_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &settings.remote_profile.graph_endpoint,
+            )
+        } else {
+            normalize_endpoint(
+                ModelProvider::LlamaCppLocal,
+                &settings.local_profile.endpoint,
+            )
+        },
+        embed_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                &settings.remote_profile.embed_endpoint,
+            )
+        } else {
+            normalize_endpoint(
+                ModelProvider::LlamaCppLocal,
+                &settings.local_profile.endpoint,
+            )
+        },
         api_key: if active_provider == ModelProvider::OpenAiCompatible {
             normalize_optional_text(settings.remote_profile.api_key.clone())
         } else {
@@ -613,6 +726,9 @@ pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) 
         );
         // Legacy endpoint compatibility: expose the chat endpoint as the single endpoint.
         std::env::set_var(MEMORI_MODEL_ENDPOINT_ENV, &settings.chat_endpoint);
+        std::env::set_var(MEMORI_CHAT_ENDPOINT_ENV, &settings.chat_endpoint);
+        std::env::set_var(MEMORI_GRAPH_ENDPOINT_ENV, &settings.graph_endpoint);
+        std::env::set_var(MEMORI_EMBED_ENDPOINT_ENV, &settings.embed_endpoint);
         std::env::set_var(MEMORI_CHAT_MODEL_ENV, &settings.chat_model);
         std::env::set_var(MEMORI_GRAPH_MODEL_ENV, &settings.graph_model);
         std::env::set_var(MEMORI_EMBED_MODEL_ENV, &settings.embed_model);
@@ -651,5 +767,111 @@ pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) 
         } else {
             std::env::remove_var("MEMORI_EMBED_CONCURRENCY");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn local_profile() -> LocalModelProfileDto {
+        LocalModelProfileDto {
+            endpoint: "http://localhost:18001".to_string(),
+            models_root: None,
+            chat_model: "local-chat".to_string(),
+            graph_model: "local-graph".to_string(),
+            embed_model: "local-embed".to_string(),
+            chat_context_length: None,
+            graph_context_length: None,
+            embed_context_length: None,
+            chat_concurrency: None,
+            graph_concurrency: None,
+            embed_concurrency: None,
+            performance_preset: None,
+            n_gpu_layers: None,
+            batch_size: None,
+            ubatch_size: None,
+            threads: None,
+            threads_batch: None,
+            flash_attn: None,
+            cache_type_k: None,
+            cache_type_v: None,
+        }
+    }
+
+    #[test]
+    fn remote_runtime_uses_role_specific_endpoints() {
+        let settings = ModelSettingsDto {
+            active_provider: "openai_compatible".to_string(),
+            local_profile: local_profile(),
+            remote_profile: RemoteModelProfileDto {
+                chat_endpoint: "https://chat.example.com".to_string(),
+                graph_endpoint: "https://graph.example.com".to_string(),
+                embed_endpoint: "https://embed.example.com".to_string(),
+                endpoint: None,
+                api_key: Some("sk-test".to_string()),
+                chat_model: "remote-chat".to_string(),
+                graph_model: "remote-graph".to_string(),
+                embed_model: "remote-embed".to_string(),
+                chat_context_length: None,
+                graph_context_length: None,
+                embed_context_length: None,
+                chat_concurrency: None,
+                graph_concurrency: None,
+                embed_concurrency: None,
+            },
+            stop_local_models_on_exit: true,
+        };
+
+        let runtime = resolve_active_runtime_settings(&settings);
+
+        assert_eq!(runtime.provider, ModelProvider::OpenAiCompatible);
+        assert_eq!(runtime.chat_endpoint, "https://chat.example.com");
+        assert_eq!(runtime.graph_endpoint, "https://graph.example.com");
+        assert_eq!(runtime.embed_endpoint, "https://embed.example.com");
+        assert_eq!(runtime.chat_model, "remote-chat");
+        assert_eq!(runtime.graph_model, "remote-graph");
+        assert_eq!(runtime.embed_model, "remote-embed");
+    }
+
+    #[test]
+    fn legacy_remote_endpoint_payload_expands_to_all_roles() {
+        let payload = ModelSettingsDto {
+            active_provider: "openai_compatible".to_string(),
+            local_profile: local_profile(),
+            remote_profile: RemoteModelProfileDto {
+                chat_endpoint: String::new(),
+                graph_endpoint: String::new(),
+                embed_endpoint: String::new(),
+                endpoint: Some("https://legacy.example.com".to_string()),
+                api_key: None,
+                chat_model: "remote-chat".to_string(),
+                graph_model: "remote-graph".to_string(),
+                embed_model: "remote-embed".to_string(),
+                chat_context_length: None,
+                graph_context_length: None,
+                embed_context_length: None,
+                chat_concurrency: None,
+                graph_concurrency: None,
+                embed_concurrency: None,
+            },
+            stop_local_models_on_exit: true,
+        };
+
+        let normalized = normalize_model_settings_payload(payload).expect("payload normalizes");
+
+        assert_eq!(
+            normalized.remote_profile.chat_endpoint,
+            "https://legacy.example.com"
+        );
+        assert_eq!(
+            normalized.remote_profile.graph_endpoint,
+            "https://legacy.example.com"
+        );
+        assert_eq!(
+            normalized.remote_profile.embed_endpoint,
+            "https://legacy.example.com"
+        );
+        assert!(normalized.remote_profile.endpoint.is_none());
     }
 }
