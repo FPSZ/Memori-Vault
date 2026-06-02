@@ -95,11 +95,6 @@ pub(crate) async fn set_model_settings(
     settings.local_chat_concurrency = normalized.local_profile.chat_concurrency;
     settings.local_graph_concurrency = normalized.local_profile.graph_concurrency;
     settings.local_embed_concurrency = normalized.local_profile.embed_concurrency;
-    settings.local_rerank_endpoint = Some(normalized.local_profile.rerank_endpoint.clone());
-    settings.local_rerank_model = Some(normalized.local_profile.rerank_model.clone());
-    settings.local_rerank_model_path = normalized.local_profile.rerank_model_path.clone();
-    settings.local_rerank_context_length = normalized.local_profile.rerank_context_length;
-    settings.local_rerank_concurrency = normalized.local_profile.rerank_concurrency;
     settings.local_performance_preset = normalized.local_profile.performance_preset.clone();
     settings.local_n_gpu_layers = normalized.local_profile.n_gpu_layers;
     settings.local_batch_size = normalized.local_profile.batch_size;
