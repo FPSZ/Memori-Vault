@@ -95,9 +95,19 @@ export function ModelCard({
             processAlive ? (
               <button
                 type="button"
-                onClick={onStop}
-                disabled={runtimeBusy || external}
-                title={external ? "该模型服务不是当前软件会话启动的，请到原进程或系统任务管理器中关闭。" : undefined}
+                onClick={() => {
+                  if (
+                    external &&
+                    !window.confirm(
+                      `端口 ${port ?? ""} 上的「${meta.label}」是外部启动的模型服务（非本软件启动）。\n确定要强制结束该端口上的进程吗？`
+                    )
+                  ) {
+                    return;
+                  }
+                  onStop();
+                }}
+                disabled={runtimeBusy}
+                title={external ? "该模型服务不是当前软件会话启动的；点击将按端口强制结束对应进程。" : undefined}
                 className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-400 transition hover:opacity-80 disabled:opacity-50"
               >
                 {runtimeBusy ? <LoaderCircle className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}

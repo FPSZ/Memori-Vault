@@ -238,6 +238,102 @@ fn is_port_listening(port: u16) -> bool {
     .is_ok()
 }
 
+/// 查找正在监听指定端口（LISTENING）的进程 PID。
+/// 用于关闭并非由当前 app 会话启动的"外部运行"模型。
+fn find_listening_pid(port: u16) -> Option<u32> {
+    #[cfg(windows)]
+    {
+        // netstat -ano 输出列：Proto  Local  Foreign  State  PID
+        let output = std::process::Command::new("netstat")
+            .args(["-ano", "-p", "tcp"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        let needle_v4 = format!("127.0.0.1:{port}");
+        let needle_any = format!("0.0.0.0:{port}");
+        let needle_v6 = format!("[::1]:{port}");
+        let needle_v6any = format!("[::]:{port}");
+        for line in text.lines() {
+            let line = line.trim();
+            if !line.to_ascii_uppercase().contains("LISTENING") {
+                continue;
+            }
+            let local_matches = line.split_whitespace().nth(1).is_some_and(|local| {
+                local == needle_v4
+                    || local == needle_any
+                    || local == needle_v6
+                    || local == needle_v6any
+            });
+            if !local_matches {
+                continue;
+            }
+            if let Some(pid) = line.split_whitespace().last().and_then(|p| p.parse().ok()) {
+                return Some(pid);
+            }
+        }
+        None
+    }
+    #[cfg(not(windows))]
+    {
+        // lsof -ti tcp:<port> -sTCP:LISTEN 直接输出 PID
+        let output = std::process::Command::new("lsof")
+            .args(["-ti", &format!("tcp:{port}"), "-sTCP:LISTEN"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        text.lines().find_map(|line| line.trim().parse::<u32>().ok())
+    }
+}
+
+/// 按 PID 终止进程（跨平台）。用于关闭外部运行的模型服务。
+fn kill_pid_by_id(pid: u32) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let output = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F", "/T"])
+            .output()
+            .map_err(|err| format!("调用 taskkill 失败: {err}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            Err(format!("taskkill 终止 PID {pid} 失败: {}", detail.trim()))
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let output = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .output()
+            .map_err(|err| format!("调用 kill 失败: {err}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            Err(format!("kill 终止 PID {pid} 失败: {}", detail.trim()))
+        }
+    }
+}
+
+/// 关闭一个并非当前会话启动的外部模型服务：解析端口上的监听进程并终止。
+fn stop_external_model_on_port(role: &str, port: Option<u16>) -> Result<(), String> {
+    let Some(port) = port else {
+        return Err(format!("{role} 模型未配置可用端口，无法关闭外部进程"));
+    };
+    if !is_port_listening(port) {
+        // 端口已无监听，视为已停止。
+        return Ok(());
+    }
+    let Some(pid) = find_listening_pid(port) else {
+        return Err(format!(
+            "端口 {port} 上检测到外部模型，但未能定位其进程 PID，请手动在任务管理器中关闭"
+        ));
+    };
+    kill_pid_by_id(pid)?;
+    info!(role = %role, pid = pid, port = port, "stopped external model by port");
+    Ok(())
+}
+
 async fn wait_for_local_model_startup(
     role: &str,
     port: u16,
@@ -501,13 +597,21 @@ pub(crate) async fn start_local_model_role(
     Ok(())
 }
 
-pub(crate) async fn stop_local_model_role(role: &str, state: &State<'_, DesktopState>) -> Result<(), String> {
+pub(crate) async fn stop_local_model_role(
+    role: &str,
+    state: &State<'_, DesktopState>,
+) -> Result<(), String> {
     let process = {
         let mut guard = state.local_models.lock().await;
         guard.remove(role)
     };
     let Some(mut process) = process else {
-        return Ok(());
+        // 当前会话没有托管该角色的进程：可能是"外部运行"的模型，按配置端口尝试关闭。
+        let port = load_app_settings()
+            .ok()
+            .map(|settings| resolve_model_settings(&settings).local_profile)
+            .and_then(|profile| endpoint_port(&role_endpoint(&profile, role)).ok());
+        return stop_external_model_on_port(role, port);
     };
     let pid = process.child.id();
     match process.child.kill() {
