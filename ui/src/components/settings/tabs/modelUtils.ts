@@ -11,20 +11,53 @@ import { useI18n } from "../../../i18n";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
 type ModelRoleKey = "chat" | "graph" | "embed";
+type RemoteProtocol = "openai_compatible" | "openai_responses" | "ollama_openai" | "lmstudio_vllm";
 type RemoteProviderPreset = {
   id: string;
   label: string;
   description: string;
+  protocol?: RemoteProtocol;
+  fullUrl?: boolean;
   profile: Omit<RemoteModelProfileDto, "api_key">;
 };
 
 const REMOTE_PRESET_STORAGE_KEY = "memori-remote-model-presets";
+const REMOTE_PROTOCOL_STORAGE_KEY = "memori-remote-model-protocol";
+const REMOTE_FULL_URL_STORAGE_KEY = "memori-remote-model-full-url";
+
+const REMOTE_PROTOCOLS: Array<{
+  value: RemoteProtocol;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "openai_compatible",
+    label: "OpenAI-compatible /v1",
+    description: "适用于 OpenAI、DeepSeek、OpenRouter、硅基流动、DashScope 兼容模式等。"
+  },
+  {
+    value: "openai_responses",
+    label: "OpenAI Response / Chat 兼容",
+    description: "按 OpenAI 风格配置，当前运行时仍使用 chat/completions 兼容调用。"
+  },
+  {
+    value: "ollama_openai",
+    label: "Ollama OpenAI-compatible",
+    description: "适用于 Ollama 的 OpenAI 兼容接口，例如 http://localhost:11434。"
+  },
+  {
+    value: "lmstudio_vllm",
+    label: "LM Studio / vLLM",
+    description: "适用于 LM Studio、vLLM、Xinference 等暴露 OpenAI 兼容接口的服务。"
+  }
+];
 
 const REMOTE_PROVIDER_PRESETS: RemoteProviderPreset[] = [
   {
     id: "openai",
     label: "OpenAI",
-    description: "Official OpenAI API, chat and embedding on one base URL.",
+    description: "官方 OpenAI API，聊天和向量共用同一个地址。",
+    protocol: "openai_compatible",
     profile: {
       chat_endpoint: "https://api.openai.com",
       graph_endpoint: "https://api.openai.com",
@@ -37,7 +70,8 @@ const REMOTE_PROVIDER_PRESETS: RemoteProviderPreset[] = [
   {
     id: "deepseek",
     label: "DeepSeek",
-    description: "DeepSeek OpenAI-compatible chat endpoint.",
+    description: "DeepSeek 的 OpenAI 兼容接口。",
+    protocol: "openai_compatible",
     profile: {
       chat_endpoint: "https://api.deepseek.com",
       graph_endpoint: "https://api.deepseek.com",
@@ -50,7 +84,8 @@ const REMOTE_PROVIDER_PRESETS: RemoteProviderPreset[] = [
   {
     id: "openrouter",
     label: "OpenRouter",
-    description: "One OpenAI-compatible gateway for many hosted models.",
+    description: "一个 OpenAI 兼容网关路由多个托管模型。",
+    protocol: "openai_compatible",
     profile: {
       chat_endpoint: "https://openrouter.ai/api",
       graph_endpoint: "https://openrouter.ai/api",
@@ -63,7 +98,8 @@ const REMOTE_PROVIDER_PRESETS: RemoteProviderPreset[] = [
   {
     id: "siliconflow",
     label: "SiliconFlow",
-    description: "China-hosted OpenAI-compatible model service.",
+    description: "硅基流动 OpenAI 兼容模型服务。",
+    protocol: "openai_compatible",
     profile: {
       chat_endpoint: "https://api.siliconflow.cn",
       graph_endpoint: "https://api.siliconflow.cn",
@@ -76,7 +112,8 @@ const REMOTE_PROVIDER_PRESETS: RemoteProviderPreset[] = [
   {
     id: "dashscope",
     label: "DashScope",
-    description: "Alibaba DashScope compatible-mode endpoint.",
+    description: "阿里 DashScope OpenAI 兼容模式。",
+    protocol: "openai_compatible",
     profile: {
       chat_endpoint: "https://dashscope.aliyuncs.com/compatible-mode",
       graph_endpoint: "https://dashscope.aliyuncs.com/compatible-mode",
@@ -89,7 +126,8 @@ const REMOTE_PROVIDER_PRESETS: RemoteProviderPreset[] = [
   {
     id: "moonshot",
     label: "Moonshot / Kimi",
-    description: "Moonshot AI OpenAI-compatible endpoint.",
+    description: "Moonshot / Kimi OpenAI 兼容接口。",
+    protocol: "openai_compatible",
     profile: {
       chat_endpoint: "https://api.moonshot.cn",
       graph_endpoint: "https://api.moonshot.cn",
@@ -109,6 +147,29 @@ function applyRemotePreset(
     ...current,
     ...preset.profile
   };
+}
+
+function normalizeRemoteProtocol(value: string | null | undefined): RemoteProtocol {
+  return REMOTE_PROTOCOLS.some((item) => item.value === value)
+    ? (value as RemoteProtocol)
+    : "openai_compatible";
+}
+
+function stripOpenAiRequestPath(value: string): string {
+  let next = value.trim().replace(/\/+$/, "");
+  next = next.replace(/\/v1\/(chat\/completions|responses|embeddings|models)$/i, "");
+  next = next.replace(/\/v1$/i, "");
+  return next;
+}
+
+function endpointToApiUrl(endpoint: string, fullUrl: boolean): string {
+  const base = endpoint.trim().replace(/\/+$/, "");
+  if (!fullUrl || !base) return base;
+  return /\/v1$/i.test(base) ? base : `${base}/v1`;
+}
+
+function apiUrlToEndpoint(apiUrl: string, fullUrl: boolean): string {
+  return fullUrl ? stripOpenAiRequestPath(apiUrl) : apiUrl.trim().replace(/\/+$/, "");
 }
 
 function parseRemotePresets(raw: string | null): RemoteProviderPreset[] {
@@ -357,13 +418,20 @@ const ROLE_META: Record<
 export {
   type TranslateFn,
   type ModelRoleKey,
+  type RemoteProtocol,
   type RemoteProviderPreset,
   type RoleErrorMap,
   PERFORMANCE_PRESETS,
+  REMOTE_PROTOCOLS,
   REMOTE_PRESET_STORAGE_KEY,
+  REMOTE_PROTOCOL_STORAGE_KEY,
+  REMOTE_FULL_URL_STORAGE_KEY,
   REMOTE_PROVIDER_PRESETS,
   applyRemotePreset,
   parseRemotePresets,
+  normalizeRemoteProtocol,
+  endpointToApiUrl,
+  apiUrlToEndpoint,
   extractPort,
   replacePort,
   pickModelFile,

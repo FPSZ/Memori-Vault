@@ -1,4 +1,4 @@
-﻿use crate::*;
+use crate::*;
 
 pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto {
     let fallback_provider = settings.active_provider.clone().unwrap_or_else(|| {
@@ -638,6 +638,9 @@ pub(crate) fn normalize_optional_existing_file(
 pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> String {
     let trimmed = endpoint.trim();
     if !trimmed.is_empty() {
+        if provider == ModelProvider::OpenAiCompatible {
+            return strip_openai_compatible_request_path(trimmed);
+        }
         return trimmed.to_string();
     }
     if provider == ModelProvider::OpenAiCompatible {
@@ -645,6 +648,24 @@ pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> Str
     } else {
         DEFAULT_CHAT_ENDPOINT.to_string()
     }
+}
+
+pub(crate) fn strip_openai_compatible_request_path(endpoint: &str) -> String {
+    let mut value = endpoint.trim().trim_end_matches('/').to_string();
+    for suffix in [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/embeddings",
+        "/v1/models",
+        "/v1",
+    ] {
+        if value.to_ascii_lowercase().ends_with(suffix) {
+            let keep = value.len() - suffix.len();
+            value.truncate(keep);
+            break;
+        }
+    }
+    value
 }
 
 /// 每个本地模型角色的默认 endpoint。三个角色的端口必须互不相同，
@@ -819,8 +840,10 @@ pub(crate) fn chrono_like_now_token() -> String {
 #[cfg(test)]
 mod endpoint_tests {
     use super::{
-        dedupe_local_endpoints, ensure_distinct_local_endpoints, normalize_local_endpoint_for_role,
+        dedupe_local_endpoints, ensure_distinct_local_endpoints, normalize_endpoint,
+        normalize_local_endpoint_for_role,
     };
+    use memori_core::ModelProvider;
 
     #[test]
     fn collapsed_local_endpoints_self_heal_to_role_defaults() {
@@ -842,11 +865,14 @@ mod endpoint_tests {
             "http://localhost:18002".to_string(),
             "http://localhost:18003".to_string(),
         );
-        assert_eq!((chat.as_str(), graph.as_str(), embed.as_str()), (
-            "http://localhost:18001",
-            "http://localhost:18002",
-            "http://localhost:18003",
-        ));
+        assert_eq!(
+            (chat.as_str(), graph.as_str(), embed.as_str()),
+            (
+                "http://localhost:18001",
+                "http://localhost:18002",
+                "http://localhost:18003",
+            )
+        );
     }
 
     #[test]
@@ -877,6 +903,31 @@ mod endpoint_tests {
                 "http://localhost:18003",
             )
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn openai_compatible_endpoint_strips_full_request_path() {
+        assert_eq!(
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                "https://api.example.com/v1"
+            ),
+            "https://api.example.com"
+        );
+        assert_eq!(
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                "https://api.example.com/v1/models"
+            ),
+            "https://api.example.com"
+        );
+        assert_eq!(
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                "https://api.example.com/v1/chat/completions"
+            ),
+            "https://api.example.com"
         );
     }
 }

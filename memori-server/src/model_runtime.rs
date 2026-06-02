@@ -611,6 +611,9 @@ pub(crate) fn normalize_performance_preset(value: Option<String>) -> Option<Stri
 pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> String {
     let trimmed = endpoint.trim();
     if !trimmed.is_empty() {
+        if provider == ModelProvider::OpenAiCompatible {
+            return strip_openai_compatible_request_path(trimmed);
+        }
         return trimmed.to_string();
     }
     if provider == ModelProvider::OpenAiCompatible {
@@ -618,6 +621,24 @@ pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> Str
     } else {
         DEFAULT_CHAT_ENDPOINT.to_string()
     }
+}
+
+pub(crate) fn strip_openai_compatible_request_path(endpoint: &str) -> String {
+    let mut value = endpoint.trim().trim_end_matches('/').to_string();
+    for suffix in [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/embeddings",
+        "/v1/models",
+        "/v1",
+    ] {
+        if value.to_ascii_lowercase().ends_with(suffix) {
+            let keep = value.len() - suffix.len();
+            value.truncate(keep);
+            break;
+        }
+    }
+    value
 }
 
 pub(crate) fn resolve_active_runtime_settings(
@@ -873,5 +894,30 @@ mod tests {
             "https://legacy.example.com"
         );
         assert!(normalized.remote_profile.endpoint.is_none());
+    }
+
+    #[test]
+    fn openai_compatible_endpoint_strips_full_request_path() {
+        assert_eq!(
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                "https://api.example.com/v1"
+            ),
+            "https://api.example.com"
+        );
+        assert_eq!(
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                "https://api.example.com/v1/embeddings"
+            ),
+            "https://api.example.com"
+        );
+        assert_eq!(
+            normalize_endpoint(
+                ModelProvider::OpenAiCompatible,
+                "https://api.example.com/v1/chat/completions"
+            ),
+            "https://api.example.com"
+        );
     }
 }

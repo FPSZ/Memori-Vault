@@ -16,6 +16,7 @@ type ModelCardProps = {
   runtimeBusy: boolean;
   expanded: boolean;
   validationMessage?: string | null;
+  modelOptions?: string[];
   onEndpointChange: (v: string) => void;
   onModelChange: (v: string) => void;
   onContextLengthChange: (v: number | null) => void;
@@ -41,6 +42,7 @@ export function ModelCard({
   runtimeBusy,
   expanded,
   validationMessage,
+  modelOptions = [],
   onEndpointChange,
   onModelChange,
   onContextLengthChange,
@@ -165,10 +167,23 @@ export function ModelCard({
                 <input
                   type="text"
                   value={model}
+                  list={modelOptions.length > 0 ? `model-options-${role}` : undefined}
                   onChange={(e) => onModelChange(e.target.value)}
                   className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                   placeholder={meta.defaultModel}
                 />
+                {modelOptions.length > 0 ? (
+                  <datalist id={`model-options-${role}`}>
+                    {modelOptions.map((item) => (
+                      <option key={item} value={item} />
+                    ))}
+                  </datalist>
+                ) : null}
+                {!isLocal && modelOptions.length > 0 ? (
+                  <div className="text-[11px] text-[var(--text-muted)]">
+                    可从探测到的模型中选择，也可以直接手动输入模型名。
+                  </div>
+                ) : null}
               </div>
 
               {isLocal ? (
