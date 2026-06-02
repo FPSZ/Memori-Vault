@@ -694,7 +694,7 @@ export function ModelsTab({
               </button>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-[var(--text-muted)]">协议</label>
                 <select
@@ -711,22 +711,6 @@ export function ModelsTab({
                 <div className="text-[11px] leading-relaxed text-[var(--text-muted)]">
                   {REMOTE_PROTOCOLS.find((item) => item.value === remoteProtocol)?.description}
                 </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-[var(--text-muted)]">API Key</label>
-                <input
-                  type="password"
-                  value={modelSettings.remote_profile.api_key ?? ""}
-                  onChange={(e) =>
-                    onModelSettingsChange({
-                      ...modelSettings,
-                      remote_profile: { ...modelSettings.remote_profile, api_key: e.target.value }
-                    })
-                  }
-                  className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                  placeholder="sk-..."
-                />
               </div>
             </div>
 
@@ -754,6 +738,22 @@ export function ModelsTab({
                   ? "已开启完整 URL：可以填写带 /v1 的兼容接口地址，系统会自动避免重复拼接 /v1。"
                   : "填写兼容 OpenAI Response 格式的服务端点地址；系统会自动请求 /v1/models、/v1/chat/completions 和 /v1/embeddings。"}
               </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-[var(--text-muted)]">API Key</label>
+              <input
+                type="password"
+                value={modelSettings.remote_profile.api_key ?? ""}
+                onChange={(e) =>
+                  onModelSettingsChange({
+                    ...modelSettings,
+                    remote_profile: { ...modelSettings.remote_profile, api_key: e.target.value }
+                  })
+                }
+                className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+                placeholder="sk-..."
+              />
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2">
