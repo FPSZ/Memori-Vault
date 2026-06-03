@@ -16,6 +16,7 @@ type ModelCardProps = {
   runtimeBusy: boolean;
   expanded: boolean;
   validationMessage?: string | null;
+  note?: string | null;
   modelOptions?: string[];
   onEndpointChange: (v: string) => void;
   onModelChange: (v: string) => void;
@@ -42,6 +43,7 @@ export function ModelCard({
   runtimeBusy,
   expanded,
   validationMessage,
+  note,
   modelOptions = [],
   onEndpointChange,
   onModelChange,
@@ -85,6 +87,7 @@ export function ModelCard({
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-muted)]">
             {isLocal && port ? <span className="font-mono">端口 {port}</span> : null}
+            {note ? <span>{note}</span> : null}
             {isLocal ? (
               <span className={running || external ? "text-emerald-400" : starting ? "text-amber-400" : runtimeStatus?.state === "error" ? "text-red-400" : ""}>
                 {stateLabel}{runtimeStatus?.pid ? ` · PID ${runtimeStatus.pid}` : ""}

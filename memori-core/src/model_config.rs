@@ -4,9 +4,10 @@ use std::str::FromStr;
 use crate::{
     DEFAULT_CHAT_ENDPOINT, DEFAULT_CHAT_MODEL_QWEN3, DEFAULT_EMBED_ENDPOINT,
     DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_GRAPH_ENDPOINT, DEFAULT_GRAPH_MODEL_QWEN3,
-    MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_ENDPOINT_ENV,
-    MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV, MEMORI_GRAPH_MODEL_ENV,
-    MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_PROTOCOL_ENV, MEMORI_MODEL_PROVIDER_ENV,
+    MEMORI_CHAT_API_FORMAT_ENV, MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV,
+    MEMORI_EMBED_ENDPOINT_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV,
+    MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_PROTOCOL_ENV,
+    MEMORI_MODEL_PROVIDER_ENV,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +58,40 @@ impl RemoteModelProtocol {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatApiFormat {
+    Chat,
+    Responses,
+}
+
+impl ChatApiFormat {
+    pub fn from_value(text: &str) -> Self {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "responses" | "response" | "openai_responses" | "openai-response" => Self::Responses,
+            _ => Self::Chat,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Responses => "responses",
+        }
+    }
+}
+
+pub fn build_openai_url(endpoint: &str, tail: &str) -> String {
+    let host = endpoint.trim();
+    let tail = tail.trim_start_matches('/');
+    if let Some(stripped) = host.strip_suffix('#') {
+        return stripped.to_string();
+    }
+    if host.ends_with('/') {
+        return format!("{host}{tail}");
+    }
+    format!("{}/v1/{}", host.trim_end_matches('/'), tail)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EgressMode {
@@ -91,6 +126,7 @@ pub struct PolicyViolation {
 pub struct RuntimeModelConfig {
     pub provider: ModelProvider,
     pub protocol: RemoteModelProtocol,
+    pub api_format: ChatApiFormat,
     pub chat_endpoint: String,
     pub chat_model: String,
     pub graph_endpoint: String,
@@ -139,6 +175,16 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
         protocol: std::env::var(MEMORI_MODEL_PROTOCOL_ENV)
             .map(|v| RemoteModelProtocol::from_value(&v))
             .unwrap_or(RemoteModelProtocol::OpenAiChatCompletions),
+        api_format: std::env::var(MEMORI_CHAT_API_FORMAT_ENV)
+            .map(|v| ChatApiFormat::from_value(&v))
+            .unwrap_or_else(|_| {
+                std::env::var(MEMORI_MODEL_PROTOCOL_ENV)
+                    .map(|v| match RemoteModelProtocol::from_value(&v) {
+                        RemoteModelProtocol::OpenAiResponses => ChatApiFormat::Responses,
+                        RemoteModelProtocol::OpenAiChatCompletions => ChatApiFormat::Chat,
+                    })
+                    .unwrap_or(ChatApiFormat::Chat)
+            }),
         chat_endpoint,
         chat_model,
         graph_endpoint,
@@ -164,6 +210,55 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
         embed_concurrency: std::env::var("MEMORI_EMBED_CONCURRENCY")
             .ok()
             .and_then(|v| v.parse().ok()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_openai_url_adds_v1_for_plain_host() {
+        assert_eq!(
+            build_openai_url("https://api.example.com", "chat/completions"),
+            "https://api.example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_openai_url("https://api.example.com", "responses"),
+            "https://api.example.com/v1/responses"
+        );
+        assert_eq!(
+            build_openai_url("https://api.example.com", "embeddings"),
+            "https://api.example.com/v1/embeddings"
+        );
+        assert_eq!(
+            build_openai_url("https://api.example.com", "models"),
+            "https://api.example.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn build_openai_url_keeps_slash_versioned_host() {
+        assert_eq!(
+            build_openai_url("https://api.example.com/v1/", "chat/completions"),
+            "https://api.example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_openai_url("https://api.example.com/custom/", "models"),
+            "https://api.example.com/custom/models"
+        );
+    }
+
+    #[test]
+    fn build_openai_url_hash_forces_exact_url() {
+        assert_eq!(
+            build_openai_url("https://api.example.com/custom#", "chat/completions"),
+            "https://api.example.com/custom"
+        );
+        assert_eq!(
+            build_openai_url("https://api.example.com/custom#", "responses"),
+            "https://api.example.com/custom"
+        );
     }
 }
 

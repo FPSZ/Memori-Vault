@@ -64,6 +64,7 @@ pub(crate) struct AppSettings {
     pub(crate) local_cache_type_v: Option<String>,
     pub(crate) stop_local_models_on_exit: Option<bool>,
     pub(crate) remote_protocol: Option<String>,
+    pub(crate) remote_api_format: Option<String>,
     pub(crate) remote_endpoint: Option<String>,
     pub(crate) remote_chat_endpoint: Option<String>,
     pub(crate) remote_graph_endpoint: Option<String>,
@@ -245,6 +246,8 @@ pub(crate) struct LocalModelProfileDto {
 pub(crate) struct RemoteModelProfileDto {
     #[serde(default)]
     pub(crate) protocol: String,
+    #[serde(default)]
+    pub(crate) api_format: Option<String>,
     pub(crate) chat_endpoint: String,
     pub(crate) graph_endpoint: String,
     pub(crate) embed_endpoint: String,

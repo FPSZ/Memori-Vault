@@ -550,6 +550,7 @@
         let runtime = RuntimeModelConfig {
             provider: ModelProvider::OpenAiCompatible,
             protocol: crate::RemoteModelProtocol::OpenAiChatCompletions,
+            api_format: crate::ChatApiFormat::Chat,
             chat_endpoint: "https://api.openai.com/v1".to_string(),
             chat_model: "gpt-4o-mini".to_string(),
             graph_endpoint: "https://api.openai.com/v1".to_string(),
@@ -580,6 +581,7 @@
         let runtime = RuntimeModelConfig {
             provider: ModelProvider::OpenAiCompatible,
             protocol: crate::RemoteModelProtocol::OpenAiChatCompletions,
+            api_format: crate::ChatApiFormat::Chat,
             chat_endpoint: "https://models.company.local/v1".to_string(),
             chat_model: "approved-chat".to_string(),
             graph_endpoint: "https://models.company.local/v1".to_string(),

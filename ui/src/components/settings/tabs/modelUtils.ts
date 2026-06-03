@@ -5,6 +5,7 @@ import type {
   LocalModelProfileDto,
   LocalModelRuntimeStatusDto,
   LocalModelRuntimeStatusesDto,
+  RemoteApiFormat,
   RemoteModelProfileDto,
 } from "../types";
 import { useI18n } from "../../../i18n";
@@ -12,18 +13,19 @@ import { useI18n } from "../../../i18n";
 type TranslateFn = ReturnType<typeof useI18n>["t"];
 type ModelRoleKey = "chat" | "graph" | "embed";
 type RemoteProtocol = "openai_chat_completions" | "openai_responses";
+type RemoteApiFormatValue = RemoteApiFormat;
 type RemoteProviderPreset = {
   id: string;
   label: string;
   description: string;
   protocol?: RemoteProtocol | string;
-  fullUrl?: boolean;
+  apiFormat?: RemoteApiFormatValue | string;
   profile: Omit<RemoteModelProfileDto, "api_key">;
 };
 
 const REMOTE_PRESET_STORAGE_KEY = "memori-remote-model-presets";
 const REMOTE_PROTOCOL_STORAGE_KEY = "memori-remote-model-protocol";
-const REMOTE_FULL_URL_STORAGE_KEY = "memori-remote-model-full-url";
+const REMOTE_API_FORMAT_STORAGE_KEY = "memori-remote-model-api-format";
 
 const LEGACY_REMOTE_PROTOCOLS: Array<{
   value: string;
@@ -69,6 +71,26 @@ const REMOTE_PROTOCOLS: Array<{
   }
 ];
 
+const REMOTE_API_FORMATS: Array<{
+  value: RemoteApiFormatValue;
+  label: string;
+  description: string;
+  tail: "chat/completions" | "responses";
+}> = [
+  {
+    value: "chat",
+    label: "OpenAI",
+    description: "使用 /v1/chat/completions。适合 DeepSeek、OpenAI 兼容服务和多数中转接口。",
+    tail: "chat/completions"
+  },
+  {
+    value: "responses",
+    label: "OpenAI-Response",
+    description: "使用 /v1/responses。仅在服务商明确支持 Responses API 时选择。",
+    tail: "responses"
+  }
+];
+
 function applyRemotePreset(
   current: RemoteModelProfileDto,
   preset: RemoteProviderPreset
@@ -91,21 +113,34 @@ function normalizeRemoteProtocol(value: string | null | undefined): RemoteProtoc
     : "openai_chat_completions";
 }
 
+function normalizeRemoteApiFormat(value: string | null | undefined): RemoteApiFormatValue {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "responses" ||
+    normalized === "response" ||
+    normalized === "openai_responses" ||
+    normalized === "openai-response"
+    ? "responses"
+    : "chat";
+}
+
 function stripOpenAiRequestPath(value: string): string {
-  let next = value.trim().replace(/\/+$/, "");
+  let next = value.trim();
+  if (next.endsWith("/") || next.endsWith("#")) return next;
   next = next.replace(/\/v1\/(chat\/completions|responses|embeddings|models)$/i, "");
   next = next.replace(/\/v1$/i, "");
   return next;
 }
 
-function endpointToApiUrl(endpoint: string, fullUrl: boolean): string {
-  const base = endpoint.trim().replace(/\/+$/, "");
-  if (!fullUrl || !base) return base;
-  return /\/v1$/i.test(base) ? base : `${base}/v1`;
+function normalizeRemoteBaseUrl(value: string): string {
+  return stripOpenAiRequestPath(value);
 }
 
-function apiUrlToEndpoint(apiUrl: string, fullUrl: boolean): string {
-  return fullUrl ? stripOpenAiRequestPath(apiUrl) : apiUrl.trim().replace(/\/+$/, "");
+function buildOpenAiUrl(host: string, tail: string): string {
+  const trimmed = host.trim();
+  const cleanTail = tail.replace(/^\/+/, "");
+  if (trimmed.endsWith("#")) return trimmed.slice(0, -1);
+  if (trimmed.endsWith("/")) return `${trimmed}${cleanTail}`;
+  return `${trimmed.replace(/\/+$/, "")}/v1/${cleanTail}`;
 }
 
 function parseRemotePresets(raw: string | null): RemoteProviderPreset[] {
@@ -355,18 +390,21 @@ export {
   type TranslateFn,
   type ModelRoleKey,
   type RemoteProtocol,
+  type RemoteApiFormatValue as RemoteApiFormat,
   type RemoteProviderPreset,
   type RoleErrorMap,
   PERFORMANCE_PRESETS,
   REMOTE_PROTOCOLS,
+  REMOTE_API_FORMATS,
   REMOTE_PRESET_STORAGE_KEY,
   REMOTE_PROTOCOL_STORAGE_KEY,
-  REMOTE_FULL_URL_STORAGE_KEY,
+  REMOTE_API_FORMAT_STORAGE_KEY,
   applyRemotePreset,
   parseRemotePresets,
   normalizeRemoteProtocol,
-  endpointToApiUrl,
-  apiUrlToEndpoint,
+  normalizeRemoteApiFormat,
+  normalizeRemoteBaseUrl,
+  buildOpenAiUrl,
   extractPort,
   replacePort,
   pickModelFile,

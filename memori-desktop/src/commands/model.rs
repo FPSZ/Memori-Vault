@@ -82,6 +82,7 @@ pub(crate) async fn set_model_settings(
     settings.local_graph_model_path = normalized.local_profile.graph_model_path.clone();
     settings.local_embed_model_path = normalized.local_profile.embed_model_path.clone();
     settings.remote_protocol = Some(normalized.remote_profile.protocol.clone());
+    settings.remote_api_format = normalized.remote_profile.api_format.clone();
     settings.remote_chat_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
     settings.remote_graph_endpoint = Some(normalized.remote_profile.graph_endpoint.clone());
     settings.remote_embed_endpoint = Some(normalized.remote_profile.embed_endpoint.clone());
@@ -258,6 +259,79 @@ pub(crate) async fn probe_model_provider(
         status_code: None,
         status_message: None,
     })
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub(crate) async fn test_remote_connection(
+    baseUrl: String,
+    apiKey: Option<String>,
+    apiFormat: Option<String>,
+    chatModel: String,
+) -> Result<String, String> {
+    let endpoint = normalize_endpoint(ModelProvider::OpenAiCompatible, &baseUrl);
+    let api_key = normalize_optional_text(apiKey);
+    let api_format = normalize_chat_api_format(apiFormat.as_deref());
+    let model = chatModel.trim().to_string();
+    if endpoint.trim().is_empty() {
+        return Err("API 地址不能为空".to_string());
+    }
+    if model.is_empty() {
+        return Err("对话模型名称不能为空".to_string());
+    }
+
+    let settings = load_app_settings()?;
+    let policy = resolve_enterprise_policy(&settings);
+    validate_provider_request(
+        &to_model_policy(&policy),
+        ModelProvider::OpenAiCompatible,
+        &endpoint,
+        std::slice::from_ref(&model),
+    )
+    .map_err(|violation| violation.message)?;
+
+    let tail = if api_format == "responses" {
+        "responses"
+    } else {
+        "chat/completions"
+    };
+    let url = memori_core::build_openai_url(&endpoint, tail);
+    let client = reqwest::Client::new();
+    let mut request = if api_format == "responses" {
+        client.post(&url).json(&serde_json::json!({
+            "model": model,
+            "instructions": "Return pong.",
+            "input": "ping",
+            "temperature": 0
+        }))
+    } else {
+        client.post(&url).json(&serde_json::json!({
+            "model": model,
+            "messages": [
+                { "role": "system", "content": "Return pong." },
+                { "role": "user", "content": "ping" }
+            ],
+            "temperature": 0
+        }))
+    };
+    if let Some(key) = api_key.as_ref() {
+        request = request.bearer_auth(key);
+    }
+
+    let response = timeout(
+        Duration::from_secs(PROVIDER_HTTP_TIMEOUT_SECS),
+        request.send(),
+    )
+    .await
+    .map_err(|_| format!("检测超时({}s): {url}", PROVIDER_HTTP_TIMEOUT_SECS))?
+    .map_err(|err| format!("连接失败: {err}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("检测失败: status={}, body={body}", status));
+    }
+
+    Ok(format!("连接成功: {}", url))
 }
 
 #[tauri::command]

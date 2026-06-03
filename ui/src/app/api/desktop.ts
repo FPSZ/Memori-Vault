@@ -16,6 +16,7 @@ import type {
   MemorySettingsDto,
   ModelAvailabilityDto,
   ModelProvider,
+  RemoteApiFormat,
   ModelSettingsDto,
   LocalModelRuntimeStatusesDto,
   ProviderModelsDto
@@ -135,6 +136,15 @@ export function restartLocalModel(role: "chat" | "graph" | "embed") {
 
 export function probeModelProvider(payload: ProviderModelsPayload) {
   return invoke<ModelAvailabilityDto>("probe_model_provider", payload);
+}
+
+export function testRemoteConnection(payload: {
+  baseUrl: string;
+  apiKey: string | null;
+  apiFormat: RemoteApiFormat;
+  chatModel: string;
+}) {
+  return invoke<string>("test_remote_connection", payload);
 }
 
 export function listSearchScopes() {

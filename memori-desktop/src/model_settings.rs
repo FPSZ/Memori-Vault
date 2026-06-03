@@ -237,6 +237,19 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             }
         })
         .and_then(|value| normalize_optional_text(Some(value)));
+    let remote_api_format = settings
+        .remote_api_format
+        .clone()
+        .or_else(|| {
+            settings.remote_protocol.as_ref().map(|protocol| {
+                if normalize_remote_protocol(Some(protocol)) == "openai_responses" {
+                    "responses".to_string()
+                } else {
+                    "chat".to_string()
+                }
+            })
+        })
+        .unwrap_or_else(|| "chat".to_string());
 
     // 自愈：历史配置可能把三个本地角色塌缩到同一端口（共享的 local_endpoint 回退导致）。
     // 读取时检测冲突并把 graph/embed 重置为各自默认端口，避免“三个角色都指向 18001”。
@@ -292,6 +305,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
         },
         remote_profile: RemoteModelProfileDto {
             protocol: normalize_remote_protocol(settings.remote_protocol.as_deref()),
+            api_format: Some(normalize_chat_api_format(Some(&remote_api_format))),
             chat_endpoint: normalize_endpoint(
                 ModelProvider::OpenAiCompatible,
                 &remote_chat_endpoint,
@@ -356,6 +370,7 @@ pub(crate) fn normalize_model_settings_payload(
     let remote_graph_model = payload.remote_profile.graph_model.trim().to_string();
     let remote_embed_model = payload.remote_profile.embed_model.trim().to_string();
     let remote_protocol = normalize_remote_protocol(Some(&payload.remote_profile.protocol));
+    let remote_api_format = normalize_chat_api_format(payload.remote_profile.api_format.as_deref());
 
     if local_chat_model.is_empty()
         || local_graph_model.is_empty()
@@ -417,6 +432,7 @@ pub(crate) fn normalize_model_settings_payload(
         },
         remote_profile: RemoteModelProfileDto {
             protocol: remote_protocol,
+            api_format: Some(remote_api_format),
             chat_endpoint: remote_chat_endpoint,
             graph_endpoint: remote_graph_endpoint,
             embed_endpoint: remote_embed_endpoint,
@@ -446,6 +462,11 @@ pub(crate) fn resolve_active_runtime_settings(
             settings.remote_profile.protocol.clone()
         } else {
             "openai_chat_completions".to_string()
+        },
+        api_format: if active_provider == ModelProvider::OpenAiCompatible {
+            normalize_chat_api_format(settings.remote_profile.api_format.as_deref())
+        } else {
+            "chat".to_string()
         },
         chat_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
             normalize_endpoint(
@@ -583,7 +604,11 @@ pub(crate) fn resolve_configured_active_runtime_settings(
             && !active.embed_model.trim().is_empty()
     };
 
-    if configured { Some(active) } else { None }
+    if configured {
+        Some(active)
+    } else {
+        None
+    }
 }
 
 pub(crate) fn is_model_not_configured_message(message: &str) -> bool {
@@ -636,6 +661,20 @@ pub(crate) fn normalize_remote_protocol(value: Option<&str>) -> String {
     }
 }
 
+pub(crate) fn normalize_chat_api_format(value: Option<&str>) -> String {
+    match value
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "responses" | "response" | "openai_responses" | "openai-response" => {
+            "responses".to_string()
+        }
+        _ => "chat".to_string(),
+    }
+}
+
 pub(crate) fn normalize_optional_existing_file(
     value: Option<String>,
     label: &str,
@@ -659,6 +698,9 @@ pub(crate) fn normalize_endpoint(provider: ModelProvider, endpoint: &str) -> Str
     let trimmed = endpoint.trim();
     if !trimmed.is_empty() {
         if provider == ModelProvider::OpenAiCompatible {
+            if trimmed.ends_with('/') || trimmed.ends_with('#') {
+                return trimmed.to_string();
+            }
             return strip_openai_compatible_request_path(trimmed);
         }
         return trimmed.to_string();
@@ -771,6 +813,10 @@ pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) 
             provider_to_string(settings.provider),
         );
         std::env::set_var(memori_core::MEMORI_MODEL_PROTOCOL_ENV, &settings.protocol);
+        std::env::set_var(
+            memori_core::MEMORI_CHAT_API_FORMAT_ENV,
+            &settings.api_format,
+        );
         std::env::set_var(MEMORI_MODEL_ENDPOINT_ENV, &settings.chat_endpoint);
         std::env::set_var(MEMORI_CHAT_ENDPOINT_ENV, &settings.chat_endpoint);
         std::env::set_var(MEMORI_GRAPH_ENDPOINT_ENV, &settings.graph_endpoint);
@@ -917,14 +963,12 @@ mod endpoint_tests {
         )
         .unwrap_err();
         assert!(err.contains("不同的端口"));
-        assert!(
-            ensure_distinct_local_endpoints(
-                "http://localhost:18001",
-                "http://localhost:18002",
-                "http://localhost:18003",
-            )
-            .is_ok()
-        );
+        assert!(ensure_distinct_local_endpoints(
+            "http://localhost:18001",
+            "http://localhost:18002",
+            "http://localhost:18003",
+        )
+        .is_ok());
     }
 
     #[test]

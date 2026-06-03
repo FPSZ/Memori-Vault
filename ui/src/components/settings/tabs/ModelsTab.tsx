@@ -30,20 +30,19 @@ import {
   dirNameFromPath,
   modelPathForRole,
   runtimeStatusForRole,
-  roleEndpoint,
-  roleModel,
   optionalNumber,
   validateLocalRoles,
   describeAvailabilityError,
   ROLE_META,
-  REMOTE_PROTOCOLS,
   REMOTE_PROTOCOL_STORAGE_KEY,
-  REMOTE_FULL_URL_STORAGE_KEY,
+  REMOTE_API_FORMAT_STORAGE_KEY,
   REMOTE_PRESET_STORAGE_KEY,
   applyRemotePreset,
   parseRemotePresets,
   normalizeRemoteProtocol,
+  normalizeRemoteApiFormat,
   type RemoteProtocol,
+  type RemoteApiFormat,
   type RemoteProviderPreset,
 } from "./modelUtils";
 import { ModelCard } from "./ModelCard";
@@ -68,6 +67,10 @@ type ModelsTabProps = {
   onPickLocalModelsRoot: () => Promise<void>;
   onClearLocalModelsRoot: () => void;
 };
+
+function apiFormatToProtocol(format: RemoteApiFormat): RemoteProtocol {
+  return format === "responses" ? "openai_responses" : "openai_chat_completions";
+}
 
 export function ModelsTab({
   t,
@@ -100,18 +103,15 @@ export function ModelsTab({
   const [localRoleErrors, setLocalRoleErrors] = useState<RoleErrorMap>({});
   const [localConfigMessages, setLocalConfigMessages] = useState<string[]>([]);
   const [customPresetName, setCustomPresetName] = useState("");
-  const [remoteProtocol, setRemoteProtocol] = useState<RemoteProtocol>(() =>
+  const [remoteApiFormat, setRemoteApiFormat] = useState<RemoteApiFormat>(() =>
     typeof window === "undefined"
-      ? normalizeRemoteProtocol(modelSettings.remote_profile.protocol)
-      : normalizeRemoteProtocol(
-          modelSettings.remote_profile.protocol ??
+      ? normalizeRemoteApiFormat(modelSettings.remote_profile.api_format ?? modelSettings.remote_profile.protocol)
+      : normalizeRemoteApiFormat(
+          modelSettings.remote_profile.api_format ??
+            window.localStorage.getItem(REMOTE_API_FORMAT_STORAGE_KEY) ??
+            modelSettings.remote_profile.protocol ??
             window.localStorage.getItem(REMOTE_PROTOCOL_STORAGE_KEY)
         )
-  );
-  const [remoteFullUrl, setRemoteFullUrl] = useState(() =>
-    typeof window === "undefined"
-      ? false
-      : window.localStorage.getItem(REMOTE_FULL_URL_STORAGE_KEY) === "true"
   );
   const [customRemotePresets, setCustomRemotePresets] = useState<RemoteProviderPreset[]>(() =>
     typeof window === "undefined"
@@ -177,21 +177,20 @@ export function ModelsTab({
   };
 
   const applyRemoteProviderPreset = (preset: RemoteProviderPreset) => {
-    if (preset.protocol) {
-      const protocol = normalizeRemoteProtocol(preset.protocol);
-      setRemoteProtocol(protocol);
-      window.localStorage.setItem(REMOTE_PROTOCOL_STORAGE_KEY, protocol);
-    }
-    if (typeof preset.fullUrl === "boolean") {
-      setRemoteFullUrl(preset.fullUrl);
-      window.localStorage.setItem(REMOTE_FULL_URL_STORAGE_KEY, String(preset.fullUrl));
-    }
+    const apiFormat = normalizeRemoteApiFormat(
+      preset.apiFormat ?? preset.profile.api_format ?? preset.protocol
+    );
+    const protocol = apiFormatToProtocol(apiFormat);
+    setRemoteApiFormat(apiFormat);
+    window.localStorage.setItem(REMOTE_API_FORMAT_STORAGE_KEY, apiFormat);
+    window.localStorage.setItem(REMOTE_PROTOCOL_STORAGE_KEY, protocol);
     onModelSettingsChange({
       ...modelSettings,
       active_provider: "openai_compatible",
       remote_profile: {
         ...applyRemotePreset(modelSettings.remote_profile, preset),
-        protocol: preset.protocol ? normalizeRemoteProtocol(preset.protocol) : remoteProtocol
+        protocol,
+        api_format: apiFormat
       }
     });
   };
@@ -203,10 +202,11 @@ export function ModelsTab({
       id: `custom-${Date.now()}`,
       label,
       description: "用户保存的远程模型配置",
-      protocol: remoteProtocol,
-      fullUrl: remoteFullUrl,
+      protocol: apiFormatToProtocol(remoteApiFormat),
+      apiFormat: remoteApiFormat,
       profile: {
-        protocol: remoteProtocol,
+        protocol: apiFormatToProtocol(remoteApiFormat),
+        api_format: remoteApiFormat,
         chat_endpoint: modelSettings.remote_profile.chat_endpoint,
         graph_endpoint: modelSettings.remote_profile.graph_endpoint,
         embed_endpoint: modelSettings.remote_profile.embed_endpoint,
@@ -230,15 +230,12 @@ export function ModelsTab({
     window.localStorage.setItem(REMOTE_PRESET_STORAGE_KEY, JSON.stringify(next));
   };
 
-  const updateRemoteProtocol = (next: RemoteProtocol) => {
-    setRemoteProtocol(next);
-    window.localStorage.setItem(REMOTE_PROTOCOL_STORAGE_KEY, next);
-    updateProfile({ protocol: next });
-  };
-
-  const updateRemoteFullUrl = (next: boolean) => {
-    setRemoteFullUrl(next);
-    window.localStorage.setItem(REMOTE_FULL_URL_STORAGE_KEY, String(next));
+  const updateRemoteApiFormat = (next: RemoteApiFormat) => {
+    const protocol = apiFormatToProtocol(next);
+    setRemoteApiFormat(next);
+    window.localStorage.setItem(REMOTE_API_FORMAT_STORAGE_KEY, next);
+    window.localStorage.setItem(REMOTE_PROTOCOL_STORAGE_KEY, protocol);
+    updateProfile({ api_format: next, protocol });
   };
 
   const handlePickLlamaServer = async () => {
@@ -650,15 +647,13 @@ export function ModelsTab({
           <RemoteModelSettingsPanel
             modelSettings={modelSettings}
             modelBusy={modelBusy}
-            remoteProtocol={remoteProtocol}
-            remoteFullUrl={remoteFullUrl}
+            remoteApiFormat={remoteApiFormat}
             savedRemotePresets={savedRemotePresets}
             customPresetName={customPresetName}
             remoteModels={remoteModels}
             onRefreshProviderModels={handleRefreshProviderModels}
             onRemoteProfileChange={updateProfile}
-            onRemoteProtocolChange={updateRemoteProtocol}
-            onRemoteFullUrlChange={updateRemoteFullUrl}
+            onRemoteApiFormatChange={updateRemoteApiFormat}
             onApplyRemotePreset={applyRemoteProviderPreset}
             onDeleteRemotePreset={deleteRemotePreset}
             onCustomPresetNameChange={setCustomPresetName}
@@ -681,6 +676,7 @@ export function ModelsTab({
             runtimeBusy={localModelRuntimeBusyRole === role}
             expanded={expandedRoles[role]}
             validationMessage={localRoleErrors[role] ?? null}
+            note={!isLocal && role === "embed" ? "可选（需服务商支持 /v1/embeddings）" : null}
             modelOptions={!isLocal ? remoteModels : providerModels.merged}
             onEndpointChange={(v) => updateProfile({ [`${role}_endpoint`]: v })}
             onModelChange={(v) => updateProfile({ [`${role}_model`]: v })}

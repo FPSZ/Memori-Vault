@@ -1,4 +1,4 @@
-use crate::{LocalModelClientError, resolve_runtime_model_config_from_env};
+use crate::{LocalModelClientError, build_openai_url, resolve_runtime_model_config_from_env};
 use tracing::warn;
 
 /// 统一 Embedding 客户端（兼容 llama-server / vLLM / OpenAI 的 /v1/embeddings）。
@@ -43,7 +43,7 @@ impl LocalEmbeddingClient {
     }
 
     pub async fn is_service_reachable(&self) -> bool {
-        let url = format!("{}/v1/models", self.base_url.trim_end_matches('/'));
+        let url = build_openai_url(&self.base_url, "models");
         let mut request = self.http.get(url);
         if let Some(key) = self.api_key.as_ref() {
             request = request.bearer_auth(key);
@@ -108,7 +108,7 @@ impl LocalEmbeddingClient {
         input: serde_json::Value,
         expected_count: usize,
     ) -> Result<Vec<Vec<f32>>, LocalModelClientError> {
-        let url = format!("{}/v1/embeddings", self.base_url.trim_end_matches('/'));
+        let url = build_openai_url(&self.base_url, "embeddings");
         let mut request = self.http.post(url).json(&OpenAiEmbeddingRequest {
             model: &self.model,
             input,

@@ -195,6 +195,7 @@ pub fn run() {
             set_model_settings,
             list_provider_models,
             probe_model_provider,
+            test_remote_connection,
             validate_model_setup,
             get_local_model_runtime_status,
             start_local_model,

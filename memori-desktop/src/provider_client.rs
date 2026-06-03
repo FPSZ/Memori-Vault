@@ -91,7 +91,7 @@ pub(crate) async fn list_openai_compatible_models(
         id: String,
     }
 
-    let url = format!("{}/v1/models", endpoint.trim_end_matches('/'));
+    let url = memori_core::build_openai_url(endpoint, "models");
     let mut request = reqwest::Client::new().get(url);
     if let Some(key) = api_key {
         request = request.bearer_auth(key);
@@ -154,7 +154,7 @@ pub(crate) async fn probe_openai_compatible_embedding(
         embedding: Vec<f32>,
     }
 
-    let url = format!("{}/v1/embeddings", endpoint.trim_end_matches('/'));
+    let url = memori_core::build_openai_url(endpoint, "embeddings");
     let mut request = reqwest::Client::new()
         .post(url)
         .json(&OpenAiEmbeddingProbeRequest {

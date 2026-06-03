@@ -1,26 +1,25 @@
-import { RefreshCw } from "lucide-react";
-import { CyberToggle } from "../../UI";
+import { useState } from "react";
+import { Eye, EyeOff, LoaderCircle, RefreshCw, RotateCcw } from "lucide-react";
+import { testRemoteConnection } from "../../../app/api/desktop";
 import type { ModelSettingsDto, RemoteModelProfileDto } from "../types";
 import {
-  REMOTE_PROTOCOLS,
-  apiUrlToEndpoint,
-  endpointToApiUrl,
-  type RemoteProtocol,
+  REMOTE_API_FORMATS,
+  buildOpenAiUrl,
+  normalizeRemoteBaseUrl,
+  type RemoteApiFormat,
   type RemoteProviderPreset,
 } from "./modelUtils";
 
 type RemoteModelSettingsPanelProps = {
   modelSettings: ModelSettingsDto;
   modelBusy: boolean;
-  remoteProtocol: RemoteProtocol;
-  remoteFullUrl: boolean;
+  remoteApiFormat: RemoteApiFormat;
   savedRemotePresets: RemoteProviderPreset[];
   customPresetName: string;
   remoteModels: string[];
   onRefreshProviderModels: () => Promise<void>;
   onRemoteProfileChange: (patch: Partial<RemoteModelProfileDto>) => void;
-  onRemoteProtocolChange: (next: RemoteProtocol) => void;
-  onRemoteFullUrlChange: (next: boolean) => void;
+  onRemoteApiFormatChange: (next: RemoteApiFormat) => void;
   onApplyRemotePreset: (preset: RemoteProviderPreset) => void;
   onDeleteRemotePreset: (id: string) => void;
   onCustomPresetNameChange: (next: string) => void;
@@ -30,29 +29,31 @@ type RemoteModelSettingsPanelProps = {
 export function RemoteModelSettingsPanel({
   modelSettings,
   modelBusy,
-  remoteProtocol,
-  remoteFullUrl,
+  remoteApiFormat,
   savedRemotePresets,
   customPresetName,
   remoteModels,
   onRefreshProviderModels,
   onRemoteProfileChange,
-  onRemoteProtocolChange,
-  onRemoteFullUrlChange,
+  onRemoteApiFormatChange,
   onApplyRemotePreset,
   onDeleteRemotePreset,
   onCustomPresetNameChange,
   onSaveRemotePreset,
 }: RemoteModelSettingsPanelProps) {
-  const remoteApiUrl = endpointToApiUrl(modelSettings.remote_profile.chat_endpoint, remoteFullUrl);
+  const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const baseUrl = modelSettings.remote_profile.chat_endpoint;
+  const selectedFormat = REMOTE_API_FORMATS.find((item) => item.value === remoteApiFormat) ?? REMOTE_API_FORMATS[0];
+  const previewUrl = baseUrl.trim() ? buildOpenAiUrl(baseUrl, selectedFormat.tail) : "";
   const remoteConfigToml = [
     'model_provider = "openai_compatible"',
     `model = "${modelSettings.remote_profile.chat_model}"`,
     `graph_model = "${modelSettings.remote_profile.graph_model}"`,
     `embed_model = "${modelSettings.remote_profile.embed_model}"`,
     `base_url = "${modelSettings.remote_profile.chat_endpoint}"`,
-    `protocol = "${remoteProtocol}"`,
-    `full_url_input = ${remoteFullUrl ? "true" : "false"}`,
+    `api_format = "${remoteApiFormat}"`,
     'network_access = "enabled"'
   ].join("\n");
   const remoteAuthJson = JSON.stringify(
@@ -63,8 +64,8 @@ export function RemoteModelSettingsPanel({
     2
   );
 
-  const updateRemoteApiUrl = (value: string) => {
-    const endpoint = apiUrlToEndpoint(value, remoteFullUrl);
+  const updateRemoteBaseUrl = (value: string) => {
+    const endpoint = normalizeRemoteBaseUrl(value);
     onRemoteProfileChange({
       chat_endpoint: endpoint,
       graph_endpoint: endpoint,
@@ -72,13 +73,31 @@ export function RemoteModelSettingsPanel({
     });
   };
 
+  const runConnectionTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const message = await testRemoteConnection({
+        baseUrl,
+        apiKey: modelSettings.remote_profile.api_key ?? null,
+        apiFormat: remoteApiFormat,
+        chatModel: modelSettings.remote_profile.chat_model
+      });
+      setTestResult({ ok: true, message });
+    } catch (error) {
+      setTestResult({ ok: false, message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <div className="space-y-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-medium text-[var(--text-primary)]">远程协议配置</div>
+          <div className="text-sm font-medium text-[var(--text-primary)]">远程提供商配置</div>
           <div className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
-            按协议、URL、Key 和模型名配置远端模型；供应商模板只用于快速填充。
+            按 Cherry Studio 的地址规则配置：末尾 # 强制完整 URL，末尾 / 不补 /v1，其它地址自动补 /v1。
           </div>
         </div>
         <button
@@ -93,60 +112,82 @@ export function RemoteModelSettingsPanel({
       </div>
 
       <div className="space-y-1">
-        <div className="space-y-1">
-          <label className="text-[11px] font-medium text-[var(--text-muted)]">协议</label>
-          <select
-            value={remoteProtocol}
-            onChange={(e) => onRemoteProtocolChange(e.target.value as RemoteProtocol)}
-            className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-          >
-            {REMOTE_PROTOCOLS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          <div className="text-[11px] leading-relaxed text-[var(--text-muted)]">
-            {REMOTE_PROTOCOLS.find((item) => item.value === remoteProtocol)?.description}
-          </div>
+        <label className="text-[11px] font-medium text-[var(--text-muted)]">API 协议</label>
+        <select
+          value={remoteApiFormat}
+          onChange={(e) => onRemoteApiFormatChange(e.target.value as RemoteApiFormat)}
+          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+        >
+          {REMOTE_API_FORMATS.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          ))}
+        </select>
+        <div className="text-[11px] leading-relaxed text-[var(--text-muted)]">
+          {selectedFormat.description}
         </div>
       </div>
 
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-3">
-          <label className="text-[11px] font-medium text-[var(--text-muted)]">API 请求地址</label>
-          <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
-            <span>完整 URL</span>
-            <CyberToggle
-              checked={remoteFullUrl}
-              onChange={onRemoteFullUrlChange}
-              ariaLabel="完整 URL"
-            />
+          <label className="text-[11px] font-medium text-[var(--text-muted)]">API 密钥</label>
+          <button
+            type="button"
+            onClick={() => void runConnectionTest()}
+            disabled={testing || !baseUrl.trim() || !modelSettings.remote_profile.chat_model.trim()}
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-1 text-[11px] text-[var(--accent)] transition hover:bg-[var(--bg-surface-1)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {testing ? <LoaderCircle className="h-3 w-3 animate-spin" /> : null}
+            检测
+          </button>
+        </div>
+        <div className="flex overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] focus-within:border-[var(--accent)]">
+          <input
+            type={apiKeyVisible ? "text" : "password"}
+            value={modelSettings.remote_profile.api_key ?? ""}
+            onChange={(e) => onRemoteProfileChange({ api_key: e.target.value })}
+            className="min-w-0 flex-1 bg-transparent px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none"
+            placeholder="sk-..."
+          />
+          <button
+            type="button"
+            onClick={() => setApiKeyVisible((prev) => !prev)}
+            className="inline-flex w-10 items-center justify-center border-l border-[var(--border-subtle)] text-[var(--text-muted)] transition hover:text-[var(--text-primary)]"
+            aria-label={apiKeyVisible ? "隐藏 API Key" : "显示 API Key"}
+          >
+            {apiKeyVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        </div>
+        {testResult ? (
+          <div className={`rounded-lg px-3 py-2 text-[11px] leading-relaxed ${testResult.ok ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-400"}`}>
+            {testResult.message}
           </div>
-        </div>
-        <input
-          type="text"
-          value={remoteApiUrl}
-          onChange={(e) => updateRemoteApiUrl(e.target.value)}
-          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 font-mono text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-          placeholder={remoteFullUrl ? "https://example.com/v1" : "https://example.com"}
-        />
-        <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-500">
-          {remoteFullUrl
-            ? "已开启完整 URL：可以填写带 /v1 的兼容接口地址，系统会自动避免重复拼接 /v1。"
-            : "填写兼容 OpenAI Response / Chat 格式的服务端点地址；系统会自动请求 /v1/models，并按协议使用 /v1/chat/completions 或 /v1/responses。"}
-        </div>
+        ) : null}
       </div>
 
       <div className="space-y-1">
-        <label className="text-[11px] font-medium text-[var(--text-muted)]">API Key</label>
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-[11px] font-medium text-[var(--text-muted)]">API 地址</label>
+          <button
+            type="button"
+            onClick={() => updateRemoteBaseUrl("")}
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-1 text-[11px] text-red-400 transition hover:bg-[var(--bg-surface-1)]"
+          >
+            <RotateCcw className="h-3 w-3" />
+            重置
+          </button>
+        </div>
         <input
-          type="password"
-          value={modelSettings.remote_profile.api_key ?? ""}
-          onChange={(e) => onRemoteProfileChange({ api_key: e.target.value })}
-          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-          placeholder="sk-..."
+          type="text"
+          value={baseUrl}
+          onChange={(e) => updateRemoteBaseUrl(e.target.value)}
+          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-3 py-1.5 font-mono text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+          placeholder="https://api.deepseek.com"
         />
+        <div className="text-[11px] leading-relaxed text-[var(--text-muted)]">
+          预览：{previewUrl || "填写 API 地址后显示最终请求 URL"}
+        </div>
       </div>
 
       {savedRemotePresets.length > 0 ? (

@@ -22,6 +22,14 @@ pub(crate) fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> 
     RuntimeModelConfig {
         provider: settings.provider,
         protocol: memori_core::RemoteModelProtocol::from_value(&settings.protocol),
+        api_format: match memori_core::RemoteModelProtocol::from_value(&settings.protocol) {
+            memori_core::RemoteModelProtocol::OpenAiResponses => {
+                memori_core::ChatApiFormat::Responses
+            }
+            memori_core::RemoteModelProtocol::OpenAiChatCompletions => {
+                memori_core::ChatApiFormat::Chat
+            }
+        },
         chat_endpoint: settings.chat_endpoint.clone(),
         chat_model: settings.chat_model.clone(),
         graph_endpoint: settings.graph_endpoint.clone(),

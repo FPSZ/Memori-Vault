@@ -1,81 +1,9 @@
-use serde::{Deserialize, Serialize};
-
-use crate::{
-    EngineError, ModelProvider, RemoteModelProtocol, resolve_runtime_model_config_from_env,
-};
+use crate::llm_http::{LlmHttpError, request_llm_text};
+use crate::{EngineError, resolve_runtime_model_config_from_env};
 
 const ANSWER_TEMPERATURE: f32 = 0.1;
 const MIN_ANSWER_TIMEOUT_SECS: u64 = 45;
 const MAX_ANSWER_TIMEOUT_SECS: u64 = 300;
-
-#[derive(Debug, Serialize)]
-struct ChatMessage<'a> {
-    role: &'a str,
-    content: &'a str,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatMessageResponse {
-    content: String,
-}
-
-#[derive(Debug, Serialize)]
-struct OpenAiChatCompletionRequest<'a> {
-    model: &'a str,
-    temperature: f32,
-    messages: Vec<ChatMessage<'a>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    think: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thinking: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    enable_thinking: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    chat_template_kwargs: Option<QwenChatTemplateKwargs>,
-}
-
-#[derive(Debug, Serialize)]
-struct OpenAiResponsesRequest<'a> {
-    model: &'a str,
-    temperature: f32,
-    instructions: &'a str,
-    input: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-struct QwenChatTemplateKwargs {
-    enable_thinking: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiChatCompletionResponse {
-    choices: Vec<OpenAiChatChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiChatChoice {
-    message: ChatMessageResponse,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiResponsesResponse {
-    #[serde(default)]
-    output_text: Option<String>,
-    #[serde(default)]
-    output: Vec<OpenAiResponseOutputItem>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiResponseOutputItem {
-    #[serde(default)]
-    content: Vec<OpenAiResponseContentItem>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiResponseContentItem {
-    #[serde(default)]
-    text: Option<String>,
-}
 
 /// 结合向量文本上下文与图谱上下文，生成最终回答。
 pub async fn generate_answer(
@@ -89,7 +17,6 @@ pub async fn generate_answer(
 
     let runtime = resolve_runtime_model_config_from_env();
     let model = runtime.chat_model.clone();
-    let endpoint = completion_endpoint(&runtime.chat_endpoint, runtime.protocol);
 
     let system_prompt = r#"
 你是 Memori-Vault 的检索问答助手。
@@ -109,80 +36,18 @@ pub async fn generate_answer(
         user_prompt = format!("/no_think\n\n{user_prompt}");
     }
 
-    let messages = vec![
-        ChatMessage {
-            role: "system",
-            content: system_prompt,
-        },
-        ChatMessage {
-            role: "user",
-            content: &user_prompt,
-        },
-    ];
-
     let timeout_secs = answer_timeout_secs(question, text_context, graph_context);
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(timeout_secs))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-    let mut request = if runtime.protocol == RemoteModelProtocol::OpenAiResponses {
-        client.post(endpoint).json(&OpenAiResponsesRequest {
-            model: &model,
-            temperature: ANSWER_TEMPERATURE,
-            instructions: system_prompt,
-            input: &user_prompt,
-        })
-    } else {
-        let mut request_body = OpenAiChatCompletionRequest {
-            model: &model,
-            temperature: ANSWER_TEMPERATURE,
-            messages,
-            think: None,
-            thinking: None,
-            enable_thinking: None,
-            chat_template_kwargs: None,
-        };
-        disable_qwen_thinking_if_needed(&model, &endpoint, runtime.provider, &mut request_body);
-        client.post(endpoint).json(&request_body)
-    };
-    if let Some(key) = runtime.api_key.as_ref() {
-        request = request.bearer_auth(key);
-    }
-    let response = request
-        .send()
-        .await
-        .map_err(EngineError::AnswerGenerateRequest)?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let body = match response.text().await {
-            Ok(text) => text,
-            Err(err) => format!("<读取响应体失败: {err}>"),
-        };
-        return Err(EngineError::AnswerGenerateHttpStatus {
-            status: status.as_u16(),
-            body,
-        });
-    }
-
-    let answer = if runtime.protocol == RemoteModelProtocol::OpenAiResponses {
-        let parsed: OpenAiResponsesResponse = response
-            .json()
-            .await
-            .map_err(EngineError::AnswerGenerateDeserialize)?;
-        response_output_text(parsed)
-    } else {
-        let parsed: OpenAiChatCompletionResponse = response
-            .json()
-            .await
-            .map_err(EngineError::AnswerGenerateDeserialize)?;
-        parsed
-            .choices
-            .into_iter()
-            .next()
-            .map(|c| c.message.content)
-            .unwrap_or_default()
-    };
+    let answer = request_llm_text(
+        &runtime,
+        &runtime.chat_endpoint,
+        &model,
+        ANSWER_TEMPERATURE,
+        system_prompt,
+        &user_prompt,
+        timeout_secs,
+    )
+    .await
+    .map_err(answer_error_from_llm_http)?;
     let answer = sanitize_generated_answer(&answer);
 
     if answer.is_empty() {
@@ -192,60 +57,9 @@ pub async fn generate_answer(
     Ok(answer)
 }
 
-fn completion_endpoint(base: &str, protocol: RemoteModelProtocol) -> String {
-    let base = base.trim_end_matches('/');
-    match protocol {
-        RemoteModelProtocol::OpenAiResponses => format!("{base}/v1/responses"),
-        RemoteModelProtocol::OpenAiChatCompletions => format!("{base}/v1/chat/completions"),
-    }
-}
-
-fn response_output_text(parsed: OpenAiResponsesResponse) -> String {
-    if let Some(text) = parsed.output_text {
-        if !text.trim().is_empty() {
-            return text;
-        }
-    }
-    parsed
-        .output
-        .into_iter()
-        .flat_map(|item| item.content)
-        .filter_map(|item| item.text)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn is_qwen_thinking_model(model: &str) -> bool {
     let normalized = model.to_ascii_lowercase();
     normalized.contains("qwen3") || normalized.contains("qwq")
-}
-
-fn disable_qwen_thinking_if_needed(
-    model: &str,
-    endpoint: &str,
-    provider: ModelProvider,
-    request: &mut OpenAiChatCompletionRequest<'_>,
-) {
-    if !is_qwen_thinking_model(model) || !should_send_thinking_flags(endpoint, provider) {
-        return;
-    }
-
-    // Different local OpenAI-compatible servers expose different knobs.
-    // llama.cpp ignores unknown JSON fields, while Qwen-compatible templates
-    // can use `chat_template_kwargs.enable_thinking`.
-    request.think = Some(false);
-    request.thinking = Some(false);
-    request.enable_thinking = Some(false);
-    request.chat_template_kwargs = Some(QwenChatTemplateKwargs {
-        enable_thinking: false,
-    });
-}
-
-fn should_send_thinking_flags(endpoint: &str, provider: ModelProvider) -> bool {
-    provider == ModelProvider::LlamaCppLocal
-        || endpoint.contains("127.0.0.1")
-        || endpoint.contains("localhost")
-        || endpoint.contains("0.0.0.0")
 }
 
 fn answer_timeout_secs(question: &str, text_context: &str, graph_context: &str) -> u64 {
@@ -253,6 +67,16 @@ fn answer_timeout_secs(question: &str, text_context: &str, graph_context: &str) 
     let total_chars = u64::try_from(total_chars).unwrap_or(u64::MAX);
     let extra = total_chars / 2_000 * 15;
     (MIN_ANSWER_TIMEOUT_SECS + extra).clamp(MIN_ANSWER_TIMEOUT_SECS, MAX_ANSWER_TIMEOUT_SECS)
+}
+
+fn answer_error_from_llm_http(err: LlmHttpError) -> EngineError {
+    match err {
+        LlmHttpError::Request(err) => EngineError::AnswerGenerateRequest(err),
+        LlmHttpError::HttpStatus { status, body } => {
+            EngineError::AnswerGenerateHttpStatus { status, body }
+        }
+        LlmHttpError::Deserialize(err) => EngineError::AnswerGenerateDeserialize(err),
+    }
 }
 
 fn sanitize_generated_answer(raw: &str) -> String {

@@ -1,15 +1,16 @@
 mod embedding_client;
-mod error;
 mod engine;
-mod model_config;
 mod engine_retrieve;
 mod engine_search;
+mod error;
 mod filter;
 mod graph_extractor;
 mod indexing;
 mod indexing_graph;
 mod indexing_rebuild;
 mod llm_generator;
+mod llm_http;
+mod model_config;
 mod query;
 mod query_utils;
 mod retrieval;
@@ -28,7 +29,6 @@ use std::{collections::HashMap, hash::Hash, hash::Hasher};
 pub use embedding_client::LocalEmbeddingClient;
 pub use error::*;
 pub use filter::IndexFilterConfig;
-pub use model_config::*;
 pub use graph_extractor::GraphData;
 use graph_extractor::extract_entities;
 use llm_generator::generate_answer as generate_llm_answer;
@@ -41,9 +41,10 @@ pub use memori_storage::{
 };
 use memori_storage::{RebuildState, SqliteStore, StorageError};
 use memori_vault::{
-    MemoriVaultConfig, MemoriVaultHandle, WatchEvent, WatchEventKind,
-    create_event_channel, is_supported_content_file, spawn_memori_vault,
+    MemoriVaultConfig, MemoriVaultHandle, WatchEvent, WatchEventKind, create_event_channel,
+    is_supported_content_file, spawn_memori_vault,
 };
+pub use model_config::*;
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
@@ -67,6 +68,7 @@ pub const MEMORI_MODEL_PROVIDER_ENV: &str = "MEMORI_MODEL_PROVIDER";
 pub const MEMORI_MODEL_ENDPOINT_ENV: &str = "MEMORI_MODEL_ENDPOINT";
 pub const MEMORI_MODEL_API_KEY_ENV: &str = "MEMORI_MODEL_API_KEY";
 pub const MEMORI_MODEL_PROTOCOL_ENV: &str = "MEMORI_MODEL_PROTOCOL";
+pub const MEMORI_CHAT_API_FORMAT_ENV: &str = "MEMORI_CHAT_API_FORMAT";
 pub const MEMORI_CHAT_MODEL_ENV: &str = "MEMORI_CHAT_MODEL";
 pub const MEMORI_GRAPH_MODEL_ENV: &str = "MEMORI_GRAPH_MODEL";
 pub const MEMORI_EMBED_MODEL_ENV: &str = "MEMORI_EMBED_MODEL";
@@ -82,10 +84,8 @@ const DEFAULT_DOC_TOP_K: usize = 12;
 const DEFAULT_CHUNK_CANDIDATE_K: usize = 20;
 const DEFAULT_FINAL_ANSWER_K: usize = 6;
 const RRF_K: f64 = 60.0;
-const DEFAULT_RETRIEVAL_GATING_PROFILE: RetrievalGatingProfile =
-    RetrievalGatingProfile::Balanced;
-const DEFAULT_GENERATION_REFUSAL_MODE: GenerationRefusalMode =
-    GenerationRefusalMode::Balanced;
+const DEFAULT_RETRIEVAL_GATING_PROFILE: RetrievalGatingProfile = RetrievalGatingProfile::Balanced;
+const DEFAULT_GENERATION_REFUSAL_MODE: GenerationRefusalMode = GenerationRefusalMode::Balanced;
 const DEFAULT_GATING_RETRY_ON_REFUSAL: bool = true;
 
 fn is_supported_index_file(path: &std::path::Path) -> bool {
@@ -737,13 +737,12 @@ pub(crate) use indexing_graph::*;
 pub(crate) use indexing_rebuild::*;
 pub(crate) use query::*;
 pub(crate) use query_utils::*;
-pub use retrieval_output::build_query_terms_for_offline_embedding;
 pub(crate) use retrieval::*;
 pub(crate) use retrieval_eval::*;
+pub use retrieval_output::build_query_terms_for_offline_embedding;
 pub(crate) use retrieval_output::*;
 pub use runtime::generate_answer_with_context;
 pub(crate) use runtime::*;
-
 
 #[cfg(test)]
 mod tests;
