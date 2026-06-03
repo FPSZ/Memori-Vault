@@ -1,3 +1,80 @@
+use serde::Deserialize;
+use serde_json::{Value as JsonValue, json};
+
+use super::engine_from_state;
+use super::parse_params;
+use super::protocol::JsonRpcError;
+use crate::ServerState;
+
+#[derive(Debug, Deserialize)]
+struct MemorySearchArgs {
+    query: String,
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    layer: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryAddArgs {
+    scope: String,
+    #[serde(default)]
+    scope_id: Option<String>,
+    #[serde(default)]
+    layer: Option<String>,
+    memory_type: String,
+    #[serde(default)]
+    title: Option<String>,
+    content: String,
+    #[serde(default)]
+    source_type: Option<String>,
+    source_ref: String,
+    #[serde(default)]
+    confidence: Option<f64>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    links: Vec<String>,
+    #[serde(default)]
+    supersedes: Option<i64>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryUpdateArgs {
+    memory_id: i64,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    supersedes: Option<i64>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryListRecentArgs {
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryGetSourceArgs {
+    memory_id: i64,
 }
 
 pub(crate) async fn memory_search(
@@ -177,3 +254,5 @@ pub(crate) fn parse_memory_status(
             item.parse::<memori_core::MemoryStatus>()
                 .map_err(|_| JsonRpcError::invalid_params(format!("invalid memory status: {item}")))
         })
+        .transpose()
+}

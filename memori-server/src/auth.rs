@@ -1,6 +1,17 @@
 use base64::Engine;
+use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use serde::Deserialize;
 
 use crate::*;
+
+const OIDC_HTTP_TIMEOUT_SECS: u64 = 10;
+const OIDC_CLOCK_SKEW_SECS: i64 = 300;
+
+#[derive(Debug, Deserialize)]
+struct OidcDiscoveryDocument {
+    jwks_uri: String,
+}
 
 pub(crate) async fn require_session(
     state: &ServerState,
@@ -76,6 +87,92 @@ pub(crate) fn allow_insecure_oidc_dev_login() -> bool {
         })
 }
 
+pub(crate) async fn verify_oidc_token_claims(
+    token: &str,
+    issuer: &str,
+    audience: &str,
+) -> Result<serde_json::Value, String> {
+    let issuer = issuer.trim().trim_end_matches('/');
+    let audience = audience.trim();
+    if issuer.is_empty() {
+        return Err("OIDC issuer is not configured".to_string());
+    }
+    if audience.is_empty() {
+        return Err("OIDC client_id is not configured".to_string());
+    }
+
+    let header = decode_header(token).map_err(|err| format!("invalid JWT header: {err}"))?;
+    let alg = header.alg;
+    if !is_allowed_oidc_alg(alg) {
+        return Err(format!("OIDC token alg is not allowed: {alg:?}"));
+    }
+    let kid = header
+        .kid
+        .as_deref()
+        .map(str::trim)
+        .filter(|kid| !kid.is_empty())
+        .ok_or_else(|| "OIDC token header is missing kid".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(OIDC_HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|err| format!("failed to build OIDC HTTP client: {err}"))?;
+    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
+    let discovery = client
+        .get(&discovery_url)
+        .send()
+        .await
+        .map_err(|err| format!("failed to fetch OIDC discovery document: {err}"))?
+        .error_for_status()
+        .map_err(|err| format!("OIDC discovery request failed: {err}"))?
+        .json::<OidcDiscoveryDocument>()
+        .await
+        .map_err(|err| format!("failed to parse OIDC discovery document: {err}"))?;
+    let jwks = client
+        .get(discovery.jwks_uri)
+        .send()
+        .await
+        .map_err(|err| format!("failed to fetch OIDC JWKS: {err}"))?
+        .error_for_status()
+        .map_err(|err| format!("OIDC JWKS request failed: {err}"))?
+        .json::<JwkSet>()
+        .await
+        .map_err(|err| format!("failed to parse OIDC JWKS: {err}"))?;
+    let jwk = jwks
+        .keys
+        .iter()
+        .find(|key| key.common.key_id.as_deref() == Some(kid))
+        .ok_or_else(|| "OIDC JWKS does not contain token kid".to_string())?;
+    let decoding_key =
+        DecodingKey::from_jwk(jwk).map_err(|err| format!("invalid OIDC JWK: {err}"))?;
+
+    let mut validation = Validation::new(alg);
+    validation.validate_aud = false;
+    validation.validate_exp = false;
+    validation.validate_nbf = false;
+    validation.required_spec_claims.clear();
+    let claims = decode::<serde_json::Value>(token, &decoding_key, &validation)
+        .map_err(|err| format!("OIDC token signature verification failed: {err}"))?
+        .claims;
+
+    validate_oidc_claims(&claims, issuer, audience, unix_now_secs())?;
+    Ok(claims)
+}
+
+fn is_allowed_oidc_alg(alg: Algorithm) -> bool {
+    matches!(
+        alg,
+        Algorithm::RS256
+            | Algorithm::RS384
+            | Algorithm::RS512
+            | Algorithm::PS256
+            | Algorithm::PS384
+            | Algorithm::PS512
+            | Algorithm::ES256
+            | Algorithm::ES384
+    )
+}
+
 fn is_configured_admin_token(token: &str) -> bool {
     let configured = std::env::var("MEMORI_SERVER_ADMIN_TOKEN")
         .ok()
@@ -136,16 +233,42 @@ pub(crate) fn validate_oidc_claims(
         return Err("OIDC token audience does not match policy".to_string());
     }
 
-    if let Some(exp) = claims.get("exp").and_then(json_i64)
-        && exp <= now
-    {
+    let exp = claims
+        .get("exp")
+        .and_then(json_i64)
+        .ok_or_else(|| "OIDC token is missing expiration".to_string())?;
+    if exp <= now {
         return Err("OIDC token has expired".to_string());
     }
 
     if let Some(nbf) = claims.get("nbf").and_then(json_i64)
-        && nbf > now
+        && nbf > now + OIDC_CLOCK_SKEW_SECS
     {
         return Err("OIDC token is not active yet".to_string());
+    }
+
+    let iat = claims
+        .get("iat")
+        .and_then(json_i64)
+        .ok_or_else(|| "OIDC token is missing issued-at".to_string())?;
+    if iat > now + OIDC_CLOCK_SKEW_SECS {
+        return Err("OIDC token issued-at is in the future".to_string());
+    }
+
+    if let Some(azp) = claims.get("azp").and_then(|value| value.as_str())
+        && !expected_audience.is_empty()
+        && azp.trim() != expected_audience
+    {
+        return Err("OIDC token authorized party does not match policy".to_string());
+    }
+    if matches!(claims.get("aud"), Some(serde_json::Value::Array(values)) if values.len() > 1)
+        && claims
+            .get("azp")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            != Some(expected_audience)
+    {
+        return Err("OIDC token with multiple audiences must include matching azp".to_string());
     }
 
     Ok(())
@@ -219,7 +342,9 @@ mod tests {
         let claims = serde_json::json!({
             "iss": "https://issuer.test",
             "aud": ["memori-client", "other"],
+            "azp": "memori-client",
             "exp": unix_now_secs() + 60,
+            "iat": unix_now_secs(),
         });
         validate_oidc_claims(
             &claims,

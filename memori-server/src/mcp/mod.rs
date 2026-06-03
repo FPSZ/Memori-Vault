@@ -5,6 +5,8 @@ pub mod protocol;
 pub mod resources;
 pub mod tools;
 pub mod tools_impl;
+pub mod tools_memory;
+pub mod tools_schema;
 pub mod transport_http;
 pub mod transport_stdio;
 pub mod types;
