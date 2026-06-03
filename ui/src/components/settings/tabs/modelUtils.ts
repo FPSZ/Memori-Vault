@@ -11,12 +11,12 @@ import { useI18n } from "../../../i18n";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
 type ModelRoleKey = "chat" | "graph" | "embed";
-type RemoteProtocol = "openai_compatible" | "openai_responses" | "ollama_openai" | "lmstudio_vllm";
+type RemoteProtocol = "openai_chat_completions" | "openai_responses";
 type RemoteProviderPreset = {
   id: string;
   label: string;
   description: string;
-  protocol?: RemoteProtocol;
+  protocol?: RemoteProtocol | string;
   fullUrl?: boolean;
   profile: Omit<RemoteModelProfileDto, "api_key">;
 };
@@ -25,15 +25,15 @@ const REMOTE_PRESET_STORAGE_KEY = "memori-remote-model-presets";
 const REMOTE_PROTOCOL_STORAGE_KEY = "memori-remote-model-protocol";
 const REMOTE_FULL_URL_STORAGE_KEY = "memori-remote-model-full-url";
 
-const REMOTE_PROTOCOLS: Array<{
-  value: RemoteProtocol;
+const LEGACY_REMOTE_PROTOCOLS: Array<{
+  value: string;
   label: string;
   description: string;
 }> = [
   {
     value: "openai_compatible",
     label: "OpenAI-compatible /v1",
-    description: "适用于 OpenAI、DeepSeek、OpenRouter、硅基流动、DashScope 兼容模式等。"
+    description: "旧版 OpenAI-compatible 协议标识，读取时会自动迁移为 Chat Completions。"
   },
   {
     value: "openai_responses",
@@ -52,90 +52,20 @@ const REMOTE_PROTOCOLS: Array<{
   }
 ];
 
-const REMOTE_PROVIDER_PRESETS: RemoteProviderPreset[] = [
+const REMOTE_PROTOCOLS: Array<{
+  value: RemoteProtocol;
+  label: string;
+  description: string;
+}> = [
   {
-    id: "openai",
-    label: "OpenAI",
-    description: "官方 OpenAI API，聊天和向量共用同一个地址。",
-    protocol: "openai_compatible",
-    profile: {
-      chat_endpoint: "https://api.openai.com",
-      graph_endpoint: "https://api.openai.com",
-      embed_endpoint: "https://api.openai.com",
-      chat_model: "gpt-4o-mini",
-      graph_model: "gpt-4o-mini",
-      embed_model: "text-embedding-3-small"
-    }
+    value: "openai_chat_completions",
+    label: "OpenAI Chat Completions",
+    description: "使用 /v1/chat/completions。适合多数 OpenAI 兼容聊天模型接口。"
   },
   {
-    id: "deepseek",
-    label: "DeepSeek",
-    description: "DeepSeek 的 OpenAI 兼容接口。",
-    protocol: "openai_compatible",
-    profile: {
-      chat_endpoint: "https://api.deepseek.com",
-      graph_endpoint: "https://api.deepseek.com",
-      embed_endpoint: "https://api.deepseek.com",
-      chat_model: "deepseek-v4-flash",
-      graph_model: "deepseek-v4-flash",
-      embed_model: "deepseek-v4-flash"
-    }
-  },
-  {
-    id: "openrouter",
-    label: "OpenRouter",
-    description: "一个 OpenAI 兼容网关路由多个托管模型。",
-    protocol: "openai_compatible",
-    profile: {
-      chat_endpoint: "https://openrouter.ai/api",
-      graph_endpoint: "https://openrouter.ai/api",
-      embed_endpoint: "https://openrouter.ai/api",
-      chat_model: "openai/gpt-4o-mini",
-      graph_model: "openai/gpt-4o-mini",
-      embed_model: "openai/text-embedding-3-small"
-    }
-  },
-  {
-    id: "siliconflow",
-    label: "SiliconFlow",
-    description: "硅基流动 OpenAI 兼容模型服务。",
-    protocol: "openai_compatible",
-    profile: {
-      chat_endpoint: "https://api.siliconflow.cn",
-      graph_endpoint: "https://api.siliconflow.cn",
-      embed_endpoint: "https://api.siliconflow.cn",
-      chat_model: "Qwen/Qwen2.5-7B-Instruct",
-      graph_model: "Qwen/Qwen2.5-7B-Instruct",
-      embed_model: "BAAI/bge-m3"
-    }
-  },
-  {
-    id: "dashscope",
-    label: "DashScope",
-    description: "阿里 DashScope OpenAI 兼容模式。",
-    protocol: "openai_compatible",
-    profile: {
-      chat_endpoint: "https://dashscope.aliyuncs.com/compatible-mode",
-      graph_endpoint: "https://dashscope.aliyuncs.com/compatible-mode",
-      embed_endpoint: "https://dashscope.aliyuncs.com/compatible-mode",
-      chat_model: "qwen-plus",
-      graph_model: "qwen-plus",
-      embed_model: "text-embedding-v3"
-    }
-  },
-  {
-    id: "moonshot",
-    label: "Moonshot / Kimi",
-    description: "Moonshot / Kimi OpenAI 兼容接口。",
-    protocol: "openai_compatible",
-    profile: {
-      chat_endpoint: "https://api.moonshot.cn",
-      graph_endpoint: "https://api.moonshot.cn",
-      embed_endpoint: "https://api.moonshot.cn",
-      chat_model: "moonshot-v1-8k",
-      graph_model: "moonshot-v1-8k",
-      embed_model: "text-embedding-3-small"
-    }
+    value: "openai_responses",
+    label: "OpenAI Responses",
+    description: "使用 /v1/responses。只在远端明确支持 Responses API 时选择。"
   }
 ];
 
@@ -150,9 +80,15 @@ function applyRemotePreset(
 }
 
 function normalizeRemoteProtocol(value: string | null | undefined): RemoteProtocol {
+  if (
+    value !== "openai_responses" &&
+    LEGACY_REMOTE_PROTOCOLS.some((item) => item.value === value)
+  ) {
+    return "openai_chat_completions";
+  }
   return REMOTE_PROTOCOLS.some((item) => item.value === value)
     ? (value as RemoteProtocol)
-    : "openai_compatible";
+    : "openai_chat_completions";
 }
 
 function stripOpenAiRequestPath(value: string): string {
@@ -426,7 +362,6 @@ export {
   REMOTE_PRESET_STORAGE_KEY,
   REMOTE_PROTOCOL_STORAGE_KEY,
   REMOTE_FULL_URL_STORAGE_KEY,
-  REMOTE_PROVIDER_PRESETS,
   applyRemotePreset,
   parseRemotePresets,
   normalizeRemoteProtocol,

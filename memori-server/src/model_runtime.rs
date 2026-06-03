@@ -78,6 +78,7 @@ pub(crate) async fn replace_engine(
 }
 pub(crate) struct ActiveRuntimeModelSettings {
     pub(crate) provider: ModelProvider,
+    pub(crate) protocol: String,
     pub(crate) chat_endpoint: String,
     pub(crate) graph_endpoint: String,
     pub(crate) embed_endpoint: String,
@@ -97,6 +98,7 @@ pub(crate) struct ActiveRuntimeModelSettings {
 pub(crate) fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> RuntimeModelConfig {
     RuntimeModelConfig {
         provider: settings.provider,
+        protocol: memori_core::RemoteModelProtocol::from_value(&settings.protocol),
         chat_endpoint: settings.chat_endpoint.clone(),
         chat_model: settings.chat_model.clone(),
         graph_endpoint: settings.graph_endpoint.clone(),
@@ -451,6 +453,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             cache_type_v: normalize_optional_text(settings.local_cache_type_v.clone()),
         },
         remote_profile: RemoteModelProfileDto {
+            protocol: normalize_remote_protocol(settings.remote_protocol.as_deref()),
             chat_endpoint: normalize_endpoint(
                 ModelProvider::OpenAiCompatible,
                 &remote_chat_endpoint,
@@ -519,6 +522,7 @@ pub(crate) fn normalize_model_settings_payload(
     let remote_chat_model = payload.remote_profile.chat_model.trim().to_string();
     let remote_graph_model = payload.remote_profile.graph_model.trim().to_string();
     let remote_embed_model = payload.remote_profile.embed_model.trim().to_string();
+    let remote_protocol = normalize_remote_protocol(Some(&payload.remote_profile.protocol));
 
     if local_chat_model.is_empty()
         || local_graph_model.is_empty()
@@ -565,6 +569,7 @@ pub(crate) fn normalize_model_settings_payload(
             cache_type_v: local_cache_type_v,
         },
         remote_profile: RemoteModelProfileDto {
+            protocol: remote_protocol,
             chat_endpoint: remote_chat_endpoint,
             graph_endpoint: remote_graph_endpoint,
             embed_endpoint: remote_embed_endpoint,
@@ -593,6 +598,18 @@ pub(crate) fn normalize_optional_text(value: Option<String>) -> Option<String> {
             Some(trimmed)
         }
     })
+}
+
+pub(crate) fn normalize_remote_protocol(value: Option<&str>) -> String {
+    match value
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "openai_responses" => "openai_responses".to_string(),
+        _ => "openai_chat_completions".to_string(),
+    }
 }
 
 pub(crate) fn normalize_performance_preset(value: Option<String>) -> Option<String> {
@@ -647,6 +664,11 @@ pub(crate) fn resolve_active_runtime_settings(
     let active_provider = ModelProvider::from_value(&settings.active_provider);
     ActiveRuntimeModelSettings {
         provider: active_provider,
+        protocol: if active_provider == ModelProvider::OpenAiCompatible {
+            settings.remote_profile.protocol.clone()
+        } else {
+            "openai_chat_completions".to_string()
+        },
         chat_endpoint: if active_provider == ModelProvider::OpenAiCompatible {
             normalize_endpoint(
                 ModelProvider::OpenAiCompatible,
@@ -745,6 +767,7 @@ pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) 
             MEMORI_MODEL_PROVIDER_ENV,
             provider_to_string(settings.provider),
         );
+        std::env::set_var(memori_core::MEMORI_MODEL_PROTOCOL_ENV, &settings.protocol);
         // Legacy endpoint compatibility: expose the chat endpoint as the single endpoint.
         std::env::set_var(MEMORI_MODEL_ENDPOINT_ENV, &settings.chat_endpoint);
         std::env::set_var(MEMORI_CHAT_ENDPOINT_ENV, &settings.chat_endpoint);
@@ -826,6 +849,7 @@ mod tests {
             active_provider: "openai_compatible".to_string(),
             local_profile: local_profile(),
             remote_profile: RemoteModelProfileDto {
+                protocol: "openai_chat_completions".to_string(),
                 chat_endpoint: "https://chat.example.com".to_string(),
                 graph_endpoint: "https://graph.example.com".to_string(),
                 embed_endpoint: "https://embed.example.com".to_string(),
@@ -861,6 +885,7 @@ mod tests {
             active_provider: "openai_compatible".to_string(),
             local_profile: local_profile(),
             remote_profile: RemoteModelProfileDto {
+                protocol: "openai_chat_completions".to_string(),
                 chat_endpoint: String::new(),
                 graph_endpoint: String::new(),
                 embed_endpoint: String::new(),

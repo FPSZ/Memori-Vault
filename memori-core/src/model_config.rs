@@ -6,7 +6,7 @@ use crate::{
     DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_GRAPH_ENDPOINT, DEFAULT_GRAPH_MODEL_QWEN3,
     MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_ENDPOINT_ENV,
     MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV, MEMORI_GRAPH_MODEL_ENV,
-    MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_PROVIDER_ENV,
+    MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_PROTOCOL_ENV, MEMORI_MODEL_PROVIDER_ENV,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +31,28 @@ impl FromStr for ModelProvider {
             }
             "openai_compatible" => Ok(Self::OpenAiCompatible),
             _ => Err("unknown model provider"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteModelProtocol {
+    OpenAiChatCompletions,
+    OpenAiResponses,
+}
+
+impl RemoteModelProtocol {
+    pub fn from_value(text: &str) -> Self {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "openai_responses" | "responses" | "response" => Self::OpenAiResponses,
+            _ => Self::OpenAiChatCompletions,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenAiChatCompletions => "openai_chat_completions",
+            Self::OpenAiResponses => "openai_responses",
         }
     }
 }
@@ -68,6 +90,7 @@ pub struct PolicyViolation {
 #[derive(Debug, Clone)]
 pub struct RuntimeModelConfig {
     pub provider: ModelProvider,
+    pub protocol: RemoteModelProtocol,
     pub chat_endpoint: String,
     pub chat_model: String,
     pub graph_endpoint: String,
@@ -113,6 +136,9 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
 
     RuntimeModelConfig {
         provider,
+        protocol: std::env::var(MEMORI_MODEL_PROTOCOL_ENV)
+            .map(|v| RemoteModelProtocol::from_value(&v))
+            .unwrap_or(RemoteModelProtocol::OpenAiChatCompletions),
         chat_endpoint,
         chat_model,
         graph_endpoint,

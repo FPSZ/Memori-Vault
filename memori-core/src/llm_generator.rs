@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{EngineError, ModelProvider, resolve_runtime_model_config_from_env};
+use crate::{
+    EngineError, ModelProvider, RemoteModelProtocol, resolve_runtime_model_config_from_env,
+};
 
 const ANSWER_TEMPERATURE: f32 = 0.1;
 const MIN_ANSWER_TIMEOUT_SECS: u64 = 45;
@@ -33,6 +35,14 @@ struct OpenAiChatCompletionRequest<'a> {
 }
 
 #[derive(Debug, Serialize)]
+struct OpenAiResponsesRequest<'a> {
+    model: &'a str,
+    temperature: f32,
+    instructions: &'a str,
+    input: &'a str,
+}
+
+#[derive(Debug, Serialize)]
 struct QwenChatTemplateKwargs {
     enable_thinking: bool,
 }
@@ -47,6 +57,26 @@ struct OpenAiChatChoice {
     message: ChatMessageResponse,
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenAiResponsesResponse {
+    #[serde(default)]
+    output_text: Option<String>,
+    #[serde(default)]
+    output: Vec<OpenAiResponseOutputItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiResponseOutputItem {
+    #[serde(default)]
+    content: Vec<OpenAiResponseContentItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiResponseContentItem {
+    #[serde(default)]
+    text: Option<String>,
+}
+
 /// 结合向量文本上下文与图谱上下文，生成最终回答。
 pub async fn generate_answer(
     question: &str,
@@ -59,10 +89,7 @@ pub async fn generate_answer(
 
     let runtime = resolve_runtime_model_config_from_env();
     let model = runtime.chat_model.clone();
-    let endpoint = format!(
-        "{}/v1/chat/completions",
-        runtime.chat_endpoint.trim_end_matches('/')
-    );
+    let endpoint = completion_endpoint(&runtime.chat_endpoint, runtime.protocol);
 
     let system_prompt = r#"
 你是 Memori-Vault 的检索问答助手。
@@ -98,17 +125,26 @@ pub async fn generate_answer(
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
-    let mut request_body = OpenAiChatCompletionRequest {
-        model: &model,
-        temperature: ANSWER_TEMPERATURE,
-        messages,
-        think: None,
-        thinking: None,
-        enable_thinking: None,
-        chat_template_kwargs: None,
+    let mut request = if runtime.protocol == RemoteModelProtocol::OpenAiResponses {
+        client.post(endpoint).json(&OpenAiResponsesRequest {
+            model: &model,
+            temperature: ANSWER_TEMPERATURE,
+            instructions: system_prompt,
+            input: &user_prompt,
+        })
+    } else {
+        let mut request_body = OpenAiChatCompletionRequest {
+            model: &model,
+            temperature: ANSWER_TEMPERATURE,
+            messages,
+            think: None,
+            thinking: None,
+            enable_thinking: None,
+            chat_template_kwargs: None,
+        };
+        disable_qwen_thinking_if_needed(&model, &endpoint, runtime.provider, &mut request_body);
+        client.post(endpoint).json(&request_body)
     };
-    disable_qwen_thinking_if_needed(&model, &endpoint, runtime.provider, &mut request_body);
-    let mut request = client.post(endpoint).json(&request_body);
     if let Some(key) = runtime.api_key.as_ref() {
         request = request.bearer_auth(key);
     }
@@ -129,16 +165,24 @@ pub async fn generate_answer(
         });
     }
 
-    let parsed: OpenAiChatCompletionResponse = response
-        .json()
-        .await
-        .map_err(EngineError::AnswerGenerateDeserialize)?;
-    let answer = parsed
-        .choices
-        .into_iter()
-        .next()
-        .map(|c| c.message.content)
-        .unwrap_or_default();
+    let answer = if runtime.protocol == RemoteModelProtocol::OpenAiResponses {
+        let parsed: OpenAiResponsesResponse = response
+            .json()
+            .await
+            .map_err(EngineError::AnswerGenerateDeserialize)?;
+        response_output_text(parsed)
+    } else {
+        let parsed: OpenAiChatCompletionResponse = response
+            .json()
+            .await
+            .map_err(EngineError::AnswerGenerateDeserialize)?;
+        parsed
+            .choices
+            .into_iter()
+            .next()
+            .map(|c| c.message.content)
+            .unwrap_or_default()
+    };
     let answer = sanitize_generated_answer(&answer);
 
     if answer.is_empty() {
@@ -146,6 +190,29 @@ pub async fn generate_answer(
     }
 
     Ok(answer)
+}
+
+fn completion_endpoint(base: &str, protocol: RemoteModelProtocol) -> String {
+    let base = base.trim_end_matches('/');
+    match protocol {
+        RemoteModelProtocol::OpenAiResponses => format!("{base}/v1/responses"),
+        RemoteModelProtocol::OpenAiChatCompletions => format!("{base}/v1/chat/completions"),
+    }
+}
+
+fn response_output_text(parsed: OpenAiResponsesResponse) -> String {
+    if let Some(text) = parsed.output_text {
+        if !text.trim().is_empty() {
+            return text;
+        }
+    }
+    parsed
+        .output
+        .into_iter()
+        .flat_map(|item| item.content)
+        .filter_map(|item| item.text)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn is_qwen_thinking_model(model: &str) -> bool {

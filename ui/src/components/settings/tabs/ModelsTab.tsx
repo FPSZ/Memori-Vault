@@ -40,7 +40,6 @@ import {
   REMOTE_PROTOCOL_STORAGE_KEY,
   REMOTE_FULL_URL_STORAGE_KEY,
   REMOTE_PRESET_STORAGE_KEY,
-  REMOTE_PROVIDER_PRESETS,
   applyRemotePreset,
   parseRemotePresets,
   normalizeRemoteProtocol,
@@ -104,8 +103,11 @@ export function ModelsTab({
   const [customPresetName, setCustomPresetName] = useState("");
   const [remoteProtocol, setRemoteProtocol] = useState<RemoteProtocol>(() =>
     typeof window === "undefined"
-      ? "openai_compatible"
-      : normalizeRemoteProtocol(window.localStorage.getItem(REMOTE_PROTOCOL_STORAGE_KEY))
+      ? normalizeRemoteProtocol(modelSettings.remote_profile.protocol)
+      : normalizeRemoteProtocol(
+          modelSettings.remote_profile.protocol ??
+            window.localStorage.getItem(REMOTE_PROTOCOL_STORAGE_KEY)
+        )
   );
   const [remoteFullUrl, setRemoteFullUrl] = useState(() =>
     typeof window === "undefined"
@@ -117,7 +119,7 @@ export function ModelsTab({
       ? []
       : parseRemotePresets(window.localStorage.getItem(REMOTE_PRESET_STORAGE_KEY))
   );
-  const allRemotePresets = [...REMOTE_PROVIDER_PRESETS, ...customRemotePresets];
+  const savedRemotePresets = customRemotePresets;
   const remoteApiUrl = endpointToApiUrl(modelSettings.remote_profile.chat_endpoint, remoteFullUrl);
   const remoteModels = providerModels.merged;
   const remoteConfigToml = [
@@ -195,8 +197,9 @@ export function ModelsTab({
 
   const applyRemoteProviderPreset = (preset: RemoteProviderPreset) => {
     if (preset.protocol) {
-      setRemoteProtocol(preset.protocol);
-      window.localStorage.setItem(REMOTE_PROTOCOL_STORAGE_KEY, preset.protocol);
+      const protocol = normalizeRemoteProtocol(preset.protocol);
+      setRemoteProtocol(protocol);
+      window.localStorage.setItem(REMOTE_PROTOCOL_STORAGE_KEY, protocol);
     }
     if (typeof preset.fullUrl === "boolean") {
       setRemoteFullUrl(preset.fullUrl);
@@ -205,7 +208,10 @@ export function ModelsTab({
     onModelSettingsChange({
       ...modelSettings,
       active_provider: "openai_compatible",
-      remote_profile: applyRemotePreset(modelSettings.remote_profile, preset)
+      remote_profile: {
+        ...applyRemotePreset(modelSettings.remote_profile, preset),
+        protocol: preset.protocol ? normalizeRemoteProtocol(preset.protocol) : remoteProtocol
+      }
     });
   };
 
@@ -219,6 +225,7 @@ export function ModelsTab({
       protocol: remoteProtocol,
       fullUrl: remoteFullUrl,
       profile: {
+        protocol: remoteProtocol,
         chat_endpoint: modelSettings.remote_profile.chat_endpoint,
         graph_endpoint: modelSettings.remote_profile.graph_endpoint,
         embed_endpoint: modelSettings.remote_profile.embed_endpoint,
@@ -245,6 +252,7 @@ export function ModelsTab({
   const updateRemoteProtocol = (next: RemoteProtocol) => {
     setRemoteProtocol(next);
     window.localStorage.setItem(REMOTE_PROTOCOL_STORAGE_KEY, next);
+    updateProfile({ protocol: next });
   };
 
   const updateRemoteFullUrl = (next: boolean) => {
@@ -748,8 +756,9 @@ export function ModelsTab({
               />
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2">
-              {allRemotePresets.map((preset) => {
+            {savedRemotePresets.length > 0 ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {savedRemotePresets.map((preset) => {
                 const isCustom = preset.id.startsWith("custom-");
                 return (
                   <div
@@ -779,8 +788,9 @@ export function ModelsTab({
                     </div>
                   </div>
                 );
-              })}
-            </div>
+                })}
+              </div>
+            ) : null}
 
             <div className="flex gap-2">
               <input

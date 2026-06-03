@@ -55,6 +55,7 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettingsDto = {
     embed_model_path: ""
   },
   remote_profile: {
+    protocol: "openai_chat_completions",
     chat_endpoint: "https://api.openai.com",
     graph_endpoint: "https://api.openai.com",
     embed_endpoint: "https://api.openai.com",

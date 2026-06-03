@@ -61,6 +61,7 @@ pub(crate) async fn set_model_settings_handler(
     settings.local_cache_type_k = normalized.local_profile.cache_type_k.clone();
     settings.local_cache_type_v = normalized.local_profile.cache_type_v.clone();
     settings.stop_local_models_on_exit = Some(normalized.stop_local_models_on_exit);
+    settings.remote_protocol = Some(normalized.remote_profile.protocol.clone());
     settings.remote_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
     settings.remote_chat_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
     settings.remote_graph_endpoint = Some(normalized.remote_profile.graph_endpoint.clone());

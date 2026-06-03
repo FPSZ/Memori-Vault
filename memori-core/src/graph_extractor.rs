@@ -3,7 +3,9 @@ use std::collections::HashSet;
 use memori_storage::{GraphEdge, GraphNode};
 use serde::{Deserialize, Serialize};
 
-use crate::{EngineError, ModelProvider, resolve_runtime_model_config_from_env};
+use crate::{
+    EngineError, ModelProvider, RemoteModelProtocol, resolve_runtime_model_config_from_env,
+};
 
 const GRAPH_TEMPERATURE: f32 = 0.0;
 
@@ -42,6 +44,14 @@ struct OpenAiChatCompletionRequest<'a> {
 }
 
 #[derive(Debug, Serialize)]
+struct OpenAiResponsesRequest<'a> {
+    model: &'a str,
+    temperature: f32,
+    instructions: &'a str,
+    input: &'a str,
+}
+
+#[derive(Debug, Serialize)]
 struct QwenChatTemplateKwargs {
     enable_thinking: bool,
 }
@@ -54,6 +64,26 @@ struct OpenAiChatCompletionResponse {
 #[derive(Debug, Deserialize)]
 struct OpenAiChatChoice {
     message: ChatMessageResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiResponsesResponse {
+    #[serde(default)]
+    output_text: Option<String>,
+    #[serde(default)]
+    output: Vec<OpenAiResponseOutputItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiResponseOutputItem {
+    #[serde(default)]
+    content: Vec<OpenAiResponseContentItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiResponseContentItem {
+    #[serde(default)]
+    text: Option<String>,
 }
 
 /// 从文本块中抽取实体与关系。
@@ -113,21 +143,27 @@ pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError
         },
     ];
 
-    let endpoint = format!(
-        "{}/v1/chat/completions",
-        runtime.graph_endpoint.trim_end_matches('/')
-    );
-    let mut request_body = OpenAiChatCompletionRequest {
-        model: &model,
-        temperature: GRAPH_TEMPERATURE,
-        messages,
-        think: None,
-        thinking: None,
-        enable_thinking: None,
-        chat_template_kwargs: None,
+    let endpoint = completion_endpoint(&runtime.graph_endpoint, runtime.protocol);
+    let mut request = if runtime.protocol == RemoteModelProtocol::OpenAiResponses {
+        client.post(endpoint).json(&OpenAiResponsesRequest {
+            model: &model,
+            temperature: GRAPH_TEMPERATURE,
+            instructions: system_prompt,
+            input: &user_prompt,
+        })
+    } else {
+        let mut request_body = OpenAiChatCompletionRequest {
+            model: &model,
+            temperature: GRAPH_TEMPERATURE,
+            messages,
+            think: None,
+            thinking: None,
+            enable_thinking: None,
+            chat_template_kwargs: None,
+        };
+        disable_qwen_thinking_if_needed(&model, &endpoint, runtime.provider, &mut request_body);
+        client.post(endpoint).json(&request_body)
     };
-    disable_qwen_thinking_if_needed(&model, &endpoint, runtime.provider, &mut request_body);
-    let mut request = client.post(endpoint).json(&request_body);
     if let Some(key) = runtime.api_key.as_ref() {
         request = request.bearer_auth(key);
     }
@@ -148,18 +184,49 @@ pub async fn extract_entities(text_chunk: &str) -> Result<GraphData, EngineError
         });
     }
 
-    let parsed: OpenAiChatCompletionResponse = response
-        .json()
-        .await
-        .map_err(EngineError::GraphExtractDeserialize)?;
-    let raw_content = parsed
-        .choices
-        .into_iter()
-        .next()
-        .map(|c| c.message.content)
-        .unwrap_or_default();
+    let raw_content = if runtime.protocol == RemoteModelProtocol::OpenAiResponses {
+        let parsed: OpenAiResponsesResponse = response
+            .json()
+            .await
+            .map_err(EngineError::GraphExtractDeserialize)?;
+        response_output_text(parsed)
+    } else {
+        let parsed: OpenAiChatCompletionResponse = response
+            .json()
+            .await
+            .map_err(EngineError::GraphExtractDeserialize)?;
+        parsed
+            .choices
+            .into_iter()
+            .next()
+            .map(|c| c.message.content)
+            .unwrap_or_default()
+    };
 
     parse_graph_data(&raw_content)
+}
+
+fn completion_endpoint(base: &str, protocol: RemoteModelProtocol) -> String {
+    let base = base.trim_end_matches('/');
+    match protocol {
+        RemoteModelProtocol::OpenAiResponses => format!("{base}/v1/responses"),
+        RemoteModelProtocol::OpenAiChatCompletions => format!("{base}/v1/chat/completions"),
+    }
+}
+
+fn response_output_text(parsed: OpenAiResponsesResponse) -> String {
+    if let Some(text) = parsed.output_text {
+        if !text.trim().is_empty() {
+            return text;
+        }
+    }
+    parsed
+        .output
+        .into_iter()
+        .flat_map(|item| item.content)
+        .filter_map(|item| item.text)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn is_qwen_thinking_model(model: &str) -> bool {

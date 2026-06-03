@@ -81,6 +81,7 @@ pub(crate) async fn set_model_settings(
     settings.local_chat_model_path = normalized.local_profile.chat_model_path.clone();
     settings.local_graph_model_path = normalized.local_profile.graph_model_path.clone();
     settings.local_embed_model_path = normalized.local_profile.embed_model_path.clone();
+    settings.remote_protocol = Some(normalized.remote_profile.protocol.clone());
     settings.remote_chat_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
     settings.remote_graph_endpoint = Some(normalized.remote_profile.graph_endpoint.clone());
     settings.remote_embed_endpoint = Some(normalized.remote_profile.embed_endpoint.clone());

@@ -4,6 +4,7 @@ export type FontPreset = "system" | "neo" | "mono";
 export type FontScale = "s" | "m" | "l";
 export type ThemeMode = "dark" | "light";
 export type ModelProvider = "llama_cpp_local" | "openai_compatible";
+export type RemoteProtocol = "openai_chat_completions" | "openai_responses";
 export type LocalPerformancePreset = "compat" | "gpu" | "low_vram" | "throughput";
 export type IndexingMode = "continuous" | "manual" | "scheduled";
 export type ResourceBudget = "low" | "balanced" | "fast";
@@ -53,6 +54,7 @@ export type LocalModelProfileDto = {
 };
 
 export type RemoteModelProfileDto = {
+  protocol?: RemoteProtocol | string | null;
   chat_endpoint: string;
   graph_endpoint: string;
   embed_endpoint: string;

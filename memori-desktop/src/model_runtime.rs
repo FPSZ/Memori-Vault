@@ -125,6 +125,7 @@ pub(crate) fn describe_engine_error(err: EngineError) -> String {
 #[derive(Debug, Clone)]
 pub(crate) struct ActiveRuntimeModelSettings {
     pub(crate) provider: ModelProvider,
+    pub(crate) protocol: String,
     pub(crate) chat_endpoint: String,
     pub(crate) graph_endpoint: String,
     pub(crate) embed_endpoint: String,
@@ -144,6 +145,7 @@ pub(crate) struct ActiveRuntimeModelSettings {
 pub(crate) fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> RuntimeModelConfig {
     RuntimeModelConfig {
         provider: settings.provider,
+        protocol: memori_core::RemoteModelProtocol::from_value(&settings.protocol),
         chat_endpoint: settings.chat_endpoint.clone(),
         chat_model: settings.chat_model.clone(),
         graph_endpoint: settings.graph_endpoint.clone(),
