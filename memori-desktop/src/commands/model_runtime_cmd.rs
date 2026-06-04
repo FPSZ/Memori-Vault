@@ -1,9 +1,9 @@
-﻿use crate::*;
+use crate::*;
 
 pub(crate) fn normalize_local_model_role(role: &str) -> Result<String, String> {
     let normalized = role.trim().to_ascii_lowercase();
     match normalized.as_str() {
-        "chat" | "graph" | "embed" => Ok(normalized),
+        "chat" | "graph" | "embed" | "rerank" => Ok(normalized),
         _ => Err(format!("unsupported local model role: {role}")),
     }
 }
@@ -13,6 +13,7 @@ fn role_endpoint(profile: &LocalModelProfileDto, role: &str) -> String {
         "chat" => profile.chat_endpoint.clone(),
         "graph" => profile.graph_endpoint.clone(),
         "embed" => profile.embed_endpoint.clone(),
+        "rerank" => profile.rerank_endpoint.clone(),
         _ => String::new(),
     }
 }
@@ -22,6 +23,7 @@ fn role_model(profile: &LocalModelProfileDto, role: &str) -> String {
         "chat" => profile.chat_model.clone(),
         "graph" => profile.graph_model.clone(),
         "embed" => profile.embed_model.clone(),
+        "rerank" => profile.rerank_model.clone(),
         _ => String::new(),
     }
 }
@@ -31,6 +33,7 @@ fn role_model_path(profile: &LocalModelProfileDto, role: &str) -> Option<String>
         "chat" => profile.chat_model_path.clone(),
         "graph" => profile.graph_model_path.clone(),
         "embed" => profile.embed_model_path.clone(),
+        "rerank" => profile.rerank_model_path.clone(),
         _ => None,
     }
 }
@@ -40,6 +43,7 @@ fn role_context_length(profile: &LocalModelProfileDto, role: &str) -> Option<u32
         "chat" => profile.chat_context_length,
         "graph" => profile.graph_context_length,
         "embed" => profile.embed_context_length,
+        "rerank" => profile.rerank_context_length,
         _ => None,
     }
 }
@@ -49,6 +53,7 @@ fn role_concurrency(profile: &LocalModelProfileDto, role: &str) -> Option<u32> {
         "chat" => profile.chat_concurrency,
         "graph" => profile.graph_concurrency,
         "embed" => profile.embed_concurrency,
+        "rerank" => profile.rerank_concurrency,
         _ => None,
     }
 }
@@ -281,7 +286,8 @@ fn find_listening_pid(port: u16) -> Option<u32> {
             .output()
             .ok()?;
         let text = String::from_utf8_lossy(&output.stdout);
-        text.lines().find_map(|line| line.trim().parse::<u32>().ok())
+        text.lines()
+            .find_map(|line| line.trim().parse::<u32>().ok())
     }
 }
 
@@ -367,7 +373,7 @@ pub(crate) async fn local_runtime_statuses(
     profile: &LocalModelProfileDto,
 ) -> Result<LocalModelRuntimeStatusesDto, String> {
     let mut guard = state.local_models.lock().await;
-    let roles = ["chat", "graph", "embed"];
+    let roles = ["chat", "graph", "embed", "rerank"];
     let mut result = Vec::new();
     for role in roles {
         let endpoint = role_endpoint(profile, role);
@@ -521,6 +527,9 @@ pub(crate) async fn start_local_model_role(
         .arg(&model);
     if role == "embed" {
         command.arg("--embedding");
+    }
+    if role == "rerank" {
+        command.arg("--reranking");
     }
     if let Some(ctx) = role_context_length(profile, role).filter(|value| *value > 0) {
         command.arg("--ctx-size").arg(ctx.to_string());

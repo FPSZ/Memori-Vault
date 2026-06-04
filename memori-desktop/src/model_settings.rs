@@ -37,6 +37,14 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
         MEMORI_MODEL_ENDPOINT_ENV,
         DEFAULT_EMBED_ENDPOINT,
     );
+    let local_rerank_endpoint = resolve_endpoint(
+        settings.local_rerank_endpoint.clone(),
+        None,
+        None,
+        MEMORI_RERANK_ENDPOINT_ENV,
+        MEMORI_MODEL_ENDPOINT_ENV,
+        DEFAULT_RERANK_ENDPOINT,
+    );
 
     let remote_chat_endpoint = resolve_endpoint(
         settings.remote_chat_endpoint.clone(),
@@ -137,6 +145,18 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             }
         })
         .unwrap_or_else(|| DEFAULT_EMBED_MODEL_QWEN3.to_string());
+
+    let local_rerank_model = settings
+        .local_rerank_model
+        .clone()
+        .or_else(|| {
+            if env_provider == ModelProvider::LlamaCppLocal {
+                std::env::var(MEMORI_RERANK_MODEL_ENV).ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| DEFAULT_RERANK_MODEL_GTE.to_string());
 
     let remote_chat_model = settings
         .remote_chat_model
@@ -253,11 +273,13 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
 
     // 自愈：历史配置可能把三个本地角色塌缩到同一端口（共享的 local_endpoint 回退导致）。
     // 读取时检测冲突并把 graph/embed 重置为各自默认端口，避免“三个角色都指向 18001”。
-    let (local_chat_endpoint, local_graph_endpoint, local_embed_endpoint) = dedupe_local_endpoints(
-        normalize_endpoint(ModelProvider::LlamaCppLocal, &local_chat_endpoint),
-        normalize_endpoint(ModelProvider::LlamaCppLocal, &local_graph_endpoint),
-        normalize_endpoint(ModelProvider::LlamaCppLocal, &local_embed_endpoint),
-    );
+    let (local_chat_endpoint, local_graph_endpoint, local_embed_endpoint, local_rerank_endpoint) =
+        dedupe_local_endpoints(
+            normalize_endpoint(ModelProvider::LlamaCppLocal, &local_chat_endpoint),
+            normalize_endpoint(ModelProvider::LlamaCppLocal, &local_graph_endpoint),
+            normalize_endpoint(ModelProvider::LlamaCppLocal, &local_embed_endpoint),
+            normalize_endpoint(ModelProvider::LlamaCppLocal, &local_rerank_endpoint),
+        );
 
     ModelSettingsDto {
         active_provider: provider_to_string(active_provider),
@@ -291,6 +313,11 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
             chat_concurrency: settings.local_chat_concurrency,
             graph_concurrency: settings.local_graph_concurrency,
             embed_concurrency: settings.local_embed_concurrency,
+            rerank_endpoint: local_rerank_endpoint,
+            rerank_model: local_rerank_model,
+            rerank_model_path: normalize_optional_text(settings.local_rerank_model_path.clone()),
+            rerank_context_length: settings.local_rerank_context_length,
+            rerank_concurrency: settings.local_rerank_concurrency,
             performance_preset: normalize_performance_preset(
                 settings.local_performance_preset.clone(),
             ),
@@ -344,11 +371,14 @@ pub(crate) fn normalize_model_settings_payload(
         normalize_local_endpoint_for_role("graph", &payload.local_profile.graph_endpoint);
     let local_embed_endpoint =
         normalize_local_endpoint_for_role("embed", &payload.local_profile.embed_endpoint);
+    let local_rerank_endpoint =
+        normalize_local_endpoint_for_role("rerank", &payload.local_profile.rerank_endpoint);
     // 拒绝把多个角色配到同一端口（保存时硬校验，杜绝再次塌缩）。
     ensure_distinct_local_endpoints(
         &local_chat_endpoint,
         &local_graph_endpoint,
         &local_embed_endpoint,
+        &local_rerank_endpoint,
     )?;
     let remote_chat_endpoint = normalize_endpoint(
         ModelProvider::OpenAiCompatible,
@@ -366,6 +396,15 @@ pub(crate) fn normalize_model_settings_payload(
     let local_chat_model = payload.local_profile.chat_model.trim().to_string();
     let local_graph_model = payload.local_profile.graph_model.trim().to_string();
     let local_embed_model = payload.local_profile.embed_model.trim().to_string();
+    // 重排模型可选：留空时回落到默认模型名，不报错（重排服务可不启用）。
+    let local_rerank_model = {
+        let trimmed = payload.local_profile.rerank_model.trim();
+        if trimmed.is_empty() {
+            DEFAULT_RERANK_MODEL_GTE.to_string()
+        } else {
+            trimmed.to_string()
+        }
+    };
     let remote_chat_model = payload.remote_profile.chat_model.trim().to_string();
     let remote_graph_model = payload.remote_profile.graph_model.trim().to_string();
     let remote_embed_model = payload.remote_profile.embed_model.trim().to_string();
@@ -395,6 +434,8 @@ pub(crate) fn normalize_model_settings_payload(
         normalize_optional_existing_file(payload.local_profile.graph_model_path, "graph model")?;
     let local_embed_model_path =
         normalize_optional_existing_file(payload.local_profile.embed_model_path, "embed model")?;
+    let local_rerank_model_path =
+        normalize_optional_existing_file(payload.local_profile.rerank_model_path, "rerank model")?;
     let local_performance_preset =
         normalize_performance_preset(payload.local_profile.performance_preset);
     let local_cache_type_k = normalize_optional_text(payload.local_profile.cache_type_k);
@@ -420,6 +461,11 @@ pub(crate) fn normalize_model_settings_payload(
             chat_concurrency: payload.local_profile.chat_concurrency,
             graph_concurrency: payload.local_profile.graph_concurrency,
             embed_concurrency: payload.local_profile.embed_concurrency,
+            rerank_endpoint: local_rerank_endpoint,
+            rerank_model: local_rerank_model,
+            rerank_model_path: local_rerank_model_path,
+            rerank_context_length: payload.local_profile.rerank_context_length,
+            rerank_concurrency: payload.local_profile.rerank_concurrency,
             performance_preset: local_performance_preset,
             n_gpu_layers: payload.local_profile.n_gpu_layers,
             batch_size: payload.local_profile.batch_size,
@@ -556,6 +602,13 @@ pub(crate) fn resolve_active_runtime_settings(
         } else {
             settings.local_profile.embed_concurrency
         },
+        // 重排为本地专属角色：仅本地 provider 启用，远程模式下关闭。
+        rerank_endpoint: normalize_endpoint(
+            ModelProvider::LlamaCppLocal,
+            &settings.local_profile.rerank_endpoint,
+        ),
+        rerank_model: settings.local_profile.rerank_model.trim().to_string(),
+        rerank_enabled: active_provider == ModelProvider::LlamaCppLocal,
     }
 }
 
@@ -604,11 +657,7 @@ pub(crate) fn resolve_configured_active_runtime_settings(
             && !active.embed_model.trim().is_empty()
     };
 
-    if configured {
-        Some(active)
-    } else {
-        None
-    }
+    if configured { Some(active) } else { None }
 }
 
 pub(crate) fn is_model_not_configured_message(message: &str) -> bool {
@@ -736,6 +785,7 @@ pub(crate) fn default_local_endpoint_for_role(role: &str) -> &'static str {
     match role {
         "graph" => DEFAULT_GRAPH_ENDPOINT,
         "embed" => DEFAULT_EMBED_ENDPOINT,
+        "rerank" => DEFAULT_RERANK_ENDPOINT,
         _ => DEFAULT_CHAT_ENDPOINT,
     }
 }
@@ -773,7 +823,8 @@ pub(crate) fn dedupe_local_endpoints(
     chat: String,
     graph: String,
     embed: String,
-) -> (String, String, String) {
+    rerank: String,
+) -> (String, String, String, String) {
     let graph = if same_endpoint_target(&chat, &graph) {
         default_local_endpoint_for_role("graph").to_string()
     } else {
@@ -784,21 +835,31 @@ pub(crate) fn dedupe_local_endpoints(
     } else {
         embed
     };
-    (chat, graph, embed)
+    let rerank = if same_endpoint_target(&chat, &rerank)
+        || same_endpoint_target(&graph, &rerank)
+        || same_endpoint_target(&embed, &rerank)
+    {
+        default_local_endpoint_for_role("rerank").to_string()
+    } else {
+        rerank
+    };
+    (chat, graph, embed, rerank)
 }
 
-/// 校验本地三角色端口互不相同。保存时调用，拒绝把多个角色配到同一端口。
+/// 校验本地四角色端口互不相同。保存时调用，拒绝把多个角色配到同一端口。
 pub(crate) fn ensure_distinct_local_endpoints(
     chat: &str,
     graph: &str,
     embed: &str,
+    rerank: &str,
 ) -> Result<(), String> {
-    let collision = same_endpoint_target(chat, graph)
-        || same_endpoint_target(chat, embed)
-        || same_endpoint_target(graph, embed);
+    let endpoints = [chat, graph, embed, rerank];
+    let collision = (0..endpoints.len()).any(|i| {
+        ((i + 1)..endpoints.len()).any(|j| same_endpoint_target(endpoints[i], endpoints[j]))
+    });
     if collision {
         return Err(
-            "对话/图谱/向量三个本地模型必须使用不同的端口：一个 llama-server 进程只能服务一个角色，向量模型还需要独立的 --embedding 服务。请为每个角色设置不同的端口（默认 18001 / 18002 / 18003）。"
+            "对话/图谱/向量/重排四个本地模型必须使用不同的端口：一个 llama-server 进程只能服务一个角色，向量模型需要 --embedding、重排模型需要 --reranking 独立服务。请为每个角色设置不同的端口（默认 18001 / 18002 / 18003 / 18004）。"
                 .to_string(),
         );
     }
@@ -824,6 +885,12 @@ pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) 
         std::env::set_var(MEMORI_CHAT_MODEL_ENV, &settings.chat_model);
         std::env::set_var(MEMORI_GRAPH_MODEL_ENV, &settings.graph_model);
         std::env::set_var(MEMORI_EMBED_MODEL_ENV, &settings.embed_model);
+        std::env::set_var(MEMORI_RERANK_ENDPOINT_ENV, &settings.rerank_endpoint);
+        std::env::set_var(MEMORI_RERANK_MODEL_ENV, &settings.rerank_model);
+        std::env::set_var(
+            MEMORI_RERANK_ENABLED_ENV,
+            if settings.rerank_enabled { "1" } else { "0" },
+        );
         if let Some(key) = settings.api_key.as_ref() {
             std::env::set_var(MEMORI_MODEL_API_KEY_ENV, key);
         } else {
@@ -915,7 +982,8 @@ mod endpoint_tests {
     #[test]
     fn collapsed_local_endpoints_self_heal_to_role_defaults() {
         // 历史 bug：三个角色都被塌缩到 18001。读取时应自愈成各自默认端口。
-        let (chat, graph, embed) = dedupe_local_endpoints(
+        let (chat, graph, embed, rerank) = dedupe_local_endpoints(
+            "http://localhost:18001".to_string(),
             "http://localhost:18001".to_string(),
             "http://localhost:18001".to_string(),
             "http://localhost:18001".to_string(),
@@ -923,21 +991,29 @@ mod endpoint_tests {
         assert_eq!(chat, "http://localhost:18001");
         assert_eq!(graph, "http://localhost:18002");
         assert_eq!(embed, "http://localhost:18003");
+        assert_eq!(rerank, "http://localhost:18004");
     }
 
     #[test]
     fn distinct_local_endpoints_are_left_untouched() {
-        let (chat, graph, embed) = dedupe_local_endpoints(
+        let (chat, graph, embed, rerank) = dedupe_local_endpoints(
             "http://localhost:18001".to_string(),
             "http://localhost:18002".to_string(),
             "http://localhost:18003".to_string(),
+            "http://localhost:18004".to_string(),
         );
         assert_eq!(
-            (chat.as_str(), graph.as_str(), embed.as_str()),
+            (
+                chat.as_str(),
+                graph.as_str(),
+                embed.as_str(),
+                rerank.as_str()
+            ),
             (
                 "http://localhost:18001",
                 "http://localhost:18002",
                 "http://localhost:18003",
+                "http://localhost:18004",
             )
         );
     }
@@ -952,6 +1028,10 @@ mod endpoint_tests {
             normalize_local_endpoint_for_role("embed", ""),
             "http://localhost:18003"
         );
+        assert_eq!(
+            normalize_local_endpoint_for_role("rerank", ""),
+            "http://localhost:18004"
+        );
     }
 
     #[test]
@@ -960,15 +1040,19 @@ mod endpoint_tests {
             "http://localhost:18001",
             "http://localhost:18001",
             "http://localhost:18003",
+            "http://localhost:18004",
         )
         .unwrap_err();
         assert!(err.contains("不同的端口"));
-        assert!(ensure_distinct_local_endpoints(
-            "http://localhost:18001",
-            "http://localhost:18002",
-            "http://localhost:18003",
-        )
-        .is_ok());
+        assert!(
+            ensure_distinct_local_endpoints(
+                "http://localhost:18001",
+                "http://localhost:18002",
+                "http://localhost:18003",
+                "http://localhost:18004",
+            )
+            .is_ok()
+        );
     }
 
     #[test]

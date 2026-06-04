@@ -48,7 +48,8 @@ fn apply_memory_settings(settings: &mut AppSettings, payload: MemorySettingsDto)
     // ADR-003/P1 keeps graph as explanation context only; it must not affect
     // the main retrieval ranking until an explicit ranking experiment ships.
     settings.graph_ranking_enabled = Some(false);
-    settings.retrieval_gating_profile = Some(normalize_gating_profile(&payload.retrieval_gating_profile));
+    settings.retrieval_gating_profile =
+        Some(normalize_gating_profile(&payload.retrieval_gating_profile));
     settings.generation_refusal_mode = Some(normalize_generation_refusal_mode(
         &payload.generation_refusal_mode,
     ));
@@ -112,10 +113,7 @@ fn apply_runtime_gating_settings(settings: &AppSettings) {
         );
         std::env::set_var(
             memori_core::MEMORI_GATING_RETRY_ON_REFUSAL_ENV,
-            settings
-                .gating_retry_on_refusal
-                .unwrap_or(true)
-                .to_string(),
+            settings.gating_retry_on_refusal.unwrap_or(true).to_string(),
         );
     }
 }

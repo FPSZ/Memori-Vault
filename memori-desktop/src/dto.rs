@@ -53,6 +53,11 @@ pub(crate) struct AppSettings {
     pub(crate) local_chat_concurrency: Option<u32>,
     pub(crate) local_graph_concurrency: Option<u32>,
     pub(crate) local_embed_concurrency: Option<u32>,
+    pub(crate) local_rerank_endpoint: Option<String>,
+    pub(crate) local_rerank_model: Option<String>,
+    pub(crate) local_rerank_model_path: Option<String>,
+    pub(crate) local_rerank_context_length: Option<u32>,
+    pub(crate) local_rerank_concurrency: Option<u32>,
     pub(crate) local_performance_preset: Option<String>,
     pub(crate) local_n_gpu_layers: Option<i32>,
     pub(crate) local_batch_size: Option<u32>,
@@ -222,6 +227,17 @@ pub(crate) struct LocalModelProfileDto {
     pub(crate) graph_concurrency: Option<u32>,
     #[serde(default)]
     pub(crate) embed_concurrency: Option<u32>,
+    // 重排角色（仅本地 llama.cpp，--reranking）。serde(default) 兼容旧 payload。
+    #[serde(default)]
+    pub(crate) rerank_endpoint: String,
+    #[serde(default)]
+    pub(crate) rerank_model: String,
+    #[serde(default)]
+    pub(crate) rerank_model_path: Option<String>,
+    #[serde(default)]
+    pub(crate) rerank_context_length: Option<u32>,
+    #[serde(default)]
+    pub(crate) rerank_concurrency: Option<u32>,
     #[serde(default)]
     pub(crate) performance_preset: Option<String>,
     #[serde(default)]

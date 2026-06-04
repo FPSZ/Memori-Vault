@@ -9,13 +9,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use memori_core::{
     AskResponseStructured, AskStatus, DEFAULT_CHAT_ENDPOINT, DEFAULT_CHAT_MODEL,
     DEFAULT_EMBED_ENDPOINT, DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_GRAPH_ENDPOINT, DEFAULT_GRAPH_MODEL,
-    DEFAULT_MODEL_PROVIDER, EgressMode, EngineError, EnterpriseModelPolicy, IndexingConfig,
-    IndexingMode, IndexingStatus, MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV,
-    MEMORI_EMBED_ENDPOINT_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV,
-    MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV,
-    MEMORI_MODEL_PROVIDER_ENV, MemoriEngine, ModelProvider, ResourceBudget, RuntimeModelConfig,
-    ScheduleWindow, VaultStats, normalize_policy_endpoint, validate_provider_request,
-    validate_runtime_model_settings,
+    DEFAULT_MODEL_PROVIDER, DEFAULT_RERANK_ENDPOINT, DEFAULT_RERANK_MODEL_GTE, EgressMode,
+    EngineError, EnterpriseModelPolicy, IndexingConfig, IndexingMode, IndexingStatus,
+    MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_ENDPOINT_ENV,
+    MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV, MEMORI_GRAPH_MODEL_ENV,
+    MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_ENDPOINT_ENV, MEMORI_MODEL_PROVIDER_ENV,
+    MEMORI_RERANK_ENABLED_ENV, MEMORI_RERANK_ENDPOINT_ENV, MEMORI_RERANK_MODEL_ENV, MemoriEngine,
+    ModelProvider, ResourceBudget, RuntimeModelConfig, ScheduleWindow, VaultStats,
+    normalize_policy_endpoint, validate_provider_request, validate_runtime_model_settings,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State, WindowEvent};
@@ -101,6 +102,7 @@ pub fn run() {
     let init_error = Arc::new(Mutex::new(None));
     let init_error_worker = Arc::clone(&init_error);
     let local_models = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let regression_runs = Arc::new(Mutex::new(std::collections::HashMap::new()));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -143,6 +145,7 @@ pub fn run() {
                 engine: Arc::clone(&shared_engine),
                 init_error: Arc::clone(&init_error),
                 local_models: Arc::clone(&local_models),
+                regression_runs: Arc::clone(&regression_runs),
             });
             Ok(())
         })
@@ -204,6 +207,7 @@ pub fn run() {
             pull_model,
             set_local_models_root,
             scan_local_model_files,
+            download_rerank_model,
             get_mcp_settings,
             set_mcp_settings,
             get_mcp_status,
@@ -215,7 +219,12 @@ pub fn run() {
             read_file_preview,
             rank_settings_query,
             get_logs,
-            get_log_dir
+            get_log_dir,
+            list_retrieval_regression_reports,
+            read_retrieval_regression_report,
+            run_retrieval_regression,
+            get_retrieval_regression_run,
+            get_retrieval_regression_progress
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|err| {

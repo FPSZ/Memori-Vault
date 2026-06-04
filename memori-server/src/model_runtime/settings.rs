@@ -10,6 +10,9 @@ pub(crate) struct ActiveRuntimeModelSettings {
     pub(crate) chat_model: String,
     pub(crate) graph_model: String,
     pub(crate) embed_model: String,
+    pub(crate) rerank_endpoint: String,
+    pub(crate) rerank_model: String,
+    pub(crate) rerank_enabled: bool,
     pub(crate) chat_context_length: Option<u32>,
     pub(crate) graph_context_length: Option<u32>,
     pub(crate) embed_context_length: Option<u32>,
@@ -36,6 +39,9 @@ pub(crate) fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> 
         graph_model: settings.graph_model.clone(),
         embed_endpoint: settings.embed_endpoint.clone(),
         embed_model: settings.embed_model.clone(),
+        rerank_endpoint: settings.rerank_endpoint.clone(),
+        rerank_model: settings.rerank_model.clone(),
+        rerank_enabled: settings.rerank_enabled,
         api_key: settings.api_key.clone(),
         chat_context_length: settings.chat_context_length,
         graph_context_length: settings.graph_context_length,
@@ -658,6 +664,10 @@ pub(crate) fn resolve_active_runtime_settings(
         } else {
             settings.local_profile.embed_model.trim().to_string()
         },
+        // server 端暂未暴露 rerank 配置，默认使用本地第 4 角色端口；服务不可达时 core 会自动降级。
+        rerank_endpoint: memori_core::DEFAULT_RERANK_ENDPOINT.to_string(),
+        rerank_model: memori_core::DEFAULT_RERANK_MODEL_GTE.to_string(),
+        rerank_enabled: true,
         chat_context_length: if active_provider == ModelProvider::OpenAiCompatible {
             settings.remote_profile.chat_context_length
         } else {
@@ -707,6 +717,15 @@ pub(crate) fn apply_model_settings_to_env(settings: ActiveRuntimeModelSettings) 
         std::env::set_var(MEMORI_CHAT_MODEL_ENV, &settings.chat_model);
         std::env::set_var(MEMORI_GRAPH_MODEL_ENV, &settings.graph_model);
         std::env::set_var(MEMORI_EMBED_MODEL_ENV, &settings.embed_model);
+        std::env::set_var(
+            memori_core::MEMORI_RERANK_ENDPOINT_ENV,
+            &settings.rerank_endpoint,
+        );
+        std::env::set_var(memori_core::MEMORI_RERANK_MODEL_ENV, &settings.rerank_model);
+        std::env::set_var(
+            memori_core::MEMORI_RERANK_ENABLED_ENV,
+            if settings.rerank_enabled { "1" } else { "0" },
+        );
         if let Some(key) = settings.api_key.as_ref() {
             std::env::set_var(MEMORI_MODEL_API_KEY_ENV, key);
         } else {

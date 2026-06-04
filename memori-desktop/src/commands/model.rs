@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 #[tauri::command]
 pub(crate) async fn get_model_settings() -> Result<ModelSettingsDto, String> {
@@ -97,6 +97,12 @@ pub(crate) async fn set_model_settings(
     settings.local_chat_concurrency = normalized.local_profile.chat_concurrency;
     settings.local_graph_concurrency = normalized.local_profile.graph_concurrency;
     settings.local_embed_concurrency = normalized.local_profile.embed_concurrency;
+    // 重排角色（仅本地 llama.cpp，--reranking）。此前遗漏持久化，导致保存后重启丢失 model_path。
+    settings.local_rerank_endpoint = Some(normalized.local_profile.rerank_endpoint.clone());
+    settings.local_rerank_model = Some(normalized.local_profile.rerank_model.clone());
+    settings.local_rerank_model_path = normalized.local_profile.rerank_model_path.clone();
+    settings.local_rerank_context_length = normalized.local_profile.rerank_context_length;
+    settings.local_rerank_concurrency = normalized.local_profile.rerank_concurrency;
     settings.local_performance_preset = normalized.local_profile.performance_preset.clone();
     settings.local_n_gpu_layers = normalized.local_profile.n_gpu_layers;
     settings.local_batch_size = normalized.local_profile.batch_size;
@@ -538,4 +544,138 @@ pub(crate) async fn scan_local_model_files(root: Option<String>) -> Result<Vec<S
         return Ok(Vec::new());
     };
     scan_local_model_files_from_root(&PathBuf::from(root))
+}
+
+// 一键下载的轻量重排模型：gte-multilingual-reranker-base（FP16, ~590MB）。
+// 编码器架构、多语言、llama.cpp `--reranking` 兼容成熟，是全栈里最轻的一环。
+const RERANK_MODEL_DOWNLOAD_URL: &str = "https://huggingface.co/gpustack/gte-multilingual-reranker-base-GGUF/resolve/main/gte-multilingual-reranker-base-FP16.gguf";
+const RERANK_MODEL_FILE_NAME: &str = "gte-multilingual-reranker-base-FP16.gguf";
+const RERANK_MODEL_DIR_NAME: &str = "gte-multilingual-reranker-base";
+const RERANK_DOWNLOAD_PROGRESS_EVENT: &str = "rerank_model_download_progress";
+
+#[derive(Clone, serde::Serialize)]
+struct RerankDownloadProgress {
+    downloaded: u64,
+    total: u64,
+    done: bool,
+    path: Option<String>,
+}
+
+/// 解析下载目录：优先 models_root（存在的目录），否则回落到配置目录下的 models。
+fn resolve_rerank_download_dir() -> Result<PathBuf, String> {
+    let settings = load_app_settings()?;
+    let resolved = resolve_model_settings(&settings);
+    let base = resolved
+        .local_profile
+        .models_root
+        .as_deref()
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| {
+            dirs::config_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(SETTINGS_APP_DIR_NAME)
+                .join("models")
+        });
+    let dir = base.join(RERANK_MODEL_DIR_NAME);
+    fs::create_dir_all(&dir)
+        .map_err(|err| format!("创建模型目录失败({}): {err}", dir.display()))?;
+    Ok(dir)
+}
+
+#[tauri::command]
+pub(crate) async fn download_rerank_model(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Emitter;
+
+    let dir = resolve_rerank_download_dir()?;
+    let final_path = dir.join(RERANK_MODEL_FILE_NAME);
+
+    // 已存在且非空则直接复用，避免重复下载。
+    if let Ok(meta) = fs::metadata(&final_path)
+        && meta.len() > 0
+    {
+        let path = final_path.to_string_lossy().to_string();
+        let _ = app.emit(
+            RERANK_DOWNLOAD_PROGRESS_EVENT,
+            RerankDownloadProgress {
+                downloaded: meta.len(),
+                total: meta.len(),
+                done: true,
+                path: Some(path.clone()),
+            },
+        );
+        info!(path = %path, "rerank model already present, skip download");
+        return Ok(path);
+    }
+
+    let part_path = dir.join(format!("{RERANK_MODEL_FILE_NAME}.part"));
+    info!(url = %RERANK_MODEL_DOWNLOAD_URL, dest = %final_path.display(), "downloading rerank model");
+
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|err| format!("创建下载客户端失败: {err}"))?;
+    let mut response = client
+        .get(RERANK_MODEL_DOWNLOAD_URL)
+        .send()
+        .await
+        .map_err(|err| format!("下载请求失败: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("下载失败，HTTP 状态 {}", response.status()));
+    }
+    let total = response.content_length().unwrap_or(0);
+
+    let mut file = std::fs::File::create(&part_path)
+        .map_err(|err| format!("创建临时文件失败({}): {err}", part_path.display()))?;
+    let mut downloaded: u64 = 0;
+    let mut last_emit: u64 = 0;
+    const EMIT_STEP: u64 = 4 * 1024 * 1024; // 每 ~4MB 推送一次进度，避免事件风暴
+
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                std::io::Write::write_all(&mut file, &chunk)
+                    .map_err(|err| format!("写入文件失败: {err}"))?;
+                downloaded += chunk.len() as u64;
+                if downloaded - last_emit >= EMIT_STEP {
+                    last_emit = downloaded;
+                    let _ = app.emit(
+                        RERANK_DOWNLOAD_PROGRESS_EVENT,
+                        RerankDownloadProgress {
+                            downloaded,
+                            total,
+                            done: false,
+                            path: None,
+                        },
+                    );
+                }
+            }
+            Ok(None) => break,
+            Err(err) => {
+                drop(file);
+                let _ = fs::remove_file(&part_path);
+                return Err(format!("下载中断: {err}"));
+            }
+        }
+    }
+    std::io::Write::flush(&mut file).map_err(|err| format!("刷新文件失败: {err}"))?;
+    drop(file);
+
+    // 原子落地：先写 .part 再改名，避免半成品被当成可用模型。
+    if final_path.exists() {
+        let _ = fs::remove_file(&final_path);
+    }
+    fs::rename(&part_path, &final_path).map_err(|err| format!("重命名下载文件失败: {err}"))?;
+
+    let path = final_path.to_string_lossy().to_string();
+    let _ = app.emit(
+        RERANK_DOWNLOAD_PROGRESS_EVENT,
+        RerankDownloadProgress {
+            downloaded,
+            total: total.max(downloaded),
+            done: true,
+            path: Some(path.clone()),
+        },
+    );
+    info!(path = %path, bytes = downloaded, "rerank model download complete");
+    Ok(path)
 }

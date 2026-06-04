@@ -141,6 +141,9 @@ pub(crate) struct ActiveRuntimeModelSettings {
     pub(crate) chat_concurrency: Option<u32>,
     pub(crate) graph_concurrency: Option<u32>,
     pub(crate) embed_concurrency: Option<u32>,
+    pub(crate) rerank_endpoint: String,
+    pub(crate) rerank_model: String,
+    pub(crate) rerank_enabled: bool,
 }
 
 pub(crate) fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> RuntimeModelConfig {
@@ -154,6 +157,9 @@ pub(crate) fn to_runtime_model_config(settings: &ActiveRuntimeModelSettings) -> 
         graph_model: settings.graph_model.clone(),
         embed_endpoint: settings.embed_endpoint.clone(),
         embed_model: settings.embed_model.clone(),
+        rerank_endpoint: settings.rerank_endpoint.clone(),
+        rerank_model: settings.rerank_model.clone(),
+        rerank_enabled: settings.rerank_enabled,
         api_key: settings.api_key.clone(),
         chat_context_length: settings.chat_context_length,
         graph_context_length: settings.graph_context_length,
