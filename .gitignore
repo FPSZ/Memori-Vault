@@ -6,6 +6,7 @@
 .memori.db
 *.db-shm
 *.db-wal
+.tmp/
 
 # Logs
 *.log

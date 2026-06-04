@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { listen } from "@tauri-apps/api/event";
 import {
   Bot,
   ChevronDown,
@@ -47,6 +48,7 @@ import {
 } from "./modelUtils";
 import { ModelCard } from "./ModelCard";
 import { RemoteModelSettingsPanel } from "./RemoteModelSettingsPanel";
+import { downloadRerankModel } from "../../../app/api/desktop";
 
 type ModelsTabProps = {
   t: TranslateFn;
@@ -97,9 +99,15 @@ export function ModelsTab({
   const [expandedRoles, setExpandedRoles] = useState<Record<ModelRoleKey, boolean>>({
     chat: false,
     graph: false,
-    embed: false
+    embed: false,
+    rerank: false
   });
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [rerankDownloading, setRerankDownloading] = useState(false);
+  const [rerankDownloadProgress, setRerankDownloadProgress] = useState<{
+    downloaded: number;
+    total: number;
+  } | null>(null);
   const [localRoleErrors, setLocalRoleErrors] = useState<RoleErrorMap>({});
   const [localConfigMessages, setLocalConfigMessages] = useState<string[]>([]);
   const [customPresetName, setCustomPresetName] = useState("");
@@ -145,7 +153,7 @@ export function ModelsTab({
       ...check.generalErrors
     ].filter((message): message is string => Boolean(message));
     setLocalConfigMessages(messages.length > 0 ? messages : [fallbackMessage]);
-    const rolesWithError = (["chat", "graph", "embed"] as const).filter((role) => check.roleErrors[role]);
+    const rolesWithError = (["chat", "graph", "embed", "rerank"] as const).filter((role) => check.roleErrors[role]);
     if (rolesWithError.length > 0) {
       expandRoles(rolesWithError);
     } else if (check.firstRole) {
@@ -261,6 +269,9 @@ export function ModelsTab({
     } else if (role === "graph") {
       patch.graph_model = stem;
       patch.graph_model_path = path;
+    } else if (role === "rerank") {
+      patch.rerank_model = stem;
+      patch.rerank_model_path = path;
     } else {
       patch.embed_model = stem;
       patch.embed_model_path = path;
@@ -272,6 +283,43 @@ export function ModelsTab({
     updateProfile(patch);
     clearLocalValidationForRole(role);
     setRoleExpanded(role, true);
+  };
+
+  const handleDownloadRerankModel = async () => {
+    setRerankDownloading(true);
+    setRerankDownloadProgress({ downloaded: 0, total: 0 });
+    let unlisten: (() => void) | null = null;
+    try {
+      unlisten = await listen<{
+        downloaded: number;
+        total: number;
+        done: boolean;
+        path?: string | null;
+      }>("rerank_model_download_progress", (event) => {
+        setRerankDownloadProgress({
+          downloaded: event.payload.downloaded,
+          total: event.payload.total
+        });
+      });
+      const path = await downloadRerankModel();
+      const fileName = fileNameFromPath(path);
+      const stem = fileName.replace(/\.gguf$/i, "");
+      updateProfile({
+        rerank_model: stem || "gte-multilingual-reranker-base",
+        rerank_model_path: path
+      });
+      clearLocalValidationForRole("rerank");
+      setRoleExpanded("rerank", true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setLocalRoleErrors((prev) => ({ ...prev, rerank: message }));
+      setLocalConfigMessages([`${ROLE_META.rerank.label}下载失败：${message}`]);
+      setRoleExpanded("rerank", true);
+    } finally {
+      unlisten?.();
+      setRerankDownloading(false);
+      setRerankDownloadProgress(null);
+    }
   };
 
   const statusOk = modelAvailability?.reachable && modelAvailability?.missing_roles?.length === 0;
@@ -303,7 +351,7 @@ export function ModelsTab({
 
   const handleProbe = async () => {
     if (isLocal) {
-      const check = validateLocalRoles(modelSettings.local_profile, ["chat", "graph", "embed"]);
+      const check = validateLocalRoles(modelSettings.local_profile, ["chat", "graph", "embed", "rerank"]);
       if (!check.ok) {
         showLocalValidation(check, "本地模型配置不完整，无法探测。");
         return;
@@ -326,7 +374,7 @@ export function ModelsTab({
 
   const handleRefreshProviderModels = async () => {
     if (isLocal) {
-      const check = validateLocalRoles(modelSettings.local_profile, ["chat", "graph", "embed"]);
+      const check = validateLocalRoles(modelSettings.local_profile, ["chat", "graph", "embed", "rerank"]);
       if (!check.ok) {
         showLocalValidation(check, "本地模型配置不完整，无法刷新模型列表。");
         return;
@@ -661,7 +709,7 @@ export function ModelsTab({
           />
         ) : null}
 
-        {(["chat", "graph", "embed"] as const).map((role) => (
+        {(["chat", "graph", "embed", "rerank"] as const).map((role) => (
           <ModelCard
             key={role}
             role={role}
@@ -688,6 +736,9 @@ export function ModelsTab({
             onStop={() => void onStopLocalModel(role)}
             onRestart={() => void onRestartLocalModel(role)}
             onExpandedChange={(expanded) => setRoleExpanded(role, expanded)}
+            onDownloadModel={role === "rerank" ? () => void handleDownloadRerankModel() : undefined}
+            downloading={role === "rerank" ? rerankDownloading : false}
+            downloadProgress={role === "rerank" ? rerankDownloadProgress : null}
           />
         ))}
 

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, ChevronUp, FolderOpen, LoaderCircle, Play, RefreshCw, Square, Zap } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, FolderOpen, LoaderCircle, Play, RefreshCw, Square, Zap } from "lucide-react";
 import type { LocalModelRuntimeStatusDto } from "../types";
 import { extractPort, replacePort, ROLE_META, type ModelRoleKey } from "./models-helpers";
 
@@ -23,6 +23,9 @@ type ModelCardProps = {
   onContextLengthChange: (v: number | null) => void;
   onConcurrencyChange: (v: number | null) => void;
   onPickFile: () => void;
+  onDownloadModel?: () => void;
+  downloading?: boolean;
+  downloadProgress?: { downloaded: number; total: number } | null;
   onProbe: () => void;
   onStart: () => void;
   onStop: () => void;
@@ -50,6 +53,9 @@ export function ModelCard({
   onContextLengthChange,
   onConcurrencyChange,
   onPickFile,
+  onDownloadModel,
+  downloading = false,
+  downloadProgress,
   onProbe,
   onStart,
   onStop,
@@ -208,7 +214,39 @@ export function ModelCard({
                       <FolderOpen className="h-3.5 w-3.5" />
                       浏览
                     </button>
+                    {onDownloadModel ? (
+                      <button
+                        type="button"
+                        onClick={onDownloadModel}
+                        disabled={downloading}
+                        title={`一键下载轻量重排模型 ${meta.defaultModel}（FP16, ~590MB）`}
+                        className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)]/40 bg-[var(--accent-soft)] px-3 py-1.5 text-xs font-medium text-[var(--accent)] transition hover:opacity-80 disabled:opacity-50"
+                      >
+                        {downloading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                        {downloading ? "下载中" : "下载"}
+                      </button>
+                    ) : null}
                   </div>
+                  {onDownloadModel && downloading ? (
+                    <div className="text-[11px] text-[var(--text-muted)]">
+                      {(() => {
+                        const dp = downloadProgress;
+                        const mb = (n: number) => (n / (1024 * 1024)).toFixed(0);
+                        if (dp && dp.total > 0) {
+                          const pct = Math.min(100, Math.floor((dp.downloaded / dp.total) * 100));
+                          return `正在下载 ${meta.defaultModel} … ${pct}%（${mb(dp.downloaded)} / ${mb(dp.total)} MB）`;
+                        }
+                        if (dp && dp.downloaded > 0) {
+                          return `正在下载 ${meta.defaultModel} … 已下载 ${mb(dp.downloaded)} MB`;
+                        }
+                        return `正在连接 Hugging Face 下载 ${meta.defaultModel} …`;
+                      })()}
+                    </div>
+                  ) : onDownloadModel ? (
+                    <div className="text-[11px] text-[var(--text-muted)]">
+                      没有模型？点「下载」自动获取轻量重排模型（~590MB，下载后自动填好路径）。
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 

@@ -277,6 +277,134 @@ html {
   -webkit-backdrop-filter: blur(22px) saturate(96%);
 }
 
+.lab-button,
+.lab-icon-button,
+.lab-run-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 92%, transparent);
+  color: var(--text-primary);
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.lab-button {
+  min-height: 2.25rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface-2) 88%, transparent);
+  padding: 0.52rem 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.lab-icon-button {
+  height: 2.25rem;
+  width: 2.25rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface-2) 88%, transparent);
+}
+
+.lab-run-button {
+  min-height: 2.6rem;
+  width: 100%;
+  border-radius: 1rem;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 28%, var(--bg-surface-1)) 0%,
+      color-mix(in srgb, var(--accent) 14%, var(--bg-surface-2)) 100%
+    );
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  box-shadow: 0 12px 28px -22px color-mix(in srgb, var(--accent) 58%, transparent);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.lab-button:hover:not(:disabled),
+.lab-icon-button:hover:not(:disabled),
+.lab-run-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border-subtle));
+  background: color-mix(in srgb, var(--bg-surface-1) 82%, var(--accent) 8%);
+  box-shadow: var(--float-shadow-focus);
+}
+
+.lab-button:disabled,
+.lab-run-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+  transform: none;
+  box-shadow: none;
+}
+
+.lab-input,
+.lab-select {
+  width: 100%;
+  min-height: 2.35rem;
+  border-radius: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 92%, transparent);
+  background: color-mix(in srgb, var(--bg-surface-1) 82%, transparent);
+  color: var(--text-primary);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.8rem;
+  outline: none;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.lab-select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 50%,
+    calc(100% - 11px) 50%;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 2rem;
+}
+
+.lab-input:focus,
+.lab-select:focus {
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+  background: color-mix(in srgb, var(--bg-surface-1) 96%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.lab-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface-2) 90%, transparent);
+  color: var(--text-secondary);
+  padding: 0.32rem 0.62rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.lab-tab-count {
+  display: inline-flex;
+  min-width: 1.1rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  padding: 0 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .surface-lite {
     background: color-mix(in srgb, var(--bg-surface-1) 92%, transparent);

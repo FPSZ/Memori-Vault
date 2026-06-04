@@ -208,7 +208,7 @@ export function useAppModel(deps: UseAppModelDeps) {
   };
 
   const runLocalModelRuntimeAction = async (
-    role: "chat" | "graph" | "embed",
+    role: "chat" | "graph" | "embed" | "rerank",
     action: () => Promise<LocalModelRuntimeStatusesDto>
   ) => {
     setLocalModelRuntimeBusyRole(role);
@@ -241,13 +241,13 @@ export function useAppModel(deps: UseAppModelDeps) {
     }
   };
 
-  const onStartLocalModel = (role: "chat" | "graph" | "embed") =>
+  const onStartLocalModel = (role: "chat" | "graph" | "embed" | "rerank") =>
     runLocalModelRuntimeAction(role, () => startLocalModel(role));
 
-  const onStopLocalModel = (role: "chat" | "graph" | "embed") =>
+  const onStopLocalModel = (role: "chat" | "graph" | "embed" | "rerank") =>
     runLocalModelRuntimeAction(role, () => stopLocalModel(role));
 
-  const onRestartLocalModel = (role: "chat" | "graph" | "embed") =>
+  const onRestartLocalModel = (role: "chat" | "graph" | "embed" | "rerank") =>
     runLocalModelRuntimeAction(role, () => restartLocalModel(role));
 
   return {

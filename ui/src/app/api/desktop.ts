@@ -122,16 +122,20 @@ export function getLocalModelRuntimeStatus() {
   return invoke<LocalModelRuntimeStatusesDto>("get_local_model_runtime_status");
 }
 
-export function startLocalModel(role: "chat" | "graph" | "embed") {
+export function startLocalModel(role: "chat" | "graph" | "embed" | "rerank") {
   return invoke<LocalModelRuntimeStatusesDto>("start_local_model", { role });
 }
 
-export function stopLocalModel(role: "chat" | "graph" | "embed") {
+export function stopLocalModel(role: "chat" | "graph" | "embed" | "rerank") {
   return invoke<LocalModelRuntimeStatusesDto>("stop_local_model", { role });
 }
 
-export function restartLocalModel(role: "chat" | "graph" | "embed") {
+export function restartLocalModel(role: "chat" | "graph" | "embed" | "rerank") {
   return invoke<LocalModelRuntimeStatusesDto>("restart_local_model", { role });
+}
+
+export function downloadRerankModel() {
+  return invoke<string>("download_rerank_model");
 }
 
 export function probeModelProvider(payload: ProviderModelsPayload) {
@@ -227,4 +231,155 @@ export function getGraphNeighbors(entityId: string, limit?: number) {
 
 export function getGraphStats() {
   return invoke<GraphStatsDto>("get_graph_stats");
+}
+
+export type RetrievalRegressionSummary = {
+  case_count: number;
+  answer_cases: number;
+  refuse_cases: number;
+  top1_document_hit_rate: number;
+  top1_chunk_hit_rate: number;
+  top3_document_recall_rate: number;
+  top5_chunk_recall_rate: number;
+  chunk_mrr: number;
+  citation_validity_rate: number;
+  reject_correctness_rate: number;
+  rerank_applied_rate: number;
+};
+
+export type RetrievalRegressionCase = {
+  id: string;
+  query: string;
+  mode: "answer" | "refuse";
+  status: string;
+  timed_out: boolean;
+  scope_paths: string[];
+  target_documents: string[];
+  target_clues: string[];
+  document_hit_rank: number | null;
+  chunk_hit_rank: number | null;
+  top1_document_hit: boolean;
+  top1_chunk_hit: boolean;
+  top3_document_recall: boolean;
+  top5_chunk_recall: boolean;
+  citation_valid: boolean;
+  reject_correct: boolean;
+  rerank_applied: boolean;
+  citations_count: number;
+  final_evidence_count: number;
+  gating_decision_reason: string;
+  doc_recall_ms: number;
+  doc_dense_ms: number;
+  chunk_lexical_ms: number;
+  chunk_dense_ms: number;
+  merge_ms: number;
+  rerank_ms: number;
+  notes: string | null;
+};
+
+export type RetrievalRegressionReportEntry = {
+  id: string;
+  name: string;
+  path: string;
+  json_path: string;
+  md_path: string | null;
+  mode: string;
+  profile: string;
+  generated_at_utc: string;
+  service_health: string;
+  rerank_health: string;
+  case_count: number;
+  last_modified_ms: number;
+  summary: RetrievalRegressionSummary;
+};
+
+export type RetrievalRegressionReport = {
+  tool: string;
+  generated_at_utc: string;
+  evaluation_mode: string;
+  profile: string;
+  suite_path: string;
+  watch_root: string;
+  db_path: string;
+  baseline: unknown;
+  service_health: string;
+  rerank_health: string;
+  live_service_used: boolean;
+  index_prep_ms: number | null;
+  case_timeout_count: number;
+  preparation_error: string | null;
+  summary: RetrievalRegressionSummary;
+  cases: RetrievalRegressionCase[];
+};
+
+export type RunRetrievalRegressionPayload = {
+  mode: "offline_deterministic" | "live_embedding";
+  profile: "core_docs" | "repo_mixed" | "full_live";
+  suite?: string;
+  watchRoot?: string;
+  dbPath?: string;
+  caseFilter?: string;
+  maxIndexPrepSecs?: number;
+  maxCaseSecs?: number;
+};
+
+export type RetrievalRegressionRunState = {
+  id: string;
+  status: "running" | "succeeded" | "failed";
+  mode: string;
+  profile: string;
+  case_filter: string | null;
+  started_at_ms: number;
+  finished_at_ms: number | null;
+  exit_code: number | null;
+  report_path: string | null;
+  stdout_tail: string;
+  stderr_tail: string;
+  error: string | null;
+};
+
+// Live, per-case progress emitted by the regression harness while a run is in
+// flight. The backend (memori-core example + Tauri command) writes this after
+// each case so the UI can show the current question, current phase, and how
+// many cases remain. Until the backend command exists the getter rejects and
+// the UI degrades to plain run status — so treat every field as best-effort.
+export type RetrievalRegressionProgress = {
+  run_id: string;
+  status: "running" | "succeeded" | "failed" | "idle";
+  total: number;
+  completed: number;
+  current_index: number; // 1-based index of the case in flight; 0 when none
+  current_case_id: string;
+  current_query: string;
+  current_mode: string; // "answer" | "refuse" | ""
+  current_phase: string; // preparing | doc_recall | chunk_recall | rerank | gating | scoring | done
+  passed: number;
+  failed: number;
+  updated_at_ms: number;
+};
+
+export function listRetrievalRegressionReports() {
+  return invoke<RetrievalRegressionReportEntry[]>("list_retrieval_regression_reports");
+}
+
+export function readRetrievalRegressionReport(reportPath: string) {
+  return invoke<RetrievalRegressionReport>("read_retrieval_regression_report", {
+    reportPath
+  });
+}
+
+export function runRetrievalRegression(payload: RunRetrievalRegressionPayload) {
+  return invoke<RetrievalRegressionRunState>("run_retrieval_regression", { payload });
+}
+
+export function getRetrievalRegressionRun(runId?: string) {
+  return invoke<RetrievalRegressionRunState | null>("get_retrieval_regression_run", {
+    runId: runId ?? null
+  });
+}
+
+export function getRetrievalRegressionProgress(runId?: string) {
+  return invoke<RetrievalRegressionProgress | null>("get_retrieval_regression_progress", {
+    runId: runId ?? null
+  });
 }

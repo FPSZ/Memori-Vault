@@ -183,8 +183,7 @@ export function useAppUI(deps: UseAppUIDeps) {
     try {
       const selected = await open({
         directory: true,
-        multiple: false,
-        defaultPath: watchRoot || undefined
+        multiple: false
       });
 
       if (!selected || Array.isArray(selected)) {

@@ -45,14 +45,17 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettingsDto = {
     chat_endpoint: "http://localhost:18001",
     graph_endpoint: "http://localhost:18002",
     embed_endpoint: "http://localhost:18003",
+    rerank_endpoint: "http://localhost:18004",
     models_root: "",
     llama_server_path: "",
     chat_model: "qwen3-14b",
     graph_model: "qwen3-8b",
     embed_model: "Qwen3-Embedding-4B",
+    rerank_model: "gte-multilingual-reranker-base",
     chat_model_path: "",
     graph_model_path: "",
-    embed_model_path: ""
+    embed_model_path: "",
+    rerank_model_path: ""
   },
   remote_profile: {
     protocol: "openai_chat_completions",

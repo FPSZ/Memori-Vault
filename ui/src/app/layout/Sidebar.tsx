@@ -1,5 +1,12 @@
 import { useMemo } from "react";
-import { ChevronRight, FileText, FolderOpen, HardDrive, Settings as SettingsIcon } from "lucide-react";
+import {
+  ChevronRight,
+  FileText,
+  FlaskConical,
+  FolderOpen,
+  HardDrive,
+  Settings as SettingsIcon
+} from "lucide-react";
 import { AppLogoMark } from "../../components/AppLogoMark";
 import { useI18n } from "../../i18n";
 import { normalizeScopeKey } from "../formatters";
@@ -17,6 +24,7 @@ type SidebarProps = {
   onToggleScopeDirExpanded: (path: string) => void;
   onPreviewFile: (path: string) => void;
   onToggleSettings: () => void;
+  onToggleRegressionLab: () => void;
 };
 
 export function Sidebar({
@@ -28,7 +36,8 @@ export function Sidebar({
   stats,
   onToggleScopeDirExpanded,
   onPreviewFile,
-  onToggleSettings
+  onToggleSettings,
+  onToggleRegressionLab
 }: SidebarProps) {
   const rootName = watchRoot
     ? watchRoot.split(/[/\\]/).filter(Boolean).pop() || "Vault"
@@ -129,6 +138,14 @@ export function Sidebar({
 
       {/* Footer actions */}
       <div className="border-t border-[var(--border-subtle)] px-2 py-2">
+        <button
+          type="button"
+          onClick={onToggleRegressionLab}
+          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs text-[var(--text-secondary)] transition hover:bg-[var(--bg-surface-1)] hover:text-[var(--text-primary)]"
+        >
+          <FlaskConical className="h-3.5 w-3.5" />
+          检索测试器
+        </button>
         <button
           type="button"
           onClick={onToggleSettings}

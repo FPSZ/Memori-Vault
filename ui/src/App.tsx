@@ -49,6 +49,7 @@ import { FilePreview } from "./app/layout/FilePreview";
 import { GraphView } from "./app/layout/GraphView";
 import { OnboardingOverlay } from "./app/layout/OnboardingOverlay";
 import { ResultStage } from "./app/layout/ResultStage";
+import { RetrievalRegressionLab } from "./app/layout/RetrievalRegressionLab";
 import { SearchStage } from "./app/layout/SearchStage";
 import { Sidebar } from "./app/layout/Sidebar";
 import { StatusFooter } from "./app/layout/StatusFooter";
@@ -177,6 +178,7 @@ export default function App() {
   const sidebarWidthRef = useRef<number>(sidebarWidth);
   useEffect(() => { sidebarWidthRef.current = sidebarWidth; }, [sidebarWidth]);
   const [graphViewOpen, setGraphViewOpen] = useState(false);
+  const [regressionLabOpen, setRegressionLabOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const compactHoverUnlockTimerRef = useRef<number | null>(null);
   const fileMatchesCloseTimerRef = useRef<number | null>(null);
@@ -539,6 +541,7 @@ export default function App() {
               onToggleScopeDirExpanded={onToggleScopeDirExpanded}
               onPreviewFile={onPreviewFile}
               onToggleSettings={() => setIsSettingsOpen((prev) => !prev)}
+              onToggleRegressionLab={() => setRegressionLabOpen(true)}
             />
           </div>
 
@@ -673,6 +676,11 @@ export default function App() {
             >
               <GraphView />
             </motion.div>
+
+            <RetrievalRegressionLab
+              open={regressionLabOpen}
+              onClose={() => setRegressionLabOpen(false)}
+            />
           </div>
         </div>
 

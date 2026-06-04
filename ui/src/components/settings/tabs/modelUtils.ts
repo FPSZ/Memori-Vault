@@ -1,4 +1,4 @@
-import { MessageSquare, Network, Share2 } from "lucide-react";
+import { ListOrdered, MessageSquare, Network, Share2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   LocalPerformancePreset,
@@ -11,7 +11,7 @@ import type {
 import { useI18n } from "../../../i18n";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
-type ModelRoleKey = "chat" | "graph" | "embed";
+type ModelRoleKey = "chat" | "graph" | "embed" | "rerank";
 type RemoteProtocol = "openai_chat_completions" | "openai_responses";
 type RemoteApiFormatValue = RemoteApiFormat;
 type RemoteProviderPreset = {
@@ -241,6 +241,7 @@ function dirNameFromPath(path: string): string {
 function modelPathForRole(profile: LocalModelProfileDto, role: ModelRoleKey): string {
   if (role === "chat") return profile.chat_model_path ?? "";
   if (role === "graph") return profile.graph_model_path ?? "";
+  if (role === "rerank") return profile.rerank_model_path ?? "";
   return profile.embed_model_path ?? "";
 }
 
@@ -256,12 +257,14 @@ type RoleErrorMap = Partial<Record<ModelRoleKey, string>>;
 function roleEndpoint(profile: LocalModelProfileDto, role: ModelRoleKey): string {
   if (role === "chat") return profile.chat_endpoint;
   if (role === "graph") return profile.graph_endpoint;
+  if (role === "rerank") return profile.rerank_endpoint;
   return profile.embed_endpoint;
 }
 
 function roleModel(profile: LocalModelProfileDto, role: ModelRoleKey): string {
   if (role === "chat") return profile.chat_model;
   if (role === "graph") return profile.graph_model;
+  if (role === "rerank") return profile.rerank_model;
   return profile.embed_model;
 }
 
@@ -352,7 +355,7 @@ function describeAvailabilityError(
   localProfile: LocalModelProfileDto | null
 ): string {
   if (!localProfile) return `${code}: ${message}`;
-  const role = (["chat", "graph", "embed"] as const).find((candidate) => {
+  const role = (["chat", "graph", "embed", "rerank"] as const).find((candidate) => {
     const endpoint = roleEndpoint(localProfile, candidate);
     return endpoint && message.includes(endpoint);
   });
@@ -383,6 +386,13 @@ const ROLE_META: Record<
     color: "text-emerald-400",
     defaultModel: "Qwen3-Embedding-4B",
     defaultPort: "18003"
+  },
+  rerank: {
+    label: "重排模型",
+    icon: ListOrdered,
+    color: "text-amber-400",
+    defaultModel: "gte-multilingual-reranker-base",
+    defaultPort: "18004"
   }
 };
 
