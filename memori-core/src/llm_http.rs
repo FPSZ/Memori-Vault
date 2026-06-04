@@ -167,10 +167,10 @@ pub(crate) async fn request_llm_text(
 }
 
 fn response_output_text(parsed: OpenAiResponsesResponse) -> String {
-    if let Some(text) = parsed.output_text {
-        if !text.trim().is_empty() {
-            return text;
-        }
+    if let Some(text) = parsed.output_text
+        && !text.trim().is_empty()
+    {
+        return text;
     }
     parsed
         .output

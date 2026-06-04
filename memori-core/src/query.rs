@@ -21,12 +21,98 @@ pub(crate) const CJK_FILLER_CHARS: &[char] =
 /// 如果作为 strict lexical hit 会严重污染 rankings。
 /// 它们在 support_terms 中被过滤，在 direct_chunk_lexical_signal 中只算 broad hit。
 pub(crate) const CJK_DOC_NOISE_TERMS: &[&str] = &[
-    "新增", "添加", "更新", "修改", "删除", "移除", "功能", "特性", "支持", "使用", "启用", "禁用",
-    "配置", "设置", "方法", "函数", "文件", "说明", "描述", "介绍", "文档", "问题", "错误", "修复",
-    "解决", "优化", "实现", "创建", "生成", "构建", "数据", "信息", "内容", "用户", "系统", "应用",
-    "程序", "项目", "代码", "需要", "可以", "通过", "进行", "确保", "验证", "检查", "测试", "默认",
-    "自动", "手动", "主要", "重要", "关键", "核心", "基本", "标准", "规范", "规则", "步骤", "过程",
-    "结果", "相关", "包含", "包括", "基于", "根据", "按照",
+    "新增",
+    "添加",
+    "更新",
+    "修改",
+    "删除",
+    "移除",
+    "功能",
+    "特性",
+    "支持",
+    "使用",
+    "启用",
+    "禁用",
+    "配置",
+    "设置",
+    "方法",
+    "函数",
+    "文件",
+    "说明",
+    "描述",
+    "介绍",
+    "文档",
+    "问题",
+    "错误",
+    "修复",
+    "解决",
+    "优化",
+    "实现",
+    "创建",
+    "生成",
+    "构建",
+    "数据",
+    "信息",
+    "内容",
+    "用户",
+    "系统",
+    "应用",
+    "程序",
+    "项目",
+    "代码",
+    "需要",
+    "可以",
+    "通过",
+    "进行",
+    "确保",
+    "验证",
+    "检查",
+    "测试",
+    "默认",
+    "自动",
+    "手动",
+    "主要",
+    "重要",
+    "关键",
+    "核心",
+    "基本",
+    "标准",
+    "规范",
+    "规则",
+    "步骤",
+    "过程",
+    "结果",
+    "相关",
+    "包含",
+    "包括",
+    "基于",
+    "根据",
+    "按照",
+    "事实",
+    "事实卡",
+    "唯一",
+    "唯一事实卡",
+    "核心事实",
+    "内部",
+    "规定",
+    "内部规定",
+    "责任人",
+    "负责人",
+    "资料",
+    "编号",
+    "资料编号",
+    "适用",
+    "范围",
+    "口径",
+    "强制",
+    "边界",
+    "评测",
+    "本地",
+    "检索",
+    "资料级别",
+    "生效",
+    "版本",
+    "记录",
 ];
 
 pub(crate) fn analyze_query(query: &str) -> QueryAnalysis {
@@ -284,12 +370,9 @@ pub(crate) fn extract_query_support_terms(
         }
     }
 
-    let has_specific_cjk_candidate = cjk_candidates
-        .iter()
-        .any(|term| term.chars().any(is_cjk) && !CJK_DOC_NOISE_TERMS.contains(&term.as_str()));
     for term in cjk_candidates {
         let is_noise = CJK_DOC_NOISE_TERMS.contains(&term.as_str());
-        if is_noise && !has_specific_cjk_candidate {
+        if is_noise {
             continue;
         }
         insert_unique_term(&mut seen, &mut support_terms, &term);
@@ -395,4 +478,30 @@ pub(crate) fn split_cjk_phrase_on_fillers(token: &str) -> Vec<String> {
     }
 
     segments
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expand_query_token_keeps_original_cjk_identifier() {
+        let terms = expand_query_token("银杏-17");
+        assert!(terms.iter().any(|term| term == "银杏-17"));
+        assert!(terms.iter().any(|term| term == "银杏17"));
+    }
+
+    #[test]
+    fn cjk_doc_noise_terms_do_not_become_support_terms() {
+        let raw_tokens = extract_query_tokens("赤松预算的唯一事实卡核心事实是什么");
+        let lexical_terms = raw_tokens
+            .iter()
+            .flat_map(|token| expand_query_token(token))
+            .collect::<Vec<_>>();
+        let support_terms = extract_query_support_terms(&raw_tokens, &lexical_terms);
+
+        assert!(support_terms.iter().any(|term| term == "赤松预算"));
+        assert!(!support_terms.iter().any(|term| term == "唯一事实卡"));
+        assert!(!support_terms.iter().any(|term| term == "核心事实"));
+    }
 }

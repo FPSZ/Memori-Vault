@@ -8,7 +8,7 @@ use memori_core::{
     AskStatus, MEMORI_DB_PATH_ENV, MemoriEngine, RetrievalInspection, RuntimeRetrievalBaseline,
     build_query_terms_for_offline_embedding,
 };
-use memori_parser::parse_and_chunk;
+use memori_parser::{extract_document_text, parse_and_chunk};
 use serde::{Deserialize, Serialize};
 use tokio::time::timeout;
 
@@ -425,13 +425,14 @@ async fn prepare_engine(
                 run_cases: true,
             })
         }
-        EvaluationMode::LiveEmbedding => prepare_live_engine(engine, args).await,
+        EvaluationMode::LiveEmbedding => prepare_live_engine(engine, args, suite).await,
     }
 }
 
 async fn prepare_live_engine(
     engine: &MemoriEngine,
     args: &CliArgs,
+    suite: &RegressionSuite,
 ) -> Result<PreparationOutcome, AnyError> {
     if !args.watch_root.exists() {
         return Ok(PreparationOutcome {
@@ -545,7 +546,7 @@ async fn prepare_live_engine(
     let started_at = Instant::now();
     match timeout(
         Duration::from_secs(args.max_index_prep_secs),
-        engine.prepare_retrieval_index(),
+        seed_live_index(engine, &args.watch_root, suite),
     )
     .await
     {
@@ -591,7 +592,7 @@ async fn seed_offline_index(
         .await?;
     store.purge_all_index_data().await?;
 
-    let documents = collect_offline_documents(suite);
+    let documents = collect_target_documents(suite);
     for relative_path in documents {
         let absolute_path = watch_root.join(&relative_path);
         if !absolute_path.exists() {
@@ -601,7 +602,7 @@ async fn seed_offline_index(
             )
             .into());
         }
-        let raw_text = fs::read_to_string(&absolute_path)?;
+        let raw_text = read_regression_document_text(&absolute_path)?;
         let chunks = parse_and_chunk(&absolute_path, &raw_text)?;
         if chunks.is_empty() {
             continue;
@@ -631,7 +632,75 @@ async fn seed_offline_index(
     Ok(())
 }
 
-fn collect_offline_documents(suite: &RegressionSuite) -> Vec<String> {
+async fn seed_live_index(
+    engine: &MemoriEngine,
+    watch_root: &Path,
+    suite: &RegressionSuite,
+) -> Result<(), AnyError> {
+    let state = engine.state();
+    let store = state.vector_store.clone();
+    store.begin_full_rebuild("live_regression_seed").await?;
+    store.purge_all_index_data().await?;
+
+    let documents = collect_target_documents(suite);
+    for relative_path in documents {
+        let absolute_path = watch_root.join(&relative_path);
+        if !absolute_path.exists() {
+            return Err(format!(
+                "live regression target document does not exist: {}",
+                absolute_path.display()
+            )
+            .into());
+        }
+        if !path_is_under_root(&absolute_path, watch_root) {
+            return Err(format!(
+                "live regression target document is outside watch_root: {}",
+                absolute_path.display()
+            )
+            .into());
+        }
+
+        let raw_text = read_regression_document_text(&absolute_path)?;
+        let chunks = parse_and_chunk(&absolute_path, &raw_text)?;
+        if chunks.is_empty() {
+            continue;
+        }
+
+        let prompts = chunks
+            .iter()
+            .map(|chunk| chunk.content.clone())
+            .collect::<Vec<_>>();
+        let embeddings = state.embedding_client.embed_batch(&prompts).await?;
+        if embeddings.len() != chunks.len() {
+            return Err(format!(
+                "embedding provider returned {} vectors for {} chunks in {}",
+                embeddings.len(),
+                chunks.len(),
+                absolute_path.display()
+            )
+            .into());
+        }
+
+        let last_modified = file_modified_secs(&absolute_path)?;
+        let content_hash = stable_hash_hex(&raw_text);
+        store
+            .replace_document_index(
+                &absolute_path,
+                Some(watch_root),
+                last_modified,
+                &content_hash,
+                chunks,
+                embeddings,
+            )
+            .await?;
+    }
+
+    store.finish_full_rebuild().await?;
+    store.load_from_db().await?;
+    Ok(())
+}
+
+fn collect_target_documents(suite: &RegressionSuite) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut documents = Vec::new();
     for case in &suite.cases {
@@ -647,6 +716,21 @@ fn collect_offline_documents(suite: &RegressionSuite) -> Vec<String> {
     }
     documents.sort();
     documents
+}
+
+fn read_regression_document_text(path: &Path) -> Result<String, AnyError> {
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if ext == "docx" || ext == "pdf" {
+        extract_document_text(path)
+            .ok_or_else(|| format!("failed to extract text from {}", path.display()).into())
+    } else {
+        Ok(fs::read_to_string(path)?)
+    }
 }
 
 fn build_deterministic_chunk_embedding(chunk: &memori_core::DocumentChunk, dim: usize) -> Vec<f32> {
@@ -1395,7 +1479,8 @@ mod tests {
     use super::{
         DEFAULT_OFFLINE_EMBEDDING_DIM, EvaluationMode, RegressionCase, RegressionCaseResult,
         RegressionMode, RegressionProfile, RegressionReport, RegressionSummary,
-        build_deterministic_query_embedding, render_report_markdown, summarize,
+        build_deterministic_query_embedding, collect_target_documents, render_report_markdown,
+        summarize,
     };
     use memori_core::{AskStatus, RuntimeRetrievalBaseline};
 
@@ -1437,6 +1522,60 @@ mod tests {
             case.profile_tags
                 .iter()
                 .any(|tag| tag == RegressionProfile::CoreDocs.as_str())
+        );
+    }
+
+    #[test]
+    fn target_document_collection_uses_only_answer_targets() {
+        let suite = super::RegressionSuite {
+            version: 2,
+            watch_root: ".".to_string(),
+            notes: None,
+            cases: vec![
+                RegressionCase {
+                    id: "C001".to_string(),
+                    query: "q1".to_string(),
+                    mode: RegressionMode::Answer,
+                    scope_paths: Vec::new(),
+                    target_documents: vec![
+                        ".\\Memory_Test\\doc_001_产品策略_极光账本_制度.md".to_string(),
+                        "Memory_Test/doc_002_产品策略_极光账本_会议纪要.txt".to_string(),
+                    ],
+                    target_clues: vec!["clue".to_string()],
+                    profile_tags: vec!["core_docs".to_string()],
+                    notes: None,
+                },
+                RegressionCase {
+                    id: "C002".to_string(),
+                    query: "q2".to_string(),
+                    mode: RegressionMode::Answer,
+                    scope_paths: Vec::new(),
+                    target_documents: vec![
+                        "Memory_Test/doc_001_产品策略_极光账本_制度.md".to_string(),
+                    ],
+                    target_clues: vec!["clue".to_string()],
+                    profile_tags: vec!["core_docs".to_string()],
+                    notes: None,
+                },
+                RegressionCase {
+                    id: "C003".to_string(),
+                    query: "q3".to_string(),
+                    mode: RegressionMode::Refuse,
+                    scope_paths: Vec::new(),
+                    target_documents: vec!["README.md".to_string()],
+                    target_clues: Vec::new(),
+                    profile_tags: vec!["core_docs".to_string()],
+                    notes: None,
+                },
+            ],
+        };
+
+        assert_eq!(
+            collect_target_documents(&suite),
+            vec![
+                "Memory_Test/doc_001_产品策略_极光账本_制度.md".to_string(),
+                "Memory_Test/doc_002_产品策略_极光账本_会议纪要.txt".to_string(),
+            ]
         );
     }
 

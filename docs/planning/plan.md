@@ -1,8 +1,36 @@
-# Memori-Vault Retrieval Rebuild Plan
+﻿# Memori-Vault Retrieval Rebuild Plan
 
-Last Updated: 2026-03-13 UTC
+Last Updated: 2026-06-04 UTC
 Current Phase: Phase 6 - Validation
 Overall Progress: 88%
+
+## 2026-06-04 Live Regression Update
+
+最新 100 条 `Memory_Test/` 回归已经完成一次真实 live 跑数：
+
+- 运行模式：`live_embedding + full_live`
+- 报告：`target/retrieval-regression/live_embedding-full_live-1780575982/report.json`
+- 本地服务：`service_health=ready`，`rerank_health=ready`
+- 索引范围：当前 suite/profile 的目标文档集合，不再全仓索引
+- 索引规模：`54` documents / `425` chunks
+- 索引准备耗时：`44,226 ms`
+- 用例：`100`，其中 `88 answer / 12 refuse`
+- 总体通过：`56/100`
+- Top-1 document hit：`35.23%`
+- Top-3 document recall：`59.09%`
+- Top-1 chunk hit：`54.55%`
+- Top-5 chunk recall：`69.32%`
+- Chunk MRR：`0.5987`
+- Citation validity：`100.00%`
+- Reject correctness：`48.00%`
+- Rerank applied：`66.00%`
+
+当前判断：
+
+- live local-model 链路已经能端到端跑通，Phase 6 不再被 “local llama.cpp / embedding unavailable” 阻塞。
+- 真实精度仍未达交付线，优先问题是 `中文直问-事实卡命中 = 4/20` 和 `refuse-越权/注入/常识 = 1/6`。
+- `score_below_threshold = 42/100` 是最大 gating reason，下一轮应先把失败拆成 `retrieval_miss` 与 `gating_false_refusal`，不要混成一个“准确率低”。
+- `文档类型定位 = 5/5`、`反常识/抗参数知识 = 9/10`、`多格式抽取 = 6/7` 表现较好，暂时不是优先瓶颈。
 
 ## Status Rules
 - 任务状态：完成即勾选 `- [x]`，不保留“半完成”状态。
@@ -79,7 +107,7 @@ Overall Progress: 88%
 - Phase 6 从现在起新增一个更高优先级 gate：
   - 使用**外部本地小语料**做 10 文档 / 15 问可用性 smoke
   - 只有当 `usable_answer_count >= 10 / 15`，且不再出现“`answered` + `当前上下文不足`”假通过时，才允许继续把 retrieval 提准视为主目标
-- `live_embedding` 仍被本地 llama.cpp / embedding 可用性阻塞，Phase 6 还不能关闭。
+- `live_embedding + full_live` 已在 2026-06-04 跑通 100 条；Phase 6 当前阻塞从服务可用性转为真实精度与 gating 质量。
 
 ## Phase 0: Baseline & Diagnosis
 **Goal**  
@@ -219,7 +247,7 @@ Overall Progress: 88%
 - [x] 收口 answer panel：引用默认折叠、证据按文档聚合去重、检索指标按阶段排行展示
 - [x] 建立内部结构地图文档（`docs/architecture/STRUCTURE.md`）并固定下一轮拆分优先级
 - [ ] 修复中文描述型 docs query 的 broad lexical 污染：让多词覆盖优先于单个高频业务词命中
-- [ ] 跑完 Phase 0 定义的全部回归查询集 (blocked: live_embedding full_live blocked by local llama.cpp availability)
+- [x] 跑完当前 100 条 `Memory_Test/` live 回归集（2026-06-04：`live_embedding + full_live`，`56/100` 通过）
 - [x] 比较重构前后的 `Top-1 document hit`、`Top-3 document recall`、`Top-5 chunk recall`、citation validity、拒答正确率
 - [ ] 对大规模文档集做本地性能压测并记录 `P50/P95`
 - [ ] 验证无证据问题会正确拒答或切开放模式

@@ -1,4 +1,48 @@
-# Memori-Vault 改进清单（按优先级）
+﻿# Memori-Vault 改进清单（按优先级）
+
+## 2026-06-04 最新检索实测更新
+
+本次更新来自 100 条 `Memory_Test/` live 回归：
+
+- 运行模式：`live_embedding + full_live`
+- 报告：`target/retrieval-regression/live_embedding-full_live-1780575982/report.json`
+- 本地服务：`service_health=ready`，`rerank_health=ready`
+- 索引准备：`44,226 ms`
+- 索引规模：`54` documents / `425` chunks
+- 用例：`100`，其中 `88 answer / 12 refuse`
+- 总体通过：`56/100`
+- Top-1 document hit：`35.23%`
+- Top-3 document recall：`59.09%`
+- Top-1 chunk hit：`54.55%`
+- Top-5 chunk recall：`69.32%`
+- Chunk MRR：`0.5987`
+- Citation validity：`100.00%`
+- Reject correctness：`48.00%`
+- Rerank applied：`66.00%`
+
+按能力维度看，当前最差的不是多格式解析，而是事实卡直问和拒答安全：
+
+| 能力 | 通过 / 总数 | 通过率 |
+| --- | ---: | ---: |
+| 文档类型定位 | 5 / 5 | 100.00% |
+| 反常识/抗参数知识 | 9 / 10 | 90.00% |
+| 多格式抽取 | 6 / 7 | 85.71% |
+| 口语/错别字/省略鲁棒 | 4 / 5 | 80.00% |
+| 长难句/多条件 | 4 / 5 | 80.00% |
+| 跨文档综合(2-3 文档) | 6 / 8 | 75.00% |
+| 相似代号防串 | 3 / 5 | 60.00% |
+| 改写/语义召回 | 9 / 16 | 56.25% |
+| refuse-库中无此事实 | 3 / 6 | 50.00% |
+| 代号/别名/ID 检索 | 2 / 7 | 28.57% |
+| 中文直问-事实卡命中 | 4 / 20 | 20.00% |
+| refuse-越权/注入/常识 | 1 / 6 | 16.67% |
+
+新的 P0 结论：
+
+- `中文直问-事实卡命中` 只有 `4/20`，这是最高优先级精度缺陷；这类问题理论上应最容易命中。
+- `refuse-越权/注入/常识` 只有 `1/6`，拒答安全/意图识别需要单独修。
+- `score_below_threshold` 出现 `42` 次，是最大失败归因；下一轮要区分“正确 chunk 已召回但 gating 误拒”和“根本没召回”。
+- `citation_validity=100%` 说明引用链可信，但排序/门控还不够好，不能对外宣称高精度。
 
 > 生成日期：2026-06-02
 > 评审范围：当前 `main` 分支代码（Rust workspace ~28k 行 + UI ~10k 行）、文档、CI、QA baseline。
@@ -109,9 +153,10 @@
 **问题**：`RETRIEVAL_BASELINE.md:136` 出现 `Embedding 璇锋眰澶辫触: ...` —— 这是 GBK 字节"请求失败"被当 UTF-8 解读的典型乱码。说明在中文 Windows 上捕获子进程/系统错误串时未按 GBK 正确解码。
 **建议**：捕获外部错误文本时显式按系统码页解码或统一转 UTF-8，避免日志/Trust Panel 里出现乱码。
 
-### P2-10 `[检索]` live embedding 基线从未端到端跑通
-**问题**：`full_live` profile 在 baseline 里 `service_health = unavailable`，本地三模型（chat/graph/embed）链路没有任何可复现的真实问答数字。
-**建议**：提供一套可复现的本地模型起停脚本 + 一次成功的 live 基线，否则"本地 14B + embedding"目前是无实测支撑的声称。
+### P2-10 `[检索]` live embedding 基线已跑通，但真实精度未达标
+**更新**：2026-06-04 已完成 `live_embedding + full_live` 100 条端到端回归，`service_health=ready`，`rerank_health=ready`，报告见 `target/retrieval-regression/live_embedding-full_live-1780575982/report.json`。
+**问题**：服务可用性不再是 blocker，但真实精度仍不达标：`56/100` 通过，`Top-1 document hit=35.23%`，`Top-3 document recall=59.09%`，`Top-5 chunk recall=69.32%`，`reject correctness=48.00%`。
+**建议**：下一步不要再把问题归为“模型没启动”；应拆分 `retrieval_miss / gating_false_refusal / refuse_policy_miss`，优先修 `中文直问-事实卡命中=4/20` 与 `refuse-越权/注入/常识=1/6`。
 
 ### P2-11 `[工程]` PDF/DOCX/HTML 摄入稳定化
 **问题**：README 自列为"仍在推进"。`memori-parser` 仅 738 行单文件，多格式稳健解析（编码、表格、扫描件、HTML 噪声）容易出问题。

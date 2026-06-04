@@ -1,146 +1,186 @@
-# Memori-Vault Release Checklist
+# Memori-Vault 发布检查清单
 
-## Memory OS Lite Release Gate
+这份清单用于桌面版发布前的最终确认，目标是把“能构建”提升为“可以对外发布”。如果某项没有验证，必须保持未勾选，不要用描述性文案替代实测结果。
 
-- [ ] README uses product positioning, not change-log wording: problem, why not other RAG tools, core advantages, quick start, architecture, current boundaries.
-- [ ] [MEMORY_OS_LITE.md](../architecture/MEMORY_OS_LITE.md) reflects current implementation and pending work.
-- [ ] Trust Panel displays `answer_source_mix`, `failure_class`, `source_groups`, `memory_context`, and `context_budget_report`.
-- [ ] Evidence Firewall is verified: document citations only come from document chunks.
-- [ ] MCP `tools/list` includes query/source tools and memory tools.
-- [ ] `memory_add` / `memory_update` writes are source-bound or policy-rejected and produce lifecycle/audit entries.
-- [ ] 50-case acceptance report is attached or explicitly marked pending.
-- [ ] Release notes do not claim temporal graph, Markdown source-of-truth, heat score, or 50k-document validation as complete unless verified.
+## Memory OS Lite 发布门槛
 
-杩欎唤娓呭崟鐢ㄤ簬妗岄潰鐗堝彂甯冨墠鐨勬渶缁堢‘璁わ紝鐩爣鏄妸鈥滆兘鏋勫缓鈥濇彁鍗囦负鈥滃彲瀵瑰鍙戝竷鈥濄€?
+- [ ] README 使用产品定位语言，而不是变更日志语言：说明问题、为什么不是普通 RAG 工具、核心优势、快速开始、架构和当前边界。
+- [ ] [MEMORY_OS_LITE.md](../architecture/MEMORY_OS_LITE.md) 反映当前实现状态和待办项。
+- [ ] Trust Panel 展示 `answer_source_mix`、`failure_class`、`source_groups`、`memory_context`、`context_budget_report`。
+- [ ] Evidence Firewall 已验证：文档引用只能来自 document chunks。
+- [ ] MCP `tools/list` 包含 query/source 工具和 memory 工具。
+- [ ] `memory_add` / `memory_update` 写入必须绑定 source，或被策略拒绝，并产出 lifecycle/audit 记录。
+- [ ] 50-case acceptance report 已附上，或明确标记 pending。
+- [ ] Release notes 不把 temporal graph、Markdown source-of-truth、heat score、50k-document validation 写成已完成，除非有实测证据。
 
-## 1. 鐗堟湰涓庢枃妗?
+## 1. 版本与文档
 
-- [ ] `Cargo.toml` 涓?`workspace.package.version` 宸叉洿鏂?
-- [ ] `ui/package.json` 涓?`version` 宸叉洿鏂?
-- [ ] `memori-desktop/tauri.conf.json` 涓?`version` 宸叉洿鏂?
-- [ ] 浠ヤ笂涓変釜鐗堟湰鍙蜂繚鎸佷竴鑷?
-- [ ] 宸茬紪鍐欏搴旂増鏈殑 release notes锛歚docs/release/RELEASE_NOTES_vX.Y.Z.md`
-- [ ] `README.md` 涓?`README.zh-CN.md` 鐨勮繍琛屾ā寮忓拰浼佷笟鐗堝彛寰勫凡鍚屾
-- [ ] `docs/guides/enterprise.md` 涓?`docs/guides/enterprise.zh-CN.md` 鐨?preview/GA 鍙ｅ緞宸插悓姝?
-## 2. 浠ｇ爜璐ㄩ噺闂?
+- [ ] `Cargo.toml` 的 `workspace.package.version` 已更新。
+- [ ] `ui/package.json` 的 `version` 已更新。
+- [ ] `memori-desktop/tauri.conf.json` 的 `version` 已更新。
+- [ ] 以上三个版本号保持一致。
+- [ ] 已编写对应版本的 release notes：`docs/release/RELEASE_NOTES_vX.Y.Z.md`。
+- [ ] `README.md` 和 `README.en.md` 的运行模式、企业版口径、检索边界已经同步。
+- [ ] `docs/guides/enterprise.md` 和 `docs/guides/enterprise.zh-CN.md` 的 preview/GA 口径已经同步。
+- [ ] `docs/qa/RETRIEVAL_BASELINE.md` 已更新到最新可复现数据。
 
-- [ ] 杩愯 `cargo fmt --all -- --check`
-- [ ] 杩愯 `cargo clippy --workspace -- -D warnings`
-- [ ] 杩愯 `cargo test --workspace`
-- [ ] 杩愯 `pnpm --dir ui install --frozen-lockfile`
-- [ ] 杩愯 `pnpm --dir ui run build`
-- [ ] 涓?CI锛坄rust-ci.yml`锛夊凡閫氳繃
+## 2. 代码质量门槛
 
-## 3. 鍙戝竷鍏抽敭琛屼负楠岃瘉
+- [ ] 运行 `cargo fmt --all -- --check`。
+- [ ] 运行 `cargo clippy --workspace -- -D warnings`。
+- [ ] 运行 `cargo test --workspace`。
+- [ ] 运行 `pnpm --dir ui install --frozen-lockfile`。
+- [ ] 运行 `pnpm --dir ui run build`。
+- [ ] CI（`rust-ci.yml`）已通过。
+- [ ] 没有未解释的 `panic`、`unwrap`、`expect` 被引入到核心运行路径。
 
-- [ ] 鏂板/淇敼 `.md` 鎴?`.txt` 鏂囦欢鍚庡彲姝ｅ父杩涘叆绱㈠紩
-- [ ] 鍒犻櫎鍗曚釜鏂囨。鍚庯紝鏃у唴瀹逛笉浼氱户缁嚭鐜板湪妫€绱㈢粨鏋滀腑
-- [ ] 灏?`.md/.txt` 閲嶅懡鍚嶄负涓嶆敮鎸佸悗缂€鍚庯紝鏃х储寮曚細琚竻鐞?
-- [ ] 鍒犻櫎鐩綍鍚庯紝鐩綍鍐呮棫绱㈠紩浼氳娓呯悊
-- [ ] 褰?parser / index 璇箟鐗堟湰涓嶅吋瀹规椂锛岀郴缁熶細鑷姩杩涘叆 `required/rebuilding`
-- [ ] 鍦?`required/rebuilding` 鏈熼棿锛宻earch / ask 浼氳鏄惧紡鎷掔粷锛岃€屼笉鏄户缁鍙栨棫绱㈠紩
-- [ ] 鍏ㄩ噺閲嶅缓瀹屾垚鍚庯紝`rebuild_state` 浼氭仮澶嶄负 `ready`
-- [ ] 绱㈠紩鐘舵€佷笉浼氬崱鍦?`scanning` / `embedding`
-- [ ] 璁剧疆涓績鍙甯镐繚瀛樺叧閿厤缃?
+## 3. 索引与检索行为验证
 
-## 4. 杩愯鏃朵笌浜у搧鍙ｅ緞
+- [ ] 新增或修改 `.md` / `.txt` / `.docx` / `.pdf` 文件后，可正常进入索引。
+- [ ] 删除单个文档后，旧内容不会继续出现在检索结果中。
+- [ ] 将支持的文件重命名为不支持的后缀后，旧索引会被清理。
+- [ ] 删除目录后，目录内旧索引会被清理。
+- [ ] 当 parser / index 语义版本不兼容时，系统会自动进入 `required` / `rebuilding`。
+- [ ] 在 `required` / `rebuilding` 期间，search / ask 会显式拒绝，而不是继续读取旧索引。
+- [ ] 全量重建完成后，`rebuild_state` 会恢复为 `ready`。
+- [ ] 索引状态不会卡在 `scanning` / `embedding`。
+- [ ] 设置中心可正常保存关键配置。
+- [ ] `core_docs` / `full_live` 回归使用 suite target documents，不应把整个仓库、`target/`、`.git/`、`node_modules/` 全量喂给 live embedding。
 
-- [ ] 妗岄潰鐗堜綔涓哄綋鍓嶄富浣撻獙杩涜鍙戝竷
-- [ ] `memori-server` 鍙ｅ緞淇濇寔涓?server runtime / private deployment preview
-- [ ] 浼佷笟鑳藉姏鍙ｅ緞淇濇寔涓?preview锛屼笉瀵瑰瀹ｇО瀹屾暣 GA 绾т紒涓氳韩浠藉畨鍏ㄨ兘鍔?
-- [ ] llama.cpp 渚濊禆涓庢帹鑽愭ā鍨嬭鏄庢竻鏅?
+## 4. 运行时与产品口径
 
-## 5. 浼佷笟绛栫暐杩愯鎬侀獙鏀?
+- [ ] 桌面版作为当前主要体验进行发布。
+- [ ] `memori-server` 口径保持为 server runtime / private deployment preview。
+- [ ] 企业能力口径保持为 preview，不对外宣称完整 GA 级企业身份安全能力。
+- [ ] llama.cpp 依赖、推荐模型、端口配置说明清楚。
+- [ ] 本地模型不可用时，UI 明确提示模型未配置或服务不可达，不自动降级到未授权远程模型。
+- [ ] rerank 模型不可用时，检索应自动降级到非 rerank 排序，并在报告里记录 `rerank_health=disabled/unavailable`。
 
-### Automated evidence snapshot (2026-03-11 UTC)
+## 5. 自动化证据快照
 
-- `cargo test -p memori-core --lib` 宸查€氳繃
-- `cargo check -p memori-core -p memori-desktop -p memori-server` 宸查€氳繃
-- `pnpm --dir ui run build` 宸查€氳繃
-- offline regression 宸茶窇閫氾細
+### 2026-03-11 UTC
+
+- `cargo test -p memori-core --lib` 已通过。
+- `cargo check -p memori-core -p memori-desktop -p memori-server` 已通过。
+- `pnpm --dir ui run build` 已通过。
+- offline regression 已跑通：
   - `offline_deterministic + core_docs`
   - `offline_deterministic + repo_mixed`
-  - 鏈€鏂版姤鍛婏細
-    - `target/retrieval-regression/offline_deterministic-core_docs-1773229611/report.json`
-    - `target/retrieval-regression/offline_deterministic-repo_mixed-1773229598/report.json`
-  - 褰撳墠缁撴灉锛?
-    - `core_docs`: `Top-1=0.6970`銆乣Top-3=0.6970`銆乣Top-5=0.7576`銆乣citation validity=1.0`銆乣reject correctness=1.0`
-    - `repo_mixed`: `Top-1=0.4773`銆乣Top-3=0.4773`銆乣Top-5=0.5455`銆乣citation validity=1.0`銆乣reject correctness=0.94`
-- live regression 宸蹭骇鍑虹粨鏋勫寲澶辫触鎶ュ憡锛?
+- 报告路径：
+  - `target/retrieval-regression/offline_deterministic-core_docs-1773229611/report.json`
+  - `target/retrieval-regression/offline_deterministic-repo_mixed-1773229598/report.json`
+- 当时结果：
+  - `core_docs`: `Top-1=0.6970`, `Top-3=0.6970`, `Top-5=0.7576`, `citation validity=1.0`, `reject correctness=1.0`
+  - `repo_mixed`: `Top-1=0.4773`, `Top-3=0.4773`, `Top-5=0.5455`, `citation validity=1.0`, `reject correctness=0.94`
+- 当时 live regression 状态：
   - `live_embedding + full_live`
-  - 褰撳墠闃诲锛氭湰鍦?llama.cpp / embedding endpoint `http://localhost:18001` 涓嶅彲杈?
+  - blocked by local llama.cpp / embedding endpoint availability
 
-### Current release posture
+### 2026-06-04 UTC
 
-- 浼佷笟鏈湴浼樺厛杩愯鏃朵笌绛栫暐闃绘柇閾捐矾宸茬粡鏈夊疄鐜板拰鏂囨。闂幆銆?
-- 妫€绱㈣川閲忓拰浼佷笟绛栫暐鏄袱鏉′笉鍚岄獙鏀剁嚎锛屼笉鑳戒簰鐩告浛浠ｃ€?
-- 褰撳墠 mixed corpus 绂荤嚎绮惧害浠嶇劧鍋忎綆锛屼笉閫傚悎鍐欐垚鈥滃彲绋冲畾浠庢暣涓祫鏂欏簱绮剧‘瀹氫綅鐩爣鏂囨。鈥濈殑瀵瑰鍙ｅ緞銆?
-- 鑻ュ綋鍓嶅彂鐗堬紝妫€绱㈣兘鍔涙洿閫傚悎浣滀负 internal preview / beta 鍙ｅ緞锛岃€屼笉鏄珮绮惧害鐭ヨ瘑妫€绱㈠凡瀹屾垚鐨勫彛寰勩€?
+- live regression 已端到端跑通：
+  - mode/profile: `live_embedding + full_live`
+  - suite: `docs/qa/retrieval_regression_suite.json`
+  - report JSON: `target/retrieval-regression/live_embedding-full_live-1780575982/report.json`
+  - report Markdown: `target/retrieval-regression/live_embedding-full_live-1780575982/report.md`
+  - local services: `service_health=ready`, `rerank_health=ready`
+  - index preparation: `44,226 ms`
+  - indexed scope: suite target documents only, not full repository
+  - indexed corpus: `54` documents / `425` chunks
+- measured metrics:
+  - cases: `100`
+  - passed / failed: `56 / 44`
+  - answer / refuse cases: `88 / 12`
+  - Top-1 document hit: `35.23%`
+  - Top-3 document recall: `59.09%`
+  - Top-1 chunk hit: `54.55%`
+  - Top-5 chunk recall: `69.32%`
+  - Chunk MRR: `0.5987`
+  - citation validity: `100.00%`
+  - reject correctness: `48.00%`
+  - rerank applied: `66.00%`
+- 结论：
+  - local live retrieval path 已经可运行，不再被 embedding/rerank 服务缺失阻塞。
+  - 检索质量仍低于 release-quality claims。
+  - 最高优先级 blocker 是中文事实卡直问（`4/20`）和拒答安全/意图处理（越权/注入/常识类 `1/6`）。
+  - `score_below_threshold` 是主导 gating reason（`42/100`），后续必须拆分 `retrieval_miss` 与 `gating_false_refusal`。
 
-### Server API checklist
+## 6. 当前发布口径
 
-- [ ] `GET /api/admin/policy` 鍙鍙栧綋鍓?enterprise policy
-  Expected result: 杩斿洖 `egress_mode`銆乣allowed_model_endpoints`銆乣allowed_models`锛屼笖榛樿鍊肩鍚?`local_only`
-- [ ] `PUT /api/admin/policy` 鏇存柊鍚庣珛鍗宠Е鍙?engine re-evaluation
-  Expected result: policy 鏇存柊鍚庢柊鐨?ask / model runtime 浣跨敤鏂扮瓥鐣ワ紝涓嶇户缁部鐢ㄦ棫 runtime
-- [ ] `local_only` 涓嬩繚瀛樿繙绔?runtime 琚嫆缁?
-  Expected result: `POST /api/model-settings` 杩斿洖鏄庣‘ forbidden / policy message
-- [ ] `local_only` 涓嬭繙绔?probe / list 琚嫆缁?
-  Expected result: `POST /api/model-settings/probe` 涓?`POST /api/model-settings/list-models` 杩斿洖鏄庣‘绛栫暐闃绘柇锛岃€屼笉鏄櫘閫氱綉缁滈敊璇?
-- [ ] `allowlist` 涓嬮潪鐧藉悕鍗?endpoint 琚嫆缁?
-  Expected result: 杩斿洖 `remote_endpoint_not_allowlisted` 鎴栫瓑浠风瓥鐣ラ敊璇?
-- [ ] `allowlist` 涓嬮潪鐧藉悕鍗?model 琚嫆缁?
-  Expected result: 杩斿洖 `model_not_allowlisted` 鎴栫瓑浠风瓥鐣ラ敊璇?
-- [ ] `POST /api/ask` 鍦?runtime policy violation 鏃跺厛琚樆鏂?
-  Expected result: ask 鍦ㄧ湡姝ｈ皟鐢ㄦā鍨嬪墠杩斿洖 forbidden / policy message
-- [ ] `policy_violation` 鍐欏叆瀹¤涓斾笉娉勯湶 API key
-  Expected result: `${CONFIG_DIR}/Memori-Vault/audit.log.jsonl` 鏈?`policy_violation` 浜嬩欢锛屼絾涓嶅寘鍚槑鏂囧瘑閽?
+- 企业本地优先运行时和策略阻断链路已有实现与文档闭环。
+- 检索质量和企业策略是两条不同验收线，不能互相替代。
+- Citation validity 表现稳定，但 mixed corpus / Memory_Test 的真实检索精度仍未达高精度发布口径。
+- 如果当前发布，检索能力应写作 internal preview / beta，不应宣称“大规模高精度知识检索已完成”。
+- `live_embedding + full_live` 已可跑通，但 `56/100` 的结果不足以作为强准确率对外承诺。
 
-### Desktop smoke checklist
+## 7. Server API 检查
 
-- [ ] 璁剧疆椤靛彲璇诲彇涓庝繚瀛?enterprise policy
-  Expected result: `get_enterprise_policy` / `set_enterprise_policy` 寰€杩斿瓧娈靛畬鏁?
-- [ ] `local_only` 涓嬭繙绔厤缃粛鍙紪杈戯紝浣嗕笉鑳芥垚涓?active runtime
-  Expected result: 淇濆瓨杩滅閰嶇疆澶辫触锛孶I 灞曠ず鏄庣‘ policy error
-- [ ] `local_only` 涓?probe / list 琚瓥鐣ラ樆鏂?
-  Expected result: Settings 涓繙绔?provider 鎺㈡祴鍜屾ā鍨嬪垪琛ㄥ埛鏂板け璐ワ紝骞舵樉绀轰紒涓氱瓥鐣ラ樆鏂師鍥?
-- [ ] `allowlist` 涓嬬櫧鍚嶅崟 endpoint/model 鍙€氳繃
-  Expected result: 鍏佽鐨?endpoint 涓?model 鍙繚瀛橈紱鑻ユ湰鏈烘ā鍨嬫湇鍔＄己澶憋紝鍒欐爣璁扮幆澧冮樆濉炶€岄潪绛栫暐澶辫触
-- [ ] `allowlist` 涓嬮潪鐧藉悕鍗?endpoint/model 琚嫆缁?
-  Expected result: UI 淇濇寔鍙紪杈戯紝浣?active runtime 鏃犳硶鍒囨崲鍒伴潪娉曡繙绔厤缃?
-- [ ] 鍒囧洖鏈湴 provider 鍚?ask / indexing 鎭㈠
-  Expected result: 鏈湴 provider 閲嶆柊鎴愪负 active runtime锛岀粨鏋勫寲 ask 涓庣储寮曟祦绋嬪彲缁х画宸ヤ綔
+- [ ] `GET /api/admin/policy` 可读取当前 enterprise policy。
+  Expected result: 返回 `egress_mode`、`allowed_model_endpoints`、`allowed_models`，且默认值符合 `local_only`。
+- [ ] `PUT /api/admin/policy` 更新后立即触发 engine re-evaluation。
+  Expected result: policy 更新后新的 ask / model runtime 使用新策略，不继续沿用旧 runtime。
+- [ ] `local_only` 下保存远端 runtime 被拒绝。
+  Expected result: `POST /api/model-settings` 返回明确 forbidden / policy message。
+- [ ] `local_only` 下远端 probe / list 被拒绝。
+  Expected result: `POST /api/model-settings/probe` 和 `POST /api/model-settings/list-models` 返回明确策略阻断，而不是普通网络错误。
+- [ ] `allowlist` 下非白名单 endpoint 被拒绝。
+  Expected result: 返回 `remote_endpoint_not_allowlisted` 或等价策略错误。
+- [ ] `allowlist` 下非白名单 model 被拒绝。
+  Expected result: 返回 `model_not_allowlisted` 或等价策略错误。
+- [ ] `POST /api/ask` 在 runtime policy violation 时先被阻断。
+  Expected result: ask 在真正调用模型前返回 forbidden / policy message。
+- [ ] `policy_violation` 写入审计且不泄露 API key。
+  Expected result: `${CONFIG_DIR}/Memori-Vault/audit.log.jsonl` 有 `policy_violation` 事件，但不包含明文密钥。
 
-### Environment notes
+## 8. Desktop smoke 检查
 
-- 鑻ユ湰鏈虹己灏?llama.cpp 鎴栫己灏戞墍闇€鏈湴妯″瀷锛岃鏍囪涓?`environment blocked`
-- 涓嶅厑璁哥敤杩滅 provider 鏇夸唬鏈疆浼佷笟鏈湴浼樺厛楠屾敹
+- [ ] 设置页可读取与保存 enterprise policy。
+  Expected result: `get_enterprise_policy` / `set_enterprise_policy` 往返字段完整。
+- [ ] `local_only` 下远端配置仍可编辑，但不能成为 active runtime。
+  Expected result: 保存远端配置失败，UI 展示明确 policy error。
+- [ ] `local_only` 下 probe / list 被策略阻断。
+  Expected result: Settings 中远端 provider 探测和模型列表刷新失败，并显示企业策略阻断原因。
+- [ ] `allowlist` 下白名单 endpoint/model 可通过。
+  Expected result: 允许的 endpoint 和 model 可保存；若本机模型服务缺失，则标记环境阻塞而非策略失败。
+- [ ] `allowlist` 下非白名单 endpoint/model 被拒绝。
+  Expected result: UI 保持可编辑，但 active runtime 无法切换到非法远端配置。
+- [ ] 切回本地 provider 后 ask / indexing 恢复。
+  Expected result: 本地 provider 重新成为 active runtime，结构化 ask 与索引流程可继续工作。
 
-## 6. Release Workflow
+## 9. 环境说明
 
-- [ ] `desktop-release.yml` 宸叉牎楠?tag/version 涓€鑷?
-- [ ] `desktop-release.yml` 宸叉牎楠?release notes 鏂囦欢瀛樺湪
-- [ ] draft release 浣跨敤姝ｅ紡 `docs/release/RELEASE_NOTES_vX.Y.Z.md`
-- [ ] 涓夌鏋勫缓浜х墿涓婁紶瑙勫垯涓庡綋鍓?Tauri 杈撳嚭涓€鑷?
+- [ ] 若本机缺少 llama.cpp 或所需本地模型，记录为 `environment blocked`。
+- [ ] 不允许用远端 provider 替代本轮企业本地优先验收。
+- [ ] 本地模型端口记录清楚：chat / graph / embed / rerank。
+- [ ] rerank 开启、关闭、不可用三种状态均可在报告中区分。
 
-## 7. 鍙戠増鍓嶆墜鍔ㄦ鏌?
+## 10. Release workflow
 
-- [ ] Windows 鍖呭彲瀹夎骞跺惎鍔?
-- [ ] Linux 鍖呭彲鍚姩骞跺姞杞?UI
-- [ ] macOS 鍖呭彲鍚姩骞跺姞杞?UI
-- [ ] 棣栨鍚姩鏃跺熀纭€娴佺▼娓呮櫚锛氶€夋嫨鐩綍銆侀厤缃ā鍨嬨€佸彂璧烽娆℃绱?
-- [ ] About / 璁剧疆椤垫樉绀虹殑鐗堟湰鍙蜂笌 release 鐗堟湰涓€鑷?
+- [ ] `desktop-release.yml` 已校验 tag/version 一致。
+- [ ] `desktop-release.yml` 已校验 release notes 文件存在。
+- [ ] draft release 使用正式 `docs/release/RELEASE_NOTES_vX.Y.Z.md`。
+- [ ] Windows / Linux / macOS 构建产物上传规则与当前 Tauri 输出一致。
 
-## 8. 鍙戠増鍚庡姩浣?
+## 11. 发布前手动检查
 
-- [ ] 妫€鏌?GitHub draft release 闄勪欢鏄惁榻愬叏
-- [ ] 妫€鏌?release title銆乼ag銆乶otes 鏄惁鍖归厤
-- [ ] 鍙戝竷鍚庨獙璇佷笅杞介摼鎺ュ彲鐢?
-- [ ] 鍦?README 鎴栧畼缃戝叆鍙ｅ悓姝ユ渶鏂扮増鏈鏄庯紙濡傞€傜敤锛?
+- [ ] Windows 包可安装并启动。
+- [ ] Linux 包可启动并加载 UI。
+- [ ] macOS 包可启动并加载 UI。
+- [ ] 首次启动基础流程清楚：选择目录、配置模型、建立索引、发起首次检索。
+- [ ] About / 设置页显示的版本号与 release 版本一致。
+- [ ] 中文界面文案无乱码。
+- [ ] 回归报告 Markdown 无乱码。
 
-## 寤鸿鍙戝竷鍙ｅ緞
+## 12. 发布后动作
 
-- 涓汉鐗堬細鍙綔涓哄綋鍓嶄富瑕佸彂甯冪洰鏍?
-- 鏈嶅姟绔?/ 绉佹湁鍖栵細寤鸿浠?preview 鍙ｅ緞鍙戝竷
-- 浼佷笟鑳藉姏锛氬缓璁槑纭负 private deployment preview锛岃€屼笉鏄畬鏁?GA 浼佷笟鐗?
-- 妫€绱㈣川閲忥細寤鸿鏄庣‘鍐欐垚鈥滃綋鍓?citations 鍙俊锛屼絾 mixed corpus document routing 浠嶅湪鎸佺画楠岃瘉鈥濓紝涓嶈鍐欐垚宸茬粡瀹屾垚澶ц妯￠珮绮惧害楠岃瘉
+- [ ] 检查 GitHub draft release 附件是否齐全。
+- [ ] 检查 release title、tag、notes 是否匹配。
+- [ ] 发布后验证下载链接可用。
+- [ ] 在 README 或官网入口同步最新版本说明（如适用）。
+
+## 建议发布文案
+
+- 个人版：可作为当前主要发布目标。
+- 服务端 / 私有化：建议使用 preview 口径发布。
+- 企业能力：建议明确为 private deployment preview，而不是完整 GA 企业版。
+- 检索质量：建议写成“citations 可信，mixed corpus document routing 仍在持续验证”，不要写成“已完成大规模高精度验证”。

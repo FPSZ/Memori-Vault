@@ -455,12 +455,9 @@ pub fn validate_runtime_model_settings(
         if !enabled {
             continue;
         }
-        if let Err(violation) = validate_provider_request(
-            policy,
-            runtime.provider,
-            endpoint,
-            &[model.to_string()],
-        ) {
+        if let Err(violation) =
+            validate_provider_request(policy, runtime.provider, endpoint, &[model.to_string()])
+        {
             return Err(match violation.code.as_str() {
                 "policy_violation" => PolicyViolation {
                     code: "runtime_blocked_by_policy".to_string(),

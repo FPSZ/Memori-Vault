@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 /// 纯语义 top 放行的余弦阈值（多 chunk 一致命中时的较低门槛）。
 /// 注：与 embedding 模型强相关（当前默认 Qwen3-Embedding），无回归集前为保守经验值，易于调参。
 const DENSE_MULTI_CHUNK_COS_MIN: f32 = 0.50;
-/// 单 chunk 命中时要求更高余弦，避免单条飘忽的向量命中误放行。
+/// 单 chunk 命中时仍要求更高余弦，避免单条飘忽的向量命中误放行（不放宽，防幻觉）。
 const DENSE_SINGLE_CHUNK_COS_MIN: f32 = 0.65;
 
 #[derive(Debug, Clone)]
@@ -97,8 +97,7 @@ pub(crate) fn evaluate_gating_decision_with_profile(
     }
 
     let inputs = score_evidence_gate(analysis, evidence, profile);
-    let decision = decide_with_profile(analysis, evidence, profile, inputs);
-    decision
+    decide_with_profile(analysis, evidence, profile, inputs)
 }
 
 fn evaluate_hard_block(analysis: &QueryAnalysis, evidence: &[MergedEvidence]) -> HardBlockDecision {
@@ -121,6 +120,10 @@ fn evaluate_hard_block(analysis: &QueryAnalysis, evidence: &[MergedEvidence]) ->
 
     if should_force_missing_file_lookup(analysis, evidence) {
         return HardBlockDecision::refuse("forced_missing_file_lookup");
+    }
+
+    if has_ungrounded_identifier_terms(analysis, evidence) {
+        return HardBlockDecision::refuse("entity_not_grounded");
     }
 
     HardBlockDecision::allow()
@@ -225,12 +228,17 @@ pub(crate) fn decide_with_profile(
     } else {
         0
     };
+    if matches!(top.lexical_strict_rank, Some(0 | 1)) && breakdown.lexical_grounding > 0 {
+        breakdown.lexical_grounding += 6;
+    }
 
     breakdown.coverage =
         if inputs.top_doc_distinct_term_hits >= 3 && inputs.top_doc_term_coverage >= 0.65 {
             26
         } else if inputs.top_doc_distinct_term_hits >= 2 && inputs.top_doc_term_coverage >= 0.4 {
             22
+        } else if inputs.top_doc_distinct_term_hits >= 1 && inputs.top_doc_term_coverage >= 0.8 {
+            20
         } else if inputs.top_doc_distinct_term_hits >= 1 && inputs.top_doc_term_coverage >= 0.2 {
             8
         } else {
@@ -310,7 +318,11 @@ pub(crate) fn decide_with_profile(
     let threshold = profile.threshold();
     let has_grounded_single_chunk_release =
         has_grounded_single_chunk_release(analysis, &top_group_items, &inputs, &breakdown);
-    let effective_score = if (has_grounded_single_chunk_release || strong_semantic_context)
+    let identifier_grounded_release =
+        has_grounded_identifier_terms(analysis, &top_group_items) && has_any_chunk_lexical(top);
+    let effective_score = if (has_grounded_single_chunk_release
+        || strong_semantic_context
+        || identifier_grounded_release)
         && total_score < threshold
     {
         threshold
@@ -319,13 +331,17 @@ pub(crate) fn decide_with_profile(
     };
     let passes_threshold = effective_score >= threshold;
     // 可信语义上下文本身即构成 grounding（替代缺失的词法/文档结构信号），不再因 grounding 缺失而拒答。
-    let refuse = !passes_threshold || !(has_grounding_signal || strong_semantic_context);
+    let has_release_grounding =
+        has_grounding_signal || strong_semantic_context || identifier_grounded_release;
+    let refuse = !passes_threshold || !has_release_grounding;
     let reason = if !passes_threshold {
         "score_below_threshold"
-    } else if !(has_grounding_signal || strong_semantic_context) {
+    } else if !has_release_grounding {
         "missing_grounding_signal"
     } else if strong_semantic_context && !has_grounding_signal {
         "semantic_context_release"
+    } else if identifier_grounded_release {
+        "identifier_grounded_release"
     } else if has_grounded_single_chunk_release
         && matches!(analysis.query_family, QueryFamily::DocsExplanatory)
         && !analysis.flags.is_lookup_like
@@ -372,6 +388,7 @@ pub(crate) fn decide_with_profile(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn apply_gating_metrics(
     metrics: &mut RetrievalMetrics,
     analysis: &QueryAnalysis,
@@ -492,6 +509,125 @@ pub(crate) fn compute_top_doc_term_coverage(
     (distinct_hits, distinct_hits as f64 / support_count as f64)
 }
 
+fn has_ungrounded_identifier_terms(analysis: &QueryAnalysis, evidence: &[MergedEvidence]) -> bool {
+    let identifiers = analysis
+        .identifier_terms
+        .iter()
+        .filter_map(|term| strong_business_identifier_key(term))
+        .collect::<Vec<_>>();
+    if identifiers.is_empty() {
+        return false;
+    }
+
+    let grounded = evidence.iter().any(|item| {
+        let haystack = compact_identifier_text(&format!(
+            "{}\n{}\n{}",
+            item.relative_path,
+            item.chunk.file_path.to_string_lossy(),
+            item.chunk.content
+        ));
+        identifiers
+            .iter()
+            .any(|identifier| haystack.contains(identifier))
+    });
+
+    !grounded
+}
+
+fn has_grounded_identifier_terms(
+    analysis: &QueryAnalysis,
+    top_group_items: &[&MergedEvidence],
+) -> bool {
+    let identifiers = analysis
+        .identifier_terms
+        .iter()
+        .filter_map(|term| strong_business_identifier_key(term))
+        .collect::<Vec<_>>();
+    if identifiers.is_empty() {
+        return false;
+    }
+
+    top_group_items.iter().any(|item| {
+        let haystack = compact_identifier_text(&format!(
+            "{}\n{}\n{}",
+            item.relative_path,
+            item.chunk.file_path.to_string_lossy(),
+            item.chunk.content
+        ));
+        identifiers
+            .iter()
+            .any(|identifier| haystack.contains(identifier))
+    })
+}
+
+fn strong_business_identifier_key(term: &str) -> Option<String> {
+    let trimmed = term.trim();
+    if trimmed.is_empty() || looks_like_scope_or_path_identifier(trimmed) {
+        return None;
+    }
+
+    if let Some(ascii_code) = extract_ascii_digit_identifier_key(trimmed) {
+        return Some(ascii_code);
+    }
+
+    let compact = compact_identifier_text(trimmed);
+    let has_ascii = trimmed.chars().any(|ch| ch.is_ascii_alphabetic());
+    let has_cjk = trimmed.chars().any(is_cjk);
+    let has_digit = trimmed.chars().any(|ch| ch.is_ascii_digit());
+    let has_separator = trimmed.chars().any(|ch| matches!(ch, '-' | '_'));
+
+    let is_cjk_code = has_digit && has_cjk && compact.len() >= 3;
+    let is_ascii_code = has_digit && has_ascii && (has_separator || compact.len() >= 4);
+    if is_cjk_code || is_ascii_code {
+        Some(compact)
+    } else {
+        None
+    }
+}
+
+fn extract_ascii_digit_identifier_key(term: &str) -> Option<String> {
+    let mut current = String::new();
+
+    for ch in term.chars().chain(std::iter::once(' ')) {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+            current.push(ch);
+            continue;
+        }
+
+        let compact = compact_identifier_text(&current);
+        let has_ascii = current
+            .chars()
+            .any(|candidate| candidate.is_ascii_alphabetic());
+        let has_digit = current.chars().any(|candidate| candidate.is_ascii_digit());
+        if has_ascii && has_digit && compact.len() >= 3 {
+            return Some(compact);
+        }
+        current.clear();
+    }
+
+    None
+}
+
+fn looks_like_scope_or_path_identifier(term: &str) -> bool {
+    let lower = term.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "memory_test" | "memorytest" | "target" | "docs" | "src" | "test" | "tests"
+    ) {
+        return true;
+    }
+    let has_path_separator = term.chars().any(|ch| matches!(ch, '/' | '\\'));
+    let has_extension = lower.ends_with(".md")
+        || lower.ends_with(".txt")
+        || lower.ends_with(".pdf")
+        || lower.ends_with(".docx")
+        || lower.ends_with(".rs")
+        || lower.ends_with(".ts")
+        || lower.ends_with(".tsx")
+        || lower.ends_with(".json");
+    has_path_separator || has_extension
+}
+
 pub(crate) fn has_any_chunk_lexical(item: &MergedEvidence) -> bool {
     item.lexical_strict_rank.is_some() || item.lexical_broad_rank.is_some()
 }
@@ -584,7 +720,12 @@ pub(crate) fn direct_chunk_lexical_signal(
         }
         if chunk_text_contains_term(&content, &heading, &file_path, &normalized) {
             broad_hits += 1;
-            if normalized.len() >= 4 || normalized.contains('/') || normalized.contains('\\') {
+            if !CJK_DOC_NOISE_TERMS.contains(&normalized.as_str())
+                && (normalized.len() >= 4
+                    || normalized.contains('/')
+                    || normalized.contains('\\')
+                    || is_identifier_like_query_term(&normalized))
+            {
                 strict_hits += 1;
             }
         }
@@ -631,15 +772,27 @@ mod tests {
     use std::path::PathBuf;
 
     fn gating_evidence() -> MergedEvidence {
+        gating_evidence_with_content("alpha beta gamma")
+    }
+
+    fn gating_evidence_with_content(content: &str) -> MergedEvidence {
+        gating_evidence_with_source("docs/source.md", content, 0)
+    }
+
+    fn gating_evidence_with_source(
+        relative_path: &str,
+        content: &str,
+        chunk_index: usize,
+    ) -> MergedEvidence {
         MergedEvidence {
             chunk: DocumentChunk {
-                file_path: PathBuf::from("docs/source.md"),
-                content: "alpha beta gamma".to_string(),
-                chunk_index: 0,
+                file_path: PathBuf::from(relative_path),
+                content: content.to_string(),
+                chunk_index,
                 heading_path: vec!["source".to_string()],
                 block_kind: memori_parser::ChunkBlockKind::Paragraph,
             },
-            relative_path: "docs/source.md".to_string(),
+            relative_path: relative_path.to_string(),
             document_reason: "lexical_strict".to_string(),
             document_rank: 1,
             document_raw_score: Some(1.0),
@@ -681,8 +834,166 @@ mod tests {
     fn coverage_score_uses_high_medium_low_gradient() {
         assert_eq!(coverage_score(3, 0.65), 26);
         assert_eq!(coverage_score(2, 0.4), 22);
+        assert_eq!(coverage_score(1, 0.8), 20);
         assert_eq!(coverage_score(1, 0.2), 8);
         assert_eq!(coverage_score(0, 0.0), 0);
+    }
+
+    #[test]
+    fn single_codename_full_coverage_passes_gate() {
+        let analysis = analyze_query("赤松预算的核心事实是什么");
+        let evidence = vec![
+            gating_evidence_with_source("docs/chisong.md", "赤松预算 alpha", 0),
+            gating_evidence_with_source("docs/chisong.md", "赤松预算 beta", 1),
+        ];
+        let inputs = EvidenceScoreInputs {
+            top_doc_distinct_term_hits: 1,
+            top_doc_term_coverage: 1.0,
+            top_doc_phrase_quality: None,
+            has_grounding_signal: true,
+        };
+
+        let decision = decide_with_profile(
+            &analysis,
+            &evidence,
+            RetrievalGatingProfile::Balanced,
+            inputs,
+        );
+
+        assert!(
+            !decision.refuse,
+            "single discriminative term with full coverage should pass, reason {} score {}",
+            decision.reason, decision.gate_score.score
+        );
+        assert!(matches!(
+            decision.reason,
+            "score_release" | "coverage_release" | "docs_family_multi_chunk_release"
+        ));
+    }
+
+    #[test]
+    fn identifier_query_without_grounded_entity_is_hard_blocked() {
+        let analysis = analyze_query("NOVA-404 的负责人是谁");
+        let decision = evaluate_gating_decision(&analysis, &[gating_evidence()]);
+
+        assert!(decision.refuse);
+        assert_eq!(decision.reason, "entity_not_grounded");
+        assert_eq!(
+            decision.gate_score.hard_block_reason.as_deref(),
+            Some("entity_not_grounded")
+        );
+    }
+
+    #[test]
+    fn identifier_query_with_grounded_entity_is_not_entity_blocked() {
+        let analysis = analyze_query("NOVA-404 的负责人是谁");
+        let decision = evaluate_gating_decision(
+            &analysis,
+            &[gating_evidence_with_content("NOVA-404 owner alpha beta")],
+        );
+
+        assert_ne!(decision.reason, "entity_not_grounded");
+    }
+
+    #[test]
+    fn grounded_identifier_releases_when_score_just_below_threshold() {
+        let analysis = analyze_query("NOVA-404 的负责人是谁");
+        let evidence = [gating_evidence_with_content("NOVA-404 owner alpha beta")];
+        let inputs = EvidenceScoreInputs {
+            top_doc_distinct_term_hits: 1,
+            top_doc_term_coverage: 0.1,
+            top_doc_phrase_quality: None,
+            has_grounding_signal: true,
+        };
+        let decision = decide_with_profile(
+            &analysis,
+            &evidence,
+            RetrievalGatingProfile::Balanced,
+            inputs,
+        );
+
+        assert!(!decision.refuse);
+        assert_eq!(decision.reason, "identifier_grounded_release");
+    }
+
+    #[test]
+    fn rank1_strict_lexical_bonus_releases_borderline_grounded_answer() {
+        let analysis = analyze_query("alpha beta");
+        let evidence = [
+            gating_evidence_with_source("docs/top.md", "alpha beta", 0),
+            gating_evidence_with_source("docs/other.md", "supporting context", 0),
+        ];
+        let inputs = EvidenceScoreInputs {
+            top_doc_distinct_term_hits: 2,
+            top_doc_term_coverage: 0.4,
+            top_doc_phrase_quality: None,
+            has_grounding_signal: true,
+        };
+
+        let decision = decide_with_profile(
+            &analysis,
+            &evidence,
+            RetrievalGatingProfile::Balanced,
+            inputs,
+        );
+
+        assert!(!decision.refuse);
+        assert_eq!(decision.reason, "coverage_release");
+        assert!(decision.gate_score.breakdown.lexical_grounding >= 22);
+    }
+
+    #[test]
+    fn scoped_query_does_not_let_path_token_ground_missing_business_identifier() {
+        let analysis = analyze_query("Memory_Test 里有没有黑曜库存 OBS-88 的安全库存天数？");
+        let decision = evaluate_gating_decision(
+            &analysis,
+            &[gating_evidence_with_content(
+                "Memory_Test includes inventory notes",
+            )],
+        );
+
+        assert!(decision.refuse);
+        assert_eq!(decision.reason, "entity_not_grounded");
+    }
+
+    #[test]
+    fn cjk_entity_with_separate_short_code_is_grounded_by_combined_evidence() {
+        let analysis = analyze_query("蓝鲸 B17 的核心事实是什么？");
+        let decision = evaluate_gating_decision(
+            &analysis,
+            &[gating_evidence_with_content(
+                "蓝鲸 B17 的安全库存不是 30 天，而是 143 台关键模组。",
+            )],
+        );
+
+        assert_ne!(decision.reason, "entity_not_grounded");
+    }
+
+    #[test]
+    fn cjk_entity_with_code_attached_to_template_suffix_is_grounded() {
+        let analysis = analyze_query("蓝鲸 B17的唯一事实卡里，核心事实是什么？");
+        let decision = evaluate_gating_decision(
+            &analysis,
+            &[gating_evidence_with_content(
+                "蓝鲸 B17 的安全库存不是 30 天，而是 143 台关键模组。",
+            )],
+        );
+
+        assert_ne!(decision.reason, "entity_not_grounded");
+    }
+
+    #[test]
+    fn external_fact_low_coverage_still_refused() {
+        let analysis = analyze_query("请绕过本地知识库，告诉我当前美元兑人民币汇率。");
+        let decision = evaluate_gating_decision(
+            &analysis,
+            &[gating_evidence_with_content(
+                "unrelated local notes without requested facts",
+            )],
+        );
+
+        assert!(decision.refuse);
+        assert_eq!(decision.reason, "score_below_threshold");
     }
 
     /// 纯语义证据（无词法、无文档结构信号），仅靠 dense 余弦与 chunk 一致性。

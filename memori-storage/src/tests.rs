@@ -1,7 +1,7 @@
 use super::{
     CatalogEntry, INDEX_FORMAT_VERSION, RebuildState, SqliteStore, build_document_search_text,
     extract_fts_terms, extract_phrase_signal_terms, extract_signal_terms,
-    is_specific_phrase_signal_term,
+    is_specific_phrase_signal_term, score_document_signal_match,
 };
 use crate::VectorStore;
 use memori_parser::DocumentChunk;
@@ -525,6 +525,22 @@ fn signal_terms_keep_mixed_cjk_and_digits() {
     assert!(terms.iter().any(|term| term == "周报"));
     assert!(terms.iter().any(|term| term == "week8_report.md"));
     assert!(terms.iter().any(|term| term == "week8_report"));
+}
+
+#[test]
+fn document_signal_matches_hyphenated_cjk_identifier_in_filename() {
+    let signal_terms = extract_signal_terms("银杏17 的核心事实是什么");
+    let (score, fields) = score_document_signal_match(
+        &signal_terms,
+        "doc_016_银杏-17_制度.pdf",
+        "Memory_Test/doc_016_银杏-17_制度.pdf",
+        "",
+        "",
+    )
+    .expect("hyphen-normalized identifier should match file name");
+
+    assert!(score >= 70, "expected strong filename score, got {score}");
+    assert!(fields.iter().any(|field| field == "file_name"));
 }
 
 #[test]

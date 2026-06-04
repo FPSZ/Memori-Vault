@@ -130,11 +130,11 @@ pub(crate) fn select_balanced_final_evidence(
         if selected.len() >= final_answer_k {
             break;
         }
-        if let Some(items) = by_group.get_mut(key) {
-            if let Some(item) = items.first().cloned() {
-                selected.push(item);
-                items.remove(0);
-            }
+        if let Some(items) = by_group.get_mut(key)
+            && let Some(item) = items.first().cloned()
+        {
+            selected.push(item);
+            items.remove(0);
         }
     }
 

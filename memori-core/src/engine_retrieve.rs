@@ -1,5 +1,6 @@
 use super::*;
 use crate::engine::{memory_record_to_evidence, should_skip_memory_context};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 重排不可用时只 warn 一次，避免每次查询刷屏（默认开启但服务未起的常见场景）。
@@ -64,7 +65,7 @@ impl MemoriEngine {
         metrics: &mut RetrievalMetrics,
     ) -> Result<EvidenceRetrievalResult, EngineError> {
         let doc_started_at = Instant::now();
-        let candidate_docs = self
+        let mut candidate_docs = self
             .resolve_candidate_documents(
                 analysis,
                 &query_embedding,
@@ -95,6 +96,7 @@ impl MemoriEngine {
         let strict_lexical_started_at = Instant::now();
         let lexical_started_at = Instant::now();
         let dense_started_at = Instant::now();
+        // 词法两路仍限定在候选文档内：词法命中本就只对词法相关的文档有意义。
         let strict_future = self.state.vector_store.search_chunks_fts_strict(
             &chunk_query,
             DEFAULT_CHUNK_CANDIDATE_K,
@@ -105,10 +107,15 @@ impl MemoriEngine {
             DEFAULT_CHUNK_CANDIDATE_K,
             &candidate_scope_paths,
         );
+        // chunk dense 破笼：不再限定在词法选出的候选文档内，改用用户原始 scope
+        // （通常为空 = 全库）。这样"和 query 无词法重叠但语义相近"的 chunk 能直接被召回，
+        // 不再受文档级语义发现 top-K 的钳制——真正在 chunk 粒度打破词法牢笼。
+        // 命中后其所属文档由 augment_candidates_with_dense_chunks 补进候选集，
+        // 否则 merge_chunk_evidence 会因查不到 doc_rank 而把这些 chunk 丢弃。
         let dense_future = self.state.vector_store.search_similar_scoped(
             query_embedding,
             DEFAULT_CHUNK_CANDIDATE_K,
-            &candidate_scope_paths,
+            normalized_scope_paths,
         );
         let (strict_lexical_matches, lexical_matches, dense_matches) =
             tokio::try_join!(strict_future, lexical_future, dense_future)?;
@@ -124,6 +131,21 @@ impl MemoriEngine {
             dense_ms = metrics.chunk_dense_ms,
             "chunk searches completed"
         );
+
+        // 把全局 dense 命中里尚未在候选集中的文档补进候选（reason=semantic），
+        // 让它们的 chunk 能进入 merge；候选集变动后重排 document_rank。
+        let added_semantic_docs = self
+            .augment_candidates_with_dense_chunks(&dense_matches, &mut candidate_docs)
+            .await?;
+        if added_semantic_docs > 0 {
+            rank_document_candidates_in_place(&mut candidate_docs, analysis.query_family);
+            metrics.doc_candidate_count = metrics.doc_candidate_count.max(candidate_docs.len());
+            debug!(
+                added = added_semantic_docs,
+                doc_count = candidate_docs.len(),
+                "augmented candidates with global dense-chunk documents"
+            );
+        }
 
         let merge_started_at = Instant::now();
         let mut evidence = merge_chunk_evidence(
@@ -576,6 +598,71 @@ impl MemoriEngine {
         let mut docs = by_path.into_values().collect::<Vec<_>>();
         rank_document_candidates_in_place(&mut docs, analysis.query_family);
         Ok(docs)
+    }
+
+    /// 把全局 dense chunk 命中里、尚未在候选集中的文档折叠成文档级 "semantic" 候选并追加。
+    /// 每个文件取其最高 cos 分（及排名），与文档级语义发现保持一致的弱 RRF 权重，
+    /// 只补召回不抢词法头部。返回新增文档数。
+    async fn augment_candidates_with_dense_chunks(
+        &self,
+        dense_matches: &[(DocumentChunk, f32)],
+        candidate_docs: &mut Vec<DocumentCandidate>,
+    ) -> Result<usize, EngineError> {
+        if dense_matches.is_empty() {
+            return Ok(0);
+        }
+        let existing = candidate_docs
+            .iter()
+            .map(|doc| doc.file_path.clone())
+            .collect::<HashSet<_>>();
+        let mut best_by_file = HashMap::<String, (f32, usize)>::new();
+        for (rank, (chunk, score)) in dense_matches.iter().enumerate() {
+            let file_path = chunk.file_path.to_string_lossy().to_string();
+            if existing.contains(&file_path) {
+                continue;
+            }
+            let entry = best_by_file.entry(file_path).or_insert((*score, rank + 1));
+            if *score > entry.0 {
+                *entry = (*score, rank + 1);
+            }
+        }
+        let mut added = 0usize;
+        for (file_path, (cos_score, rank)) in best_by_file {
+            let Some(record) = self
+                .state
+                .vector_store
+                .get_document_by_file_path(Path::new(&file_path))
+                .await?
+            else {
+                continue;
+            };
+            let is_code_document = is_code_document_path(&record.relative_path);
+            // 与 resolve_candidate_documents 的文档级语义发现同款弱权重（系数 0.8）。
+            let score = 0.8 / (RRF_K + rank as f64);
+            candidate_docs.push(DocumentCandidate {
+                file_path: record.file_path,
+                relative_path: record.relative_path,
+                is_code_document,
+                document_reason: "semantic".to_string(),
+                document_rank: rank,
+                document_raw_score: Some(cos_score as f64),
+                exact_signal_score: None,
+                exact_path_score: None,
+                exact_symbol_score: None,
+                document_filename_score: None,
+                document_final_score: score,
+                has_exact_signal: false,
+                has_exact_path_signal: false,
+                has_exact_symbol_signal: false,
+                has_docs_phrase_signal: false,
+                docs_phrase_quality: None,
+                has_filename_signal: false,
+                has_strict_lexical: false,
+                has_broad_lexical: false,
+            });
+            added += 1;
+        }
+        Ok(added)
     }
 
     pub async fn get_graph_context_for_results(

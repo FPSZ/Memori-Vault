@@ -45,8 +45,8 @@ pub(crate) struct RunRetrievalRegressionPayload {
 }
 
 #[tauri::command]
-pub(crate) async fn list_retrieval_regression_reports(
-) -> Result<Vec<RetrievalRegressionReportEntry>, String> {
+pub(crate) async fn list_retrieval_regression_reports()
+-> Result<Vec<RetrievalRegressionReportEntry>, String> {
     list_reports()
 }
 
@@ -55,19 +55,29 @@ pub(crate) async fn read_retrieval_regression_report(report_path: String) -> Res
     let repo_root = resolve_repo_root()?;
     let report_root = repo_root.join("target").join("retrieval-regression");
     let requested = PathBuf::from(report_path);
-    let canonical_report_root = report_root
-        .canonicalize()
-        .map_err(|err| format!("failed to locate report root {}: {err}", report_root.display()))?;
-    let canonical_requested = requested
-        .canonicalize()
-        .map_err(|err| format!("failed to locate report file {}: {err}", requested.display()))?;
+    let canonical_report_root = report_root.canonicalize().map_err(|err| {
+        format!(
+            "failed to locate report root {}: {err}",
+            report_root.display()
+        )
+    })?;
+    let canonical_requested = requested.canonicalize().map_err(|err| {
+        format!(
+            "failed to locate report file {}: {err}",
+            requested.display()
+        )
+    })?;
 
     if !canonical_requested.starts_with(&canonical_report_root) {
         return Err("report path must stay under target/retrieval-regression".to_string());
     }
 
-    let raw = fs::read_to_string(&canonical_requested)
-        .map_err(|err| format!("failed to read report {}: {err}", canonical_requested.display()))?;
+    let raw = fs::read_to_string(&canonical_requested).map_err(|err| {
+        format!(
+            "failed to read report {}: {err}",
+            canonical_requested.display()
+        )
+    })?;
     serde_json::from_str(&raw).map_err(|err| {
         format!(
             "failed to parse report json {}: {err}",
@@ -113,7 +123,10 @@ pub(crate) async fn run_retrieval_regression(
     let repo_root = resolve_repo_root()?;
     let script_path = repo_root.join("scripts").join("test-retrieval.ps1");
     if !script_path.exists() {
-        return Err(format!("missing regression script: {}", script_path.display()));
+        return Err(format!(
+            "missing regression script: {}",
+            script_path.display()
+        ));
     }
 
     let _ = fs::remove_file(regression_progress_path(&repo_root));
@@ -175,7 +188,8 @@ pub(crate) async fn run_retrieval_regression(
                     run.stdout_tail = process_result.stdout_tail;
                     run.stderr_tail = process_result.stderr_tail;
                     if run.status == "failed" {
-                        run.error = Some("regression process exited with a non-zero code".to_string());
+                        run.error =
+                            Some("regression process exited with a non-zero code".to_string());
                     }
                 }
                 Err(err) => {
@@ -306,7 +320,11 @@ fn run_regression_process(
                 });
             }
             Ok(None) => thread::sleep(std::time::Duration::from_millis(150)),
-            Err(err) => return Err(format!("failed while waiting for regression process: {err}")),
+            Err(err) => {
+                return Err(format!(
+                    "failed while waiting for regression process: {err}"
+                ));
+            }
         }
     }
 }
@@ -319,9 +337,12 @@ fn list_reports() -> Result<Vec<RetrievalRegressionReportEntry>, String> {
     }
 
     let mut reports = Vec::new();
-    for entry in fs::read_dir(&report_root)
-        .map_err(|err| format!("failed to read report directory {}: {err}", report_root.display()))?
-    {
+    for entry in fs::read_dir(&report_root).map_err(|err| {
+        format!(
+            "failed to read report directory {}: {err}",
+            report_root.display()
+        )
+    })? {
         let entry = entry.map_err(|err| format!("failed to read report entry: {err}"))?;
         let path = entry.path();
         if !path.is_dir() {

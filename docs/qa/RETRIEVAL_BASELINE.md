@@ -1,6 +1,78 @@
-# Retrieval Baseline Snapshot
+﻿# Retrieval Baseline Snapshot
 
-Updated: 2026-03-11 UTC
+Updated: 2026-06-04 UTC
+
+## Latest Live Regression Snapshot (2026-06-04)
+
+This is the current source-of-truth measurement for the local live retrieval path.
+
+Run:
+
+- Mode/profile: `live_embedding + full_live`
+- Suite: `docs/qa/retrieval_regression_suite.json`
+- Corpus: `Memory_Test/` regression corpus, 100 cases
+- Report JSON: `target/retrieval-regression/live_embedding-full_live-1780575982/report.json`
+- Report Markdown: `target/retrieval-regression/live_embedding-full_live-1780575982/report.md`
+- Local services: `service_health=ready`, `rerank_health=ready`
+- Index preparation: `44,226 ms`
+- Indexed scope: suite target documents only, not the full repository
+- Indexed documents/chunks: `54` documents / `425` chunks
+- Embedding: `Qwen3-Embedding-4B-Q4_K_M`, dim `2560`
+
+Summary:
+
+| Metric | Value |
+| --- | ---: |
+| Cases | 100 |
+| Passed / Failed | 56 / 44 |
+| Answer / Refuse cases | 88 / 12 |
+| Top-1 document hit | 35.23% |
+| Top-3 document recall | 59.09% |
+| Top-1 chunk hit | 54.55% |
+| Top-5 chunk recall | 69.32% |
+| Chunk MRR | 0.5987 |
+| Citation validity | 100.00% |
+| Reject correctness | 48.00% |
+| Rerank applied | 66.00% |
+
+Capability breakdown:
+
+| Capability | Passed / Total | Pass Rate |
+| --- | ---: | ---: |
+| 中文直问-事实卡命中 | 4 / 20 | 20.00% |
+| 改写/语义召回 | 9 / 16 | 56.25% |
+| 反常识/抗参数知识 | 9 / 10 | 90.00% |
+| 代号/别名/ID 检索 | 2 / 7 | 28.57% |
+| 跨文档综合(2-3 文档) | 6 / 8 | 75.00% |
+| 相似代号防串 | 3 / 5 | 60.00% |
+| 多格式抽取 | 6 / 7 | 85.71% |
+| 文档类型定位 | 5 / 5 | 100.00% |
+| 口语/错别字/省略鲁棒 | 4 / 5 | 80.00% |
+| 长难句/多条件 | 4 / 5 | 80.00% |
+| refuse-库中无此事实 | 3 / 6 | 50.00% |
+| refuse-越权/注入/常识 | 1 / 6 | 16.67% |
+
+Gating reason distribution:
+
+| Gating Reason | Count |
+| --- | ---: |
+| `score_below_threshold` | 42 |
+| `coverage_release` | 15 |
+| `docs_family_multi_chunk_release` | 14 |
+| `high_coverage_lexical_release` | 8 |
+| `intent_blocked` | 6 |
+| `compound_evidence_release` | 6 |
+| `compound_partial_release` | 6 |
+| `score_release` | 2 |
+| `semantic_context_release` | 1 |
+
+Current interpretation:
+
+- Live local-model validation is no longer blocked. The local embed and rerank services are reachable, and the full 100-case live suite ran end to end.
+- The previous `core_docs` live timeout was an index-scope bug: the harness was preparing the full repository. The current harness seeds only target documents from the selected suite/profile.
+- Citation validity is strong (`100%`), but retrieval precision is not yet at delivery bar.
+- The highest-priority quality gaps are direct Chinese fact-card hits (`4/20`) and refusal safety/intent handling (`refuse-越权/注入/常识 = 1/6`).
+- `score_below_threshold` dominates failures (`42/100`), so the next tuning pass should separate real retrieval misses from gating false negatives.
 
 ## Architecture Notes Since This Baseline
 
@@ -137,8 +209,8 @@ Report:
 
 Status:
 
-- Blocked by local model availability on `http://localhost:18001`
-- This is a valid structured live-baseline outcome and must not be replaced with synthetic metrics
+- Historical blocked snapshot, superseded by the 2026-06-04 live run at the top of this document.
+- The live path is now runnable with local embedding and rerank services; this old row is kept only for audit history.
 
 Report:
 
@@ -157,7 +229,7 @@ Report:
 
 | Profile | Cases Executed | Service Health | Result |
 | --- | ---: | --- | --- |
-| `full_live` | 0 | `unavailable` | blocked by local llama.cpp / embedding probe failure |
+| `full_live` | 100 | `ready` | `56/100` passed; `Top-3 doc recall=59.09%`; `Top-5 chunk recall=69.32%`; `rerank_health=ready` |
 
 ## 5. Current Interpretation
 
@@ -175,14 +247,14 @@ Report:
 2. `repo_mixed` regressed versus the previous documented offline snapshot.
    - previous documented snapshot: `Top-1=0.5682`, `Top-3=0.5909`, `Top-5=0.6364`, `Reject=0.9800`
    - latest snapshot: `Top-1=0.4773`, `Top-3=0.4773`, `Top-5=0.5455`, `Reject=0.9400`
-3. Live local-model validation is still blocked by local llama.cpp or local embedding availability.
+3. Live local-model validation now runs end to end, but precision is still below the delivery bar.
 4. No current document should imply that retrieval precision has been validated at 50,000-document scale.
 
 ### Practical delivery posture
 
 - `core_docs`: internal validation baseline, useful for continued regression work.
 - `repo_mixed`: still beta/internal-only quality, not ready for strong accuracy claims.
-- `full_live`: runtime path exists, but the local-model environment has not been validated end to end on this machine.
+- `full_live`: runtime path is validated end to end on this machine, but the 100-case result (`56/100`) is not release-quality yet.
 
 ## 6. Remaining Failure Pattern Summary
 
@@ -221,4 +293,4 @@ Acceptance status in this baseline:
 - Phase 0 runtime baseline and measured offline retrieval metrics are captured.
 - Current offline evidence does not support a claim that the system can reliably pinpoint one correct document out of a large mixed corpus.
 - The next retrieval work should focus on mixed-corpus document routing precision before any broader quality claim.
-- Live embedding baseline remains blocked until the local llama.cpp environment is available.
+- Live embedding baseline is no longer blocked; the next work is precision and gating improvement, not service availability.

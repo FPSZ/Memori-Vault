@@ -534,6 +534,7 @@ impl MemoriEngine {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn answer_indicates_insufficient_evidence(answer: &str) -> bool {
     answer_indicates_insufficient_evidence_with_mode(answer, DEFAULT_GENERATION_REFUSAL_MODE)
 }

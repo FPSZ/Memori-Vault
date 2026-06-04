@@ -268,6 +268,27 @@ impl MemoriEngine {
             mut metrics,
         } = prepare_query_for_retrieval(&question);
         debug!(intent = %analysis.query_intent.as_str(), family = %analysis.query_family.as_str(), flags = ?metrics.query_flags, "query analyzed");
+        if matches!(
+            analysis.query_intent,
+            QueryIntent::ExternalFact | QueryIntent::SecretRequest
+        ) {
+            metrics.gating_decision_reason = "intent_blocked".to_string();
+            metrics.gating_hard_block_reason = Some("intent_blocked".to_string());
+            metrics.decision_stage = GatingDecisionStage::HardBlock;
+            return Ok(RetrievalInspection {
+                status: AskStatus::InsufficientEvidence,
+                question,
+                scope_paths: serialized_scope_paths,
+                citations: Vec::new(),
+                evidence: Vec::new(),
+                metrics,
+                answer_source_mix: AnswerSourceMix::Insufficient,
+                memory_context: Vec::new(),
+                source_groups: Vec::new(),
+                failure_class: FailureClass::RecallMiss,
+                context_budget_report: ContextBudgetReport::default(),
+            });
+        }
         let memory_context = self.retrieve_memory_context(&analysis, 6).await?;
         let compound_plan = detect_compound_query(&question);
         if let Some(plan) = compound_plan.as_ref() {

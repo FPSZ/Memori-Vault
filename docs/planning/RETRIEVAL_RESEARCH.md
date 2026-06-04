@@ -1,4 +1,4 @@
-# 检索精度 / 可验证记忆 —— 同类技术调研参考
+﻿# 检索精度 / 可验证记忆 —— 同类技术调研参考
 
 > 调研日期：2026-06-02 · 用途：为 Memori-Vault 的检索精排算法（`memori-core`）与可验证记忆设计提供文献/工程参考。
 > 本文只做汇总与映射，不含代码改动。每一节给出「这是什么 → 对应我们哪段代码 → 可借鉴什么」。
@@ -84,7 +84,7 @@
 - 校验：`cargo check --workspace` 通过、`cargo test -p memori-core` 57 全过、`tsc --noEmit` 通过。
 
 **仍待办：**
-- 回归集量化重排前后的 `repo_mixed Top-1` 增益（对接 §8）。
+- 2026-06-04 已完成一次 `live_embedding + full_live` 100 条实测：`rerank_health=ready`，`rerank_applied=66.00%`，总体 `56/100` 通过，`Top-1 document hit=35.23%`，`Top-3 document recall=59.09%`，`Top-5 chunk recall=69.32%`。这证明 rerank 链路已接入真实回归，但还不是 rerank 净增益 A/B；后续仍需固定同一 suite 跑 `rerank on/off` 对比。
 
 ---
 

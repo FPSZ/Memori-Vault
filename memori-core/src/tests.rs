@@ -933,7 +933,7 @@ fn rebuild_compare_path_normalizes_windows_style_variants() {
 #[test]
 fn analyze_query_extracts_support_terms_for_descriptive_cjk_questions() {
     let analysis = analyze_query("新增的岗位是什么");
-    assert!(analysis.support_terms.iter().any(|term| term == "新增"));
+    assert!(!analysis.support_terms.iter().any(|term| term == "新增"));
     assert!(analysis.support_terms.iter().any(|term| term == "岗位"));
     assert!(!analysis.support_terms.iter().any(|term| term == "是什么"));
     assert!(
@@ -1386,7 +1386,7 @@ fn dense_only_long_query_is_rejected() {
 
 #[test]
 fn non_lookup_coverage_release_populates_metrics() {
-    let analysis = analyze_query("新增的岗位是什么");
+    let analysis = analyze_query("后端 岗位 是什么");
     let evidence = vec![super::MergedEvidence {
         chunk: DocumentChunk {
             file_path: PathBuf::from("docs/hiring.md"),
