@@ -919,6 +919,92 @@
         "repo_mixed",
         "full_live"
       ]
+    },
+    {
+      "id": "R55",
+      "query": "If nobody has set up any model backend yet, what happens to the place where users type questions?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/TUTORIAL.md"
+      ],
+      "target_clues": [
+        "The search box stays disabled",
+        "inline red hint"
+      ],
+      "notes": "paraphrase / semantic-only, live mode only",
+      "profile_tags": [
+        "full_live"
+      ]
+    },
+    {
+      "id": "R56",
+      "query": "Can the first response become better later while relationship extraction finishes in the background?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/TUTORIAL.md"
+      ],
+      "target_clues": [
+        "Graph extraction is asynchronous",
+        "early answers may improve over time"
+      ],
+      "notes": "paraphrase / semantic-only, live mode only",
+      "profile_tags": [
+        "full_live"
+      ]
+    },
+    {
+      "id": "R57",
+      "query": "Which indexing budget keeps background work light enough when you're actively using a laptop?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/TUTORIAL.md"
+      ],
+      "target_clues": [
+        "low",
+        "best for laptop foreground UX"
+      ],
+      "notes": "paraphrase / semantic-only, live mode only",
+      "profile_tags": [
+        "full_live"
+      ]
+    },
+    {
+      "id": "R58",
+      "query": "Under the strict private deployment policy, can the product quietly jump over to hosted model services when the approved runtime is blocked?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/enterprise.md"
+      ],
+      "target_clues": [
+        "There is no silent fallback",
+        "local_only"
+      ],
+      "notes": "paraphrase / semantic-only, live mode only",
+      "profile_tags": [
+        "full_live"
+      ]
+    },
+    {
+      "id": "R59",
+      "query": "Which admin counters show both the average ask delay and the overall failed-request totals?",
+      "mode": "answer",
+      "scope_paths": [],
+      "target_documents": [
+        "docs/guides/enterprise.md"
+      ],
+      "target_clues": [
+        "total_requests",
+        "failed_requests",
+        "ask_latency_avg_ms"
+      ],
+      "notes": "paraphrase / semantic-only, live mode only",
+      "profile_tags": [
+        "full_live"
+      ]
     }
   ]
 }

@@ -146,16 +146,21 @@ struct RegressionCaseResult {
     document_hit_rank: Option<usize>,
     chunk_hit_rank: Option<usize>,
     top1_document_hit: bool,
+    top1_chunk_hit: bool,
     top3_document_recall: bool,
     top5_chunk_recall: bool,
     citation_valid: bool,
     reject_correct: bool,
+    rerank_applied: bool,
     citations_count: usize,
     final_evidence_count: usize,
+    gating_decision_reason: String,
     doc_recall_ms: u64,
+    doc_dense_ms: u64,
     chunk_lexical_ms: u64,
     chunk_dense_ms: u64,
     merge_ms: u64,
+    rerank_ms: u64,
     notes: Option<String>,
 }
 
@@ -165,10 +170,13 @@ struct RegressionSummary {
     answer_cases: usize,
     refuse_cases: usize,
     top1_document_hit_rate: f64,
+    top1_chunk_hit_rate: f64,
     top3_document_recall_rate: f64,
     top5_chunk_recall_rate: f64,
+    chunk_mrr: f64,
     citation_validity_rate: f64,
     reject_correctness_rate: f64,
+    rerank_applied_rate: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -182,6 +190,7 @@ struct RegressionReport {
     db_path: String,
     baseline: RuntimeRetrievalBaseline,
     service_health: String,
+    rerank_health: String,
     live_service_used: bool,
     index_prep_ms: Option<u64>,
     case_timeout_count: usize,
@@ -190,9 +199,26 @@ struct RegressionReport {
     cases: Vec<RegressionCaseResult>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct RegressionProgress {
+    run_id: String,
+    status: String,
+    total: usize,
+    completed: usize,
+    current_index: usize,
+    current_case_id: String,
+    current_query: String,
+    current_mode: String,
+    current_phase: String,
+    passed: usize,
+    failed: usize,
+    updated_at_ms: u128,
+}
+
 #[derive(Debug, Clone)]
 struct PreparationOutcome {
     service_health: ServiceHealth,
+    rerank_health: String,
     live_service_used: bool,
     index_prep_ms: Option<u64>,
     preparation_error: Option<String>,
@@ -207,6 +233,10 @@ async fn main() -> Result<(), AnyError> {
     }
 
     let suite = load_suite(&args.suite_path, &args.case_filter, args.profile)?;
+    write_progress(
+        &args.watch_root,
+        RegressionProgress::preparing(suite.cases.len()),
+    );
     let engine = MemoriEngine::bootstrap(args.watch_root.clone())?;
     let prep = prepare_engine(&engine, &args, &suite).await?;
     let baseline = engine.get_runtime_retrieval_baseline().await?;
@@ -227,6 +257,7 @@ async fn main() -> Result<(), AnyError> {
         db_path: args.db_path.to_string_lossy().to_string(),
         baseline,
         service_health: prep.service_health.as_str().to_string(),
+        rerank_health: prep.rerank_health,
         live_service_used: prep.live_service_used,
         index_prep_ms: prep.index_prep_ms,
         case_timeout_count,
@@ -254,6 +285,11 @@ async fn main() -> Result<(), AnyError> {
         output_dir.join("report.md"),
         render_report_markdown(&report),
     )?;
+    let (passed, failed) = count_progress_outcomes(&report.cases);
+    write_progress(
+        &args.watch_root,
+        RegressionProgress::done(suite.cases.len(), passed, failed),
+    );
 
     if args.write_baseline_doc {
         fs::write(
@@ -382,6 +418,7 @@ async fn prepare_engine(
             seed_offline_index(engine, &args.watch_root, suite).await?;
             Ok(PreparationOutcome {
                 service_health: ServiceHealth::Ready,
+                rerank_health: "disabled".to_string(),
                 live_service_used: false,
                 index_prep_ms: Some(started_at.elapsed().as_millis() as u64),
                 preparation_error: None,
@@ -399,6 +436,7 @@ async fn prepare_live_engine(
     if !args.watch_root.exists() {
         return Ok(PreparationOutcome {
             service_health: ServiceHealth::Unavailable,
+            rerank_health: "unavailable".to_string(),
             live_service_used: true,
             index_prep_ms: None,
             preparation_error: Some(format!(
@@ -411,6 +449,7 @@ async fn prepare_live_engine(
     if !args.watch_root.is_dir() {
         return Ok(PreparationOutcome {
             service_health: ServiceHealth::Unavailable,
+            rerank_health: "unavailable".to_string(),
             live_service_used: true,
             index_prep_ms: None,
             preparation_error: Some(format!(
@@ -433,6 +472,7 @@ async fn prepare_live_engine(
     {
         return Ok(PreparationOutcome {
             service_health: ServiceHealth::Unavailable,
+            rerank_health: "unavailable".to_string(),
             live_service_used: true,
             index_prep_ms: None,
             preparation_error: Some(format!(
@@ -456,6 +496,7 @@ async fn prepare_live_engine(
         Ok(Ok(_)) => {
             return Ok(PreparationOutcome {
                 service_health: ServiceHealth::Unavailable,
+                rerank_health: "unavailable".to_string(),
                 live_service_used: true,
                 index_prep_ms: None,
                 preparation_error: Some("embedding provider returned an empty vector".to_string()),
@@ -465,6 +506,7 @@ async fn prepare_live_engine(
         Ok(Err(err)) => {
             return Ok(PreparationOutcome {
                 service_health: ServiceHealth::Unavailable,
+                rerank_health: "unavailable".to_string(),
                 live_service_used: true,
                 index_prep_ms: None,
                 preparation_error: Some(format!("embedding provider probe failed: {err}")),
@@ -474,6 +516,7 @@ async fn prepare_live_engine(
         Err(_) => {
             return Ok(PreparationOutcome {
                 service_health: ServiceHealth::Unavailable,
+                rerank_health: "unavailable".to_string(),
                 live_service_used: true,
                 index_prep_ms: None,
                 preparation_error: Some("embedding provider probe timed out".to_string()),
@@ -481,6 +524,23 @@ async fn prepare_live_engine(
             });
         }
     }
+
+    let rerank_health = if !engine.state().rerank_client.is_enabled() {
+        "disabled".to_string()
+    } else {
+        match timeout(
+            Duration::from_secs(5),
+            engine
+                .state()
+                .rerank_client
+                .rerank("probe", &["sample".to_string()]),
+        )
+        .await
+        {
+            Ok(Ok(_)) => "ready".to_string(),
+            Ok(Err(_)) | Err(_) => "unavailable".to_string(),
+        }
+    };
 
     let started_at = Instant::now();
     match timeout(
@@ -491,6 +551,7 @@ async fn prepare_live_engine(
     {
         Ok(Ok(())) => Ok(PreparationOutcome {
             service_health: ServiceHealth::Ready,
+            rerank_health,
             live_service_used: true,
             index_prep_ms: Some(started_at.elapsed().as_millis() as u64),
             preparation_error: None,
@@ -498,6 +559,7 @@ async fn prepare_live_engine(
         }),
         Ok(Err(err)) => Ok(PreparationOutcome {
             service_health: ServiceHealth::Unavailable,
+            rerank_health,
             live_service_used: true,
             index_prep_ms: Some(started_at.elapsed().as_millis() as u64),
             preparation_error: Some(format!("live index preparation failed: {err}")),
@@ -505,6 +567,7 @@ async fn prepare_live_engine(
         }),
         Err(_) => Ok(PreparationOutcome {
             service_health: ServiceHealth::Degraded,
+            rerank_health,
             live_service_used: true,
             index_prep_ms: Some(started_at.elapsed().as_millis() as u64),
             preparation_error: Some(format!(
@@ -655,8 +718,14 @@ async fn run_suite_cases(
     };
     let mut timeouts = 0usize;
     let mut results = Vec::with_capacity(suite.cases.len());
+    let mut passed = 0usize;
+    let mut failed = 0usize;
 
-    for case in &suite.cases {
+    for (index, case) in suite.cases.iter().enumerate() {
+        write_progress(
+            &args.watch_root,
+            RegressionProgress::running(suite.cases.len(), index, index + 1, case, passed, failed),
+        );
         let outcome = match args.mode {
             EvaluationMode::OfflineDeterministic => {
                 run_case(
@@ -686,6 +755,22 @@ async fn run_suite_cases(
                 }
             }
         }?;
+        if progress_case_passed(&outcome) {
+            passed += 1;
+        } else {
+            failed += 1;
+        }
+        write_progress(
+            &args.watch_root,
+            RegressionProgress::running(
+                suite.cases.len(),
+                index + 1,
+                index + 1,
+                case,
+                passed,
+                failed,
+            ),
+        );
         results.push(outcome);
     }
 
@@ -773,16 +858,25 @@ fn build_case_result(
         document_hit_rank,
         chunk_hit_rank,
         top1_document_hit: document_hit_rank == Some(1),
+        top1_chunk_hit: chunk_hit_rank == Some(1),
         top3_document_recall: document_hit_rank.is_some_and(|rank| rank <= 3),
         top5_chunk_recall: chunk_hit_rank.is_some_and(|rank| rank <= 5),
         citation_valid,
         reject_correct,
+        rerank_applied: inspection
+            .metrics
+            .query_flags
+            .iter()
+            .any(|flag| flag.contains("rerank:applied")),
         citations_count: inspection.citations.len(),
         final_evidence_count: inspection.evidence.len(),
+        gating_decision_reason: inspection.metrics.gating_decision_reason.clone(),
         doc_recall_ms: inspection.metrics.doc_recall_ms,
+        doc_dense_ms: inspection.metrics.doc_dense_ms,
         chunk_lexical_ms: inspection.metrics.chunk_lexical_ms,
         chunk_dense_ms: inspection.metrics.chunk_dense_ms,
         merge_ms: inspection.metrics.merge_ms,
+        rerank_ms: inspection.metrics.rerank_ms,
         notes: case.notes.clone(),
     }
 }
@@ -800,16 +894,21 @@ fn timeout_case_result(case: &RegressionCase) -> RegressionCaseResult {
         document_hit_rank: None,
         chunk_hit_rank: None,
         top1_document_hit: false,
+        top1_chunk_hit: false,
         top3_document_recall: false,
         top5_chunk_recall: false,
         citation_valid: false,
         reject_correct: false,
+        rerank_applied: false,
         citations_count: 0,
         final_evidence_count: 0,
+        gating_decision_reason: "timeout".to_string(),
         doc_recall_ms: 0,
+        doc_dense_ms: 0,
         chunk_lexical_ms: 0,
         chunk_dense_ms: 0,
         merge_ms: 0,
+        rerank_ms: 0,
         notes: case.notes.clone(),
     }
 }
@@ -909,6 +1008,109 @@ fn path_matches_scope(path: &Path, scope: &Path) -> bool {
     }
 }
 
+impl RegressionProgress {
+    fn preparing(total: usize) -> Self {
+        Self {
+            run_id: String::new(),
+            status: "running".to_string(),
+            total,
+            completed: 0,
+            current_index: 0,
+            current_case_id: String::new(),
+            current_query: String::new(),
+            current_mode: String::new(),
+            current_phase: "preparing".to_string(),
+            passed: 0,
+            failed: 0,
+            updated_at_ms: progress_now_ms(),
+        }
+    }
+
+    fn running(
+        total: usize,
+        completed: usize,
+        current_index: usize,
+        case: &RegressionCase,
+        passed: usize,
+        failed: usize,
+    ) -> Self {
+        Self {
+            run_id: String::new(),
+            status: "running".to_string(),
+            total,
+            completed,
+            current_index,
+            current_case_id: case.id.clone(),
+            current_query: case.query.clone(),
+            current_mode: regression_mode_as_str(&case.mode).to_string(),
+            current_phase: "running".to_string(),
+            passed,
+            failed,
+            updated_at_ms: progress_now_ms(),
+        }
+    }
+
+    fn done(total: usize, passed: usize, failed: usize) -> Self {
+        Self {
+            run_id: String::new(),
+            status: "succeeded".to_string(),
+            total,
+            completed: total,
+            current_index: total,
+            current_case_id: String::new(),
+            current_query: String::new(),
+            current_mode: String::new(),
+            current_phase: "done".to_string(),
+            passed,
+            failed,
+            updated_at_ms: progress_now_ms(),
+        }
+    }
+}
+
+fn write_progress(watch_root: &Path, progress: RegressionProgress) {
+    let progress_dir = watch_root.join("target").join("retrieval-regression");
+    let progress_path = progress_dir.join(".active-progress.json");
+    let _ = fs::create_dir_all(&progress_dir);
+    if let Ok(raw) = serde_json::to_string_pretty(&progress) {
+        let _ = fs::write(progress_path, raw);
+    }
+}
+
+fn count_progress_outcomes(results: &[RegressionCaseResult]) -> (usize, usize) {
+    let passed = results
+        .iter()
+        .filter(|case| progress_case_passed(case))
+        .count();
+    (passed, results.len().saturating_sub(passed))
+}
+
+fn progress_case_passed(case: &RegressionCaseResult) -> bool {
+    if case.timed_out {
+        return false;
+    }
+    match case.mode {
+        RegressionMode::Answer => {
+            case.top3_document_recall && case.top5_chunk_recall && case.citation_valid
+        }
+        RegressionMode::Refuse => case.reject_correct,
+    }
+}
+
+fn regression_mode_as_str(mode: &RegressionMode) -> &'static str {
+    match mode {
+        RegressionMode::Answer => "answer",
+        RegressionMode::Refuse => "refuse",
+    }
+}
+
+fn progress_now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
 fn summarize(results: &[RegressionCaseResult]) -> RegressionSummary {
     let answer_cases = results
         .iter()
@@ -927,6 +1129,13 @@ fn summarize(results: &[RegressionCaseResult]) -> RegressionSummary {
                 .count(),
             answer_cases,
         ),
+        top1_chunk_hit_rate: ratio(
+            results
+                .iter()
+                .filter(|case| case.mode == RegressionMode::Answer && case.top1_chunk_hit)
+                .count(),
+            answer_cases,
+        ),
         top3_document_recall_rate: ratio(
             results
                 .iter()
@@ -941,12 +1150,30 @@ fn summarize(results: &[RegressionCaseResult]) -> RegressionSummary {
                 .count(),
             answer_cases,
         ),
+        chunk_mrr: if answer_cases == 0 {
+            0.0
+        } else {
+            results
+                .iter()
+                .filter(|case| case.mode == RegressionMode::Answer)
+                .map(|case| {
+                    case.chunk_hit_rank
+                        .map(|rank| 1.0 / rank as f64)
+                        .unwrap_or(0.0)
+                })
+                .sum::<f64>()
+                / answer_cases as f64
+        },
         citation_validity_rate: ratio(
             results.iter().filter(|case| case.citation_valid).count(),
             results.len(),
         ),
         reject_correctness_rate: ratio(
             results.iter().filter(|case| case.reject_correct).count(),
+            results.len(),
+        ),
+        rerank_applied_rate: ratio(
+            results.iter().filter(|case| case.rerank_applied).count(),
             results.len(),
         ),
     }
@@ -962,6 +1189,7 @@ fn render_report_markdown(report: &RegressionReport) -> String {
     out.push_str(&format!("- watch_root: `{}`\n", report.watch_root));
     out.push_str(&format!("- db_path: `{}`\n", report.db_path));
     out.push_str(&format!("- service_health: `{}`\n", report.service_health));
+    out.push_str(&format!("- rerank_health: `{}`\n", report.rerank_health));
     out.push_str(&format!(
         "- live_service_used: `{}`\n",
         report.live_service_used
@@ -1000,9 +1228,14 @@ fn render_report_markdown(report: &RegressionReport) -> String {
         report.summary.top3_document_recall_rate * 100.0
     ));
     out.push_str(&format!(
+        "- Top-1 chunk hit: {:.2}%\n",
+        report.summary.top1_chunk_hit_rate * 100.0
+    ));
+    out.push_str(&format!(
         "- Top-5 chunk recall: {:.2}%\n",
         report.summary.top5_chunk_recall_rate * 100.0
     ));
+    out.push_str(&format!("- Chunk MRR: {:.4}\n", report.summary.chunk_mrr));
     out.push_str(&format!(
         "- citation validity: {:.2}%\n",
         report.summary.citation_validity_rate * 100.0
@@ -1012,17 +1245,21 @@ fn render_report_markdown(report: &RegressionReport) -> String {
         report.summary.reject_correctness_rate * 100.0
     ));
     out.push_str(&format!(
+        "- rerank applied: {:.2}%\n",
+        report.summary.rerank_applied_rate * 100.0
+    ));
+    out.push_str(&format!(
         "- case timeouts: `{}`\n\n",
         report.case_timeout_count
     ));
     out.push_str("## Cases\n\n");
     out.push_str(
-        "| ID | Status | Timed Out | Doc Rank | Chunk Rank | Citation Valid | Reject Correct |\n",
+        "| ID | Status | Timed Out | Doc Rank | Chunk Rank | Citation Valid | Reject Correct | Gating Reason |\n",
     );
-    out.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
+    out.push_str("| --- | --- | --- | --- | --- | --- | --- | --- |\n");
     for case in &report.cases {
         out.push_str(&format!(
-            "| {} | {:?} | {} | {} | {} | {} | {} |\n",
+            "| {} | {:?} | {} | {} | {} | {} | {} | {} |\n",
             case.id,
             case.status,
             yes_no(case.timed_out),
@@ -1034,6 +1271,7 @@ fn render_report_markdown(report: &RegressionReport) -> String {
                 .unwrap_or_else(|| "-".to_string()),
             yes_no(case.citation_valid),
             yes_no(case.reject_correct),
+            case.gating_decision_reason,
         ));
     }
     out
@@ -1051,7 +1289,7 @@ fn render_baseline_markdown(report: &RegressionReport) -> String {
 fn render_baseline_section(report: &RegressionReport, mode: EvaluationMode) -> String {
     if report.evaluation_mode == mode.as_str() {
         format!(
-            "- profile: `{}`\n- watch_root: `{}`\n- db_path: `{}`\n- embedding model: `{}`\n- embedding dim: `{}`\n- indexed documents: `{}`\n- indexed chunks: `{}`\n- rebuild_state: `{}`\n- service_health: `{}`\n- index_prep_ms: `{}`\n\n| Metric | Current Value | Notes |\n| --- | --- | --- |\n| `Top-1 document hit` | {:.2}% | answer cases only |\n| `Top-3 document recall` | {:.2}% | answer cases only |\n| `Top-5 chunk recall` | {:.2}% | answer cases only |\n| `citation validity` | {:.2}% | all cases |\n| `reject-correctness` | {:.2}% | all cases |\n| `index_prep_ms P50/P95` | N/A | single-run snapshot |\n",
+            "- profile: `{}`\n- watch_root: `{}`\n- db_path: `{}`\n- embedding model: `{}`\n- embedding dim: `{}`\n- indexed documents: `{}`\n- indexed chunks: `{}`\n- rebuild_state: `{}`\n- service_health: `{}`\n- rerank_health: `{}`\n- index_prep_ms: `{}`\n\n| Metric | Current Value | Notes |\n| --- | --- | --- |\n| `Top-1 document hit` | {:.2}% | answer cases only |\n| `Top-3 document recall` | {:.2}% | answer cases only |\n| `Top-1 chunk hit` | {:.2}% | answer cases only |\n| `Top-5 chunk recall` | {:.2}% | answer cases only |\n| `chunk MRR` | {:.4} | answer cases only |\n| `citation validity` | {:.2}% | all cases |\n| `reject-correctness` | {:.2}% | all cases |\n| `rerank applied` | {:.2}% | all cases |\n| `index_prep_ms P50/P95` | N/A | single-run snapshot |\n",
             report.profile,
             report.watch_root,
             report.db_path,
@@ -1061,15 +1299,19 @@ fn render_baseline_section(report: &RegressionReport, mode: EvaluationMode) -> S
             report.baseline.indexed_chunk_count,
             report.baseline.rebuild_state,
             report.service_health,
+            report.rerank_health,
             report
                 .index_prep_ms
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "N/A".to_string()),
             report.summary.top1_document_hit_rate * 100.0,
             report.summary.top3_document_recall_rate * 100.0,
+            report.summary.top1_chunk_hit_rate * 100.0,
             report.summary.top5_chunk_recall_rate * 100.0,
+            report.summary.chunk_mrr,
             report.summary.citation_validity_rate * 100.0,
             report.summary.reject_correctness_rate * 100.0,
+            report.summary.rerank_applied_rate * 100.0,
         )
     } else {
         "- status: `N/A`\n- metrics: `N/A`\n".to_string()
@@ -1151,9 +1393,11 @@ fn unix_timestamp_string() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_OFFLINE_EMBEDDING_DIM, EvaluationMode, RegressionCase, RegressionMode,
-        RegressionProfile, build_deterministic_query_embedding,
+        DEFAULT_OFFLINE_EMBEDDING_DIM, EvaluationMode, RegressionCase, RegressionCaseResult,
+        RegressionMode, RegressionProfile, RegressionReport, RegressionSummary,
+        build_deterministic_query_embedding, render_report_markdown, summarize,
     };
+    use memori_core::{AskStatus, RuntimeRetrievalBaseline};
 
     #[test]
     fn deterministic_query_embedding_is_stable() {
@@ -1194,5 +1438,188 @@ mod tests {
                 .iter()
                 .any(|tag| tag == RegressionProfile::CoreDocs.as_str())
         );
+    }
+
+    #[test]
+    fn summarize_reports_chunk_and_rerank_metrics() {
+        let results = vec![
+            RegressionCaseResult {
+                id: "R1".to_string(),
+                query: "q1".to_string(),
+                mode: RegressionMode::Answer,
+                status: AskStatus::Answered,
+                timed_out: false,
+                scope_paths: Vec::new(),
+                target_documents: vec!["README.md".to_string()],
+                target_clues: vec!["desktop-first".to_string()],
+                document_hit_rank: Some(1),
+                chunk_hit_rank: Some(1),
+                top1_document_hit: true,
+                top1_chunk_hit: true,
+                top3_document_recall: true,
+                top5_chunk_recall: true,
+                citation_valid: true,
+                reject_correct: true,
+                rerank_applied: true,
+                citations_count: 1,
+                final_evidence_count: 1,
+                gating_decision_reason: "semantic_context_release".to_string(),
+                doc_recall_ms: 10,
+                doc_dense_ms: 4,
+                chunk_lexical_ms: 2,
+                chunk_dense_ms: 3,
+                merge_ms: 1,
+                rerank_ms: 6,
+                notes: None,
+            },
+            RegressionCaseResult {
+                id: "R2".to_string(),
+                query: "q2".to_string(),
+                mode: RegressionMode::Answer,
+                status: AskStatus::Answered,
+                timed_out: false,
+                scope_paths: Vec::new(),
+                target_documents: vec!["docs/guides/TUTORIAL.md".to_string()],
+                target_clues: vec!["low".to_string()],
+                document_hit_rank: Some(2),
+                chunk_hit_rank: Some(4),
+                top1_document_hit: false,
+                top1_chunk_hit: false,
+                top3_document_recall: true,
+                top5_chunk_recall: true,
+                citation_valid: true,
+                reject_correct: true,
+                rerank_applied: false,
+                citations_count: 1,
+                final_evidence_count: 1,
+                gating_decision_reason: "lexical_context_release".to_string(),
+                doc_recall_ms: 11,
+                doc_dense_ms: 5,
+                chunk_lexical_ms: 2,
+                chunk_dense_ms: 4,
+                merge_ms: 1,
+                rerank_ms: 0,
+                notes: None,
+            },
+            RegressionCaseResult {
+                id: "R3".to_string(),
+                query: "q3".to_string(),
+                mode: RegressionMode::Refuse,
+                status: AskStatus::InsufficientEvidence,
+                timed_out: false,
+                scope_paths: Vec::new(),
+                target_documents: Vec::new(),
+                target_clues: Vec::new(),
+                document_hit_rank: None,
+                chunk_hit_rank: None,
+                top1_document_hit: false,
+                top1_chunk_hit: false,
+                top3_document_recall: false,
+                top5_chunk_recall: false,
+                citation_valid: true,
+                reject_correct: true,
+                rerank_applied: true,
+                citations_count: 0,
+                final_evidence_count: 0,
+                gating_decision_reason: "insufficient_evidence".to_string(),
+                doc_recall_ms: 0,
+                doc_dense_ms: 0,
+                chunk_lexical_ms: 0,
+                chunk_dense_ms: 0,
+                merge_ms: 0,
+                rerank_ms: 0,
+                notes: None,
+            },
+        ];
+
+        let summary = summarize(&results);
+        assert_eq!(summary.case_count, 3);
+        assert_eq!(summary.answer_cases, 2);
+        assert_eq!(summary.refuse_cases, 1);
+        assert!((summary.top1_document_hit_rate - 0.5).abs() < f64::EPSILON);
+        assert!((summary.top1_chunk_hit_rate - 0.5).abs() < f64::EPSILON);
+        assert!((summary.top3_document_recall_rate - 1.0).abs() < f64::EPSILON);
+        assert!((summary.top5_chunk_recall_rate - 1.0).abs() < f64::EPSILON);
+        assert!((summary.chunk_mrr - 0.625).abs() < 1e-9);
+        assert!((summary.citation_validity_rate - 1.0).abs() < f64::EPSILON);
+        assert!((summary.reject_correctness_rate - 1.0).abs() < f64::EPSILON);
+        assert!((summary.rerank_applied_rate - (2.0 / 3.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn markdown_report_includes_rerank_health_and_gating_reason() {
+        let report = RegressionReport {
+            tool: "memori-core/examples/retrieval_regression.rs",
+            generated_at_utc: "1".to_string(),
+            evaluation_mode: "live_embedding".to_string(),
+            profile: "full_live".to_string(),
+            suite_path: "docs/qa/retrieval_regression_suite.json".to_string(),
+            watch_root: ".".to_string(),
+            db_path: "target/retrieval-regression/live.db".to_string(),
+            baseline: RuntimeRetrievalBaseline {
+                watch_root: Some(".".to_string()),
+                resolved_db_path: "target/retrieval-regression/live.db".to_string(),
+                embedding_model_key: "test-embed".to_string(),
+                embedding_dim: 256,
+                indexed_document_count: 3,
+                indexed_chunk_count: 7,
+                rebuild_state: "ready".to_string(),
+            },
+            service_health: "ready".to_string(),
+            rerank_health: "ready".to_string(),
+            live_service_used: true,
+            index_prep_ms: Some(42),
+            case_timeout_count: 0,
+            preparation_error: None,
+            summary: RegressionSummary {
+                case_count: 1,
+                answer_cases: 1,
+                refuse_cases: 0,
+                top1_document_hit_rate: 1.0,
+                top1_chunk_hit_rate: 1.0,
+                top3_document_recall_rate: 1.0,
+                top5_chunk_recall_rate: 1.0,
+                chunk_mrr: 1.0,
+                citation_validity_rate: 1.0,
+                reject_correctness_rate: 1.0,
+                rerank_applied_rate: 1.0,
+            },
+            cases: vec![RegressionCaseResult {
+                id: "R1".to_string(),
+                query: "q1".to_string(),
+                mode: RegressionMode::Answer,
+                status: AskStatus::Answered,
+                timed_out: false,
+                scope_paths: Vec::new(),
+                target_documents: vec!["README.md".to_string()],
+                target_clues: vec!["desktop-first".to_string()],
+                document_hit_rank: Some(1),
+                chunk_hit_rank: Some(1),
+                top1_document_hit: true,
+                top1_chunk_hit: true,
+                top3_document_recall: true,
+                top5_chunk_recall: true,
+                citation_valid: true,
+                reject_correct: true,
+                rerank_applied: true,
+                citations_count: 1,
+                final_evidence_count: 1,
+                gating_decision_reason: "semantic_context_release".to_string(),
+                doc_recall_ms: 10,
+                doc_dense_ms: 4,
+                chunk_lexical_ms: 2,
+                chunk_dense_ms: 3,
+                merge_ms: 1,
+                rerank_ms: 6,
+                notes: None,
+            }],
+        };
+
+        let markdown = render_report_markdown(&report);
+        assert!(markdown.contains("- rerank_health: `ready`"));
+        assert!(markdown.contains("- rerank applied: 100.00%"));
+        assert!(markdown.contains("- Chunk MRR: 1.0000"));
+        assert!(markdown.contains("| ID | Status | Timed Out | Doc Rank | Chunk Rank | Citation Valid | Reject Correct | Gating Reason |"));
+        assert!(markdown.contains("semantic_context_release"));
     }
 }
