@@ -1,7 +1,5 @@
-﻿use super::*;
-use crate::engine::{
-    answer_indicates_insufficient_evidence_with_mode, clean_generation_answer,
-};
+use super::*;
+use crate::engine::{answer_indicates_insufficient_evidence_with_mode, clean_generation_answer};
 
 impl MemoriEngine {
     fn retrieval_gating_profile(&self) -> RetrievalGatingProfile {
@@ -21,7 +19,12 @@ impl MemoriEngine {
     fn gating_retry_on_refusal(&self) -> bool {
         std::env::var(MEMORI_GATING_RETRY_ON_REFUSAL_ENV)
             .ok()
-            .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
             .unwrap_or(DEFAULT_GATING_RETRY_ON_REFUSAL)
     }
 
@@ -448,6 +451,4 @@ impl MemoriEngine {
             context_budget_report: ContextBudgetReport::default(),
         })
     }
-
-
 }

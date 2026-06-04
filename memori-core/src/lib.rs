@@ -13,6 +13,7 @@ mod llm_http;
 mod model_config;
 mod query;
 mod query_utils;
+mod rerank_client;
 mod retrieval;
 mod retrieval_eval;
 mod retrieval_output;
@@ -45,6 +46,7 @@ use memori_vault::{
     is_supported_content_file, spawn_memori_vault,
 };
 pub use model_config::*;
+pub use rerank_client::{LocalRerankClient, RerankClientError};
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
@@ -59,9 +61,11 @@ pub const DEFAULT_GRAPH_MODEL: &str = "qwen2.5:7b";
 pub const DEFAULT_CHAT_ENDPOINT: &str = "http://localhost:18001";
 pub const DEFAULT_GRAPH_ENDPOINT: &str = "http://localhost:18002";
 pub const DEFAULT_EMBED_ENDPOINT: &str = "http://localhost:18003";
+pub const DEFAULT_RERANK_ENDPOINT: &str = "http://localhost:18004";
 pub const DEFAULT_CHAT_MODEL_QWEN3: &str = "qwen3-14b";
 pub const DEFAULT_GRAPH_MODEL_QWEN3: &str = "qwen3-8b";
 pub const DEFAULT_EMBED_MODEL_QWEN3: &str = "Qwen3-Embedding-4B";
+pub const DEFAULT_RERANK_MODEL_GTE: &str = "gte-multilingual-reranker-base";
 const DEFAULT_DB_FILE_NAME: &str = ".memori.db";
 pub const MEMORI_DB_PATH_ENV: &str = "MEMORI_DB_PATH";
 pub const MEMORI_MODEL_PROVIDER_ENV: &str = "MEMORI_MODEL_PROVIDER";
@@ -78,12 +82,25 @@ pub const MEMORI_GATING_RETRY_ON_REFUSAL_ENV: &str = "MEMORI_GATING_RETRY_ON_REF
 pub const MEMORI_CHAT_ENDPOINT_ENV: &str = "MEMORI_CHAT_ENDPOINT";
 pub const MEMORI_GRAPH_ENDPOINT_ENV: &str = "MEMORI_GRAPH_ENDPOINT";
 pub const MEMORI_EMBED_ENDPOINT_ENV: &str = "MEMORI_EMBED_ENDPOINT";
+pub const MEMORI_RERANK_ENDPOINT_ENV: &str = "MEMORI_RERANK_ENDPOINT";
+pub const MEMORI_RERANK_MODEL_ENV: &str = "MEMORI_RERANK_MODEL";
+pub const MEMORI_RERANK_ENABLED_ENV: &str = "MEMORI_RERANK_ENABLED";
 const QUERY_EMBEDDING_CACHE_SIZE: usize = 256;
 const QUERY_EMBEDDING_CACHE_TTL_SECS: i64 = 300;
 const DEFAULT_DOC_TOP_K: usize = 12;
-const DEFAULT_CHUNK_CANDIDATE_K: usize = 20;
+/// dense 文档发现：在词法四路之外补一路全局语义召回，捞回"无 token 重叠但语义相近"的文档。
+/// 小而克制，避免淹没词法候选、稀释精度。
+const DENSE_DOC_TOP_K: usize = 10;
+/// 扩大 chunk 召回窗口，给融合/重排更多候选（原 20 与重排窗口相同，重排形同空转）。
+const DEFAULT_CHUNK_CANDIDATE_K: usize = 60;
 const DEFAULT_FINAL_ANSWER_K: usize = 6;
+/// 送入 cross-encoder 重排的候选分块上限（扩召回后取头部精排，控制延迟）。
+const DEFAULT_RERANK_CANDIDATE_K: usize = 30;
 const RRF_K: f64 = 60.0;
+/// 重排融合权重：fused = α·norm(rerank) + (1-α)·norm(RRF)。偏向 rerank 但不绝对接管。
+const RERANK_FUSION_ALPHA: f64 = 0.7;
+/// 精确路径 / scope 等强结构信号在融合分上的保护加成，抵抗小 reranker 的误压制。
+const RERANK_PROTECT_BONUS: f64 = 0.15;
 const DEFAULT_RETRIEVAL_GATING_PROFILE: RetrievalGatingProfile = RetrievalGatingProfile::Balanced;
 const DEFAULT_GENERATION_REFUSAL_MODE: GenerationRefusalMode = GenerationRefusalMode::Balanced;
 const DEFAULT_GATING_RETRY_ON_REFUSAL: bool = true;
@@ -438,11 +455,15 @@ pub struct RetrievalMetrics {
     pub doc_exact_ms: u64,
     pub doc_strict_lexical_ms: u64,
     pub doc_lexical_ms: u64,
+    #[serde(default)]
+    pub doc_dense_ms: u64,
     pub doc_merge_ms: u64,
     pub chunk_strict_lexical_ms: u64,
     pub chunk_lexical_ms: u64,
     pub chunk_dense_ms: u64,
     pub merge_ms: u64,
+    #[serde(default)]
+    pub rerank_ms: u64,
     pub answer_ms: u64,
     pub doc_candidate_count: usize,
     pub chunk_candidate_count: usize,
@@ -574,6 +595,8 @@ struct MergedEvidence {
     dense_rank: Option<usize>,
     dense_raw_score: Option<f32>,
     final_score: f64,
+    /// cross-encoder 重排分数。存在时作为排序首要键；None 表示未重排。
+    rerank_score: Option<f32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -676,6 +699,7 @@ pub struct AppState {
     pub parser: ParserStub,
     pub vector_store: Arc<SqliteStore>,
     pub embedding_client: LocalEmbeddingClient,
+    pub rerank_client: LocalRerankClient,
     db_path: PathBuf,
     query_embedding_cache: Arc<RwLock<HashMap<String, EmbeddingCacheItem>>>,
     indexing_runtime: Arc<RwLock<IndexingRuntimeState>>,
@@ -689,6 +713,7 @@ impl AppState {
             parser: ParserStub,
             vector_store,
             embedding_client: LocalEmbeddingClient::default(),
+            rerank_client: LocalRerankClient::default(),
             db_path,
             query_embedding_cache: Arc::new(RwLock::new(HashMap::new())),
             indexing_runtime: Arc::new(RwLock::new(IndexingRuntimeState {

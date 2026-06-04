@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 impl MemoriEngine {
     pub fn new(state: Arc<AppState>, event_rx: mpsc::Receiver<WatchEvent>) -> Self {
@@ -159,7 +159,11 @@ impl MemoriEngine {
                 }
                 "graphing" => graph_progress,
                 _ if graph_backlog > 0 => graph_progress.min(99),
-                _ if metadata.rebuild_state == memori_storage::RebuildState::Ready && has_any_indexed_data => 100,
+                _ if metadata.rebuild_state == memori_storage::RebuildState::Ready
+                    && has_any_indexed_data =>
+                {
+                    100
+                }
                 _ if retryable_search_ready => 83,
                 _ if indexed_chunks > 0 => 66,
                 _ => 0,
@@ -531,10 +535,7 @@ impl MemoriEngine {
 }
 
 pub(crate) fn answer_indicates_insufficient_evidence(answer: &str) -> bool {
-    answer_indicates_insufficient_evidence_with_mode(
-        answer,
-        DEFAULT_GENERATION_REFUSAL_MODE,
-    )
+    answer_indicates_insufficient_evidence_with_mode(answer, DEFAULT_GENERATION_REFUSAL_MODE)
 }
 
 pub(crate) fn answer_indicates_insufficient_evidence_with_mode(
@@ -563,9 +564,9 @@ pub(crate) fn answer_indicates_insufficient_evidence_with_mode(
     let prefix = cleaned.chars().take(160).collect::<String>();
     let prefix_lower = prefix.to_ascii_lowercase();
     let cleaned_len = cleaned.chars().count();
-    let hits_marker = markers
-        .iter()
-        .any(|marker| prefix.contains(marker) || prefix_lower.contains(&marker.to_ascii_lowercase()));
+    let hits_marker = markers.iter().any(|marker| {
+        prefix.contains(marker) || prefix_lower.contains(&marker.to_ascii_lowercase())
+    });
 
     match mode {
         GenerationRefusalMode::Strict => hits_marker,

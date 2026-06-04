@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 pub(crate) fn is_cjk(ch: char) -> bool {
     matches!(
@@ -621,7 +621,6 @@ pub(crate) fn doc_top_k_for_query_family(query_family: QueryFamily) -> usize {
     }
 }
 
-
 pub(crate) fn is_lookup_like_query(query: &str) -> bool {
     let lower = query.to_ascii_lowercase();
     lower.contains("/api/")
@@ -693,7 +692,9 @@ pub(crate) fn classify_query_family(
         || lower.contains(".toml")
         || lower.contains(".yaml")
         || lower.contains(".yml");
-    let has_code_symbol = identifier_terms.iter().any(|term| is_code_like_identifier_term(term))
+    let has_code_symbol = identifier_terms
+        .iter()
+        .any(|term| is_code_like_identifier_term(term))
         || lower.contains('_');
 
     let has_impl_cue = lower.contains("现在返回什么")
@@ -724,9 +725,10 @@ pub(crate) fn classify_query_family(
 
 pub(crate) fn should_mark_missing_file_lookup_intent(analysis: &QueryAnalysis) -> bool {
     analysis.flags.is_lookup_like
-        && analysis.filename_like_terms.iter().any(|term| {
-            term.contains('.') || term.contains('/') || term.contains('\\')
-        })
+        && analysis
+            .filename_like_terms
+            .iter()
+            .any(|term| term.contains('.') || term.contains('/') || term.contains('\\'))
 }
 
 pub(crate) fn should_force_missing_file_lookup(
@@ -751,5 +753,7 @@ pub(crate) fn chunk_text_contains_term(
     if normalized.is_empty() {
         return false;
     }
-    content.contains(&normalized) || heading.contains(&normalized) || file_path.contains(&normalized)
+    content.contains(&normalized)
+        || heading.contains(&normalized)
+        || file_path.contains(&normalized)
 }

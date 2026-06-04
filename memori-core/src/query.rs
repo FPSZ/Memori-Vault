@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 pub(crate) const CJK_QUESTION_SUFFIXES: &[&str] = &[
     "是什么",
@@ -14,7 +14,8 @@ pub(crate) const CJK_QUESTION_SUFFIXES: &[&str] = &[
     "在哪",
     "谁",
 ];
-pub(crate) const CJK_FILLER_CHARS: &[char] = &['的', '了', '吗', '呢', '啊', '吧', '呀', '嘛', '么', '是'];
+pub(crate) const CJK_FILLER_CHARS: &[char] =
+    &['的', '了', '吗', '呢', '啊', '吧', '呀', '嘛', '么', '是'];
 
 /// 中文技术文档高频噪声词：这些词在几乎所有文档中都会出现，
 /// 如果作为 strict lexical hit 会严重污染 rankings。

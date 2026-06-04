@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 impl SqliteStore {
     pub async fn get_chunks_by_file_path(
@@ -315,7 +315,6 @@ impl SqliteStore {
             .optional()
             .map_err(map_sqlite_error)
     }
-
 }
 
 pub(crate) fn parse_heading_path_json(raw: &str) -> Result<Vec<String>, StorageError> {

@@ -1,4 +1,46 @@
-﻿use super::*;
+use super::*;
+use std::cmp::Ordering;
+
+/// 证据排序的统一比较器。
+/// 有 cross-encoder 重排分时以重排分为首要键（降序）；任一方缺重排分时回落到原 RRF 排序
+/// （document_rank 升序 → final_score 降序 → chunk_index 升序），保证未重排路径行为不变。
+pub(crate) fn evidence_rank_cmp(a: &MergedEvidence, b: &MergedEvidence) -> Ordering {
+    match (a.rerank_score, b.rerank_score) {
+        (Some(x), Some(y)) => y
+            .total_cmp(&x)
+            .then_with(|| a.document_rank.cmp(&b.document_rank))
+            .then_with(|| b.final_score.total_cmp(&a.final_score))
+            .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index)),
+        // 已重排的证据排在未重排之前
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => a
+            .document_rank
+            .cmp(&b.document_rank)
+            .then_with(|| b.final_score.total_cmp(&a.final_score))
+            .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index)),
+    }
+}
+
+/// 构造送入 cross-encoder 的文档文本：标题路径 + 正文，截断以控制重排延迟与上下文。
+pub(crate) fn rerank_document_text(item: &MergedEvidence) -> String {
+    // 放宽截断上限，缓解代码 chunk 被砍掉目标函数体（query-aware 窗口留作后续）。
+    const MAX_RERANK_DOC_CHARS: usize = 1600;
+    let body = if item.chunk.heading_path.is_empty() {
+        item.chunk.content.clone()
+    } else {
+        format!(
+            "{}\n{}",
+            item.chunk.heading_path.join(" > "),
+            item.chunk.content
+        )
+    };
+    if body.chars().count() > MAX_RERANK_DOC_CHARS {
+        body.chars().take(MAX_RERANK_DOC_CHARS).collect()
+    } else {
+        body
+    }
+}
 
 pub(crate) fn merge_document_candidates(
     analysis: &QueryAnalysis,
@@ -336,6 +378,8 @@ pub(crate) fn document_reason_priority(
             "filename" => 4,
             "lexical_strict" => 3,
             "lexical_broad" => 2,
+            // 语义召回只补漏：代码题偏词法，排得很低，进候选但不抢头部。
+            "semantic" => 1,
             "docs_phrase" => match phrase_quality {
                 Some(PhraseQuality::Specific) => 1,
                 _ => 0,
@@ -351,6 +395,8 @@ pub(crate) fn document_reason_priority(
             "mixed" => 6,
             "lexical_strict" => 5,
             "filename" => 4,
+            // 文档类查询里语义更有价值，给中档（与 exact_path 同级）。
+            "semantic" => 3,
             "exact_path" => 3,
             "lexical_broad" => 2,
             "exact_symbol" => 0,
@@ -365,6 +411,8 @@ pub(crate) fn document_reason_priority(
             "mixed" => 6,
             "lexical_strict" => 5,
             "filename" => 4,
+            // 解释类查询里语义更有价值，给中档（与 exact_path 同级）。
+            "semantic" => 3,
             "exact_path" => 3,
             "lexical_broad" => 2,
             "exact_symbol" => 0,
@@ -379,21 +427,57 @@ pub(crate) fn is_implementation_lookup(analysis: &QueryAnalysis) -> bool {
 }
 
 pub(crate) fn is_routing_noise_document(relative_path: &str) -> bool {
-    let lower = relative_path.to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "readme.md"
-            | "docs/plan.md"
-            | "docs/planning/plan.md"
-            | "docs/tutorial.md"
-            | "docs/guides/tutorial.md"
-    ) || lower.starts_with("docs/ai")  // docs/AI.md, docs/ai-overview.md 等 meta-analysis
-        || lower == "docs/structure.md"
-        || lower == "docs/architecture/structure.md"
-        || lower == "docs/architecture.md"
-        || lower == "docs/overview.md"
-        || lower == "docs/design.md"
-        || lower == "docs/roadmap.md"
+    let normalized = relative_path.trim().replace('\\', "/");
+    let segments = normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    let Some(file_name) = segments.last() else {
+        return false;
+    };
+
+    let file_name = file_name.to_ascii_lowercase();
+    let (stem, extension) = file_name
+        .rsplit_once('.')
+        .map(|(stem, extension)| (stem, Some(extension)))
+        .unwrap_or((file_name.as_str(), None));
+    if !matches!(extension, None | Some("md" | "markdown" | "txt")) {
+        return false;
+    }
+
+    let is_root_level = segments.len() == 1;
+    let in_docs_like_dir = segments[..segments.len().saturating_sub(1)]
+        .iter()
+        .any(|segment| {
+            matches!(
+                segment.to_ascii_lowercase().as_str(),
+                "docs" | "doc" | "wiki" | "planning" | "design"
+            )
+        });
+    let always_noise_stem = matches!(stem, "readme" | "index" | "contributing" | "changelog");
+    let docs_context_noise_stem = matches!(
+        stem,
+        "overview"
+            | "structure"
+            | "architecture"
+            | "design"
+            | "roadmap"
+            | "plan"
+            | "tutorial"
+            | "guide"
+            | "guides"
+            | "summary"
+    ) && (is_root_level || in_docs_like_dir);
+
+    always_noise_stem
+        || docs_context_noise_stem
+        || stem == "ai"
+        || stem.starts_with("ai-")
+        || stem.starts_with("ai_")
+        || segments.iter().any(|segment| {
+            let segment = segment.to_ascii_lowercase();
+            segment == "ai" || segment.starts_with("ai-") || segment.starts_with("ai_")
+        })
 }
 
 pub(crate) fn merge_chunk_evidence(
@@ -474,6 +558,7 @@ pub(crate) fn merge_chunk_evidence(
                 dense_rank: None,
                 dense_raw_score: None,
                 final_score,
+                rerank_score: None,
             });
     }
 
@@ -529,6 +614,7 @@ pub(crate) fn merge_chunk_evidence(
                 dense_rank: None,
                 dense_raw_score: None,
                 final_score,
+                rerank_score: None,
             });
     }
 
@@ -574,6 +660,7 @@ pub(crate) fn merge_chunk_evidence(
                 dense_rank: Some(index + 1),
                 dense_raw_score: Some(dense_score),
                 final_score,
+                rerank_score: None,
             });
     }
 
@@ -597,12 +684,7 @@ pub(crate) fn merge_chunk_evidence(
     }
 
     let mut items = merged.into_values().collect::<Vec<_>>();
-    items.sort_by(|a, b| {
-        a.document_rank
-            .cmp(&b.document_rank)
-            .then_with(|| b.final_score.total_cmp(&a.final_score))
-            .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index))
-    });
+    items.sort_by(evidence_rank_cmp);
     items
 }
 
@@ -613,4 +695,45 @@ pub(crate) fn should_refuse_for_insufficient_evidence(
 ) -> bool {
     evaluate_gating_decision_with_profile(analysis, evidence, DEFAULT_RETRIEVAL_GATING_PROFILE)
         .refuse
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routing_noise_document_uses_document_structure_not_full_paths() {
+        for path in [
+            "readme.md",
+            "Docs/README.md",
+            "docs/structure.md",
+            "docs/guides/tutorial.md",
+            "docs/summary.md",
+            "docs/architecture.md",
+            "docs/ai-overview.md",
+            "vault/ai/analysis.md",
+            "docs/AI.md",
+            "notes/ai_overview.txt",
+        ] {
+            assert!(
+                is_routing_noise_document(path),
+                "{path} should be treated as routing noise"
+            );
+        }
+
+        for path in [
+            "src/router.rs",
+            "docs/api-reference.md",
+            "readme_generator.ts",
+            "notes/architecture.rs",
+            "notes/summary.md",
+            "projects/foo/design.md",
+            "日记/overview.md",
+        ] {
+            assert!(
+                !is_routing_noise_document(path),
+                "{path} should not be treated as routing noise"
+            );
+        }
+    }
 }

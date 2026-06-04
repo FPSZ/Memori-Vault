@@ -552,11 +552,10 @@ pub enum StorageError {
     #[error("数据库中的 chunk_index 非法: {raw}")]
     InvalidChunkIndex { raw: i64 },
 
-    #[error("embedding 缁存暟涓嶅尮閰? query={query_dim}, stored={stored_dim}. 璇烽噸寤虹储寮曚互鍖归厤褰撳墠 embedding 妯″瀷")]
-    EmbeddingDimensionMismatch {
-        query_dim: usize,
-        stored_dim: usize,
-    },
+    #[error(
+        "embedding 缁存暟涓嶅尮閰? query={query_dim}, stored={stored_dim}. 璇烽噸寤虹储寮曚互鍖归厤褰撳墠 embedding 妯″瀷"
+    )]
+    EmbeddingDimensionMismatch { query_dim: usize, stored_dim: usize },
 
     #[error("SQLite 连接锁已损坏: {0}")]
     LockPoisoned(&'static str),

@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 pub(crate) fn build_fts_match_query(query: &str, mode: FtsQueryMode) -> Option<String> {
     let mut terms = Vec::new();
@@ -580,4 +580,3 @@ pub(crate) fn is_english_stopword(term: &str) -> bool {
             | "me"
     )
 }
-

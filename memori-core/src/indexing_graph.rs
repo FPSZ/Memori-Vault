@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -223,4 +223,3 @@ fn graph_worker_batch_size() -> usize {
         .map(|value| value.min(16))
         .unwrap_or(2)
 }
-

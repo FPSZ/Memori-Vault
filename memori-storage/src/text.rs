@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 pub(crate) const CJK_QUESTION_SUFFIXES: &[&str] = &[
     "是什么",
@@ -14,7 +14,8 @@ pub(crate) const CJK_QUESTION_SUFFIXES: &[&str] = &[
     "在哪",
     "谁",
 ];
-pub(crate) const CJK_FILLER_CHARS: &[char] = &['的', '了', '吗', '呢', '啊', '吧', '呀', '嘛', '么', '是'];
+pub(crate) const CJK_FILLER_CHARS: &[char] =
+    &['的', '了', '吗', '呢', '啊', '吧', '呀', '嘛', '么', '是'];
 
 pub(crate) const CJK_QUESTION_SUFFIX_FALLBACKS: &[&str] = &[
     "\u{662f}\u{4ec0}\u{4e48}",

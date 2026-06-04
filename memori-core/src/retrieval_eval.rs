@@ -1,6 +1,12 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 
+/// 纯语义 top 放行的余弦阈值（多 chunk 一致命中时的较低门槛）。
+/// 注：与 embedding 模型强相关（当前默认 Qwen3-Embedding），无回归集前为保守经验值，易于调参。
+const DENSE_MULTI_CHUNK_COS_MIN: f32 = 0.50;
+/// 单 chunk 命中时要求更高余弦，避免单条飘忽的向量命中误放行。
+const DENSE_SINGLE_CHUNK_COS_MIN: f32 = 0.65;
+
 #[derive(Debug, Clone)]
 pub(crate) struct GatingDecision {
     pub(crate) refuse: bool,
@@ -95,10 +101,7 @@ pub(crate) fn evaluate_gating_decision_with_profile(
     decision
 }
 
-fn evaluate_hard_block(
-    analysis: &QueryAnalysis,
-    evidence: &[MergedEvidence],
-) -> HardBlockDecision {
+fn evaluate_hard_block(analysis: &QueryAnalysis, evidence: &[MergedEvidence]) -> HardBlockDecision {
     if evidence.is_empty() {
         return HardBlockDecision::refuse("empty_evidence");
     }
@@ -139,7 +142,10 @@ pub(crate) fn score_evidence_gate(
     let top_group = source_group_key(&top.relative_path, &top.chunk.file_path.to_string_lossy());
     let top_group_items = evidence
         .iter()
-        .filter(|item| source_group_key(&item.relative_path, &item.chunk.file_path.to_string_lossy()) == top_group)
+        .filter(|item| {
+            source_group_key(&item.relative_path, &item.chunk.file_path.to_string_lossy())
+                == top_group
+        })
         .collect::<Vec<_>>();
     let (hits, coverage) = compute_top_doc_term_coverage(analysis, &top_group_items);
     let _ = profile;
@@ -170,26 +176,36 @@ pub(crate) fn decide_with_profile(
 
     let mut breakdown = GatingBreakdown::default();
     let top_group_id = source_group_key(&top.relative_path, &top.chunk.file_path.to_string_lossy());
-    let grouped = evidence
-        .iter()
-        .fold(HashMap::<String, Vec<&MergedEvidence>>::new(), |mut acc, item| {
-            let group_id = source_group_key(&item.relative_path, &item.chunk.file_path.to_string_lossy());
+    let grouped = evidence.iter().fold(
+        HashMap::<String, Vec<&MergedEvidence>>::new(),
+        |mut acc, item| {
+            let group_id =
+                source_group_key(&item.relative_path, &item.chunk.file_path.to_string_lossy());
             acc.entry(group_id).or_default().push(item);
             acc
-        });
+        },
+    );
     let top_group_items = grouped.get(&top_group_id).cloned().unwrap_or_default();
     let top_group_chunk_count = top_group_items.len();
-    let lexical_count = top_group_items.iter().filter(|item| has_any_chunk_lexical(item)).count();
+    let lexical_count = top_group_items
+        .iter()
+        .filter(|item| has_any_chunk_lexical(item))
+        .count();
     let has_strict_lexical = top_group_items
         .iter()
         .any(|item| item.lexical_strict_rank.is_some());
     let has_grounding_signal = inputs.has_grounding_signal;
-    let has_doc_signal = top_group_items.iter().any(|item| has_document_level_grounding(item));
+    let has_doc_signal = top_group_items
+        .iter()
+        .any(|item| has_document_level_grounding(item));
     let cross_source = grouped.len();
     let query_is_lookup = analysis.flags.is_lookup_like
         || matches!(analysis.query_family, QueryFamily::ImplementationLookup);
 
-    breakdown.document_signal = if top_group_items.iter().any(|item| item.document_reason == "scope") {
+    breakdown.document_signal = if top_group_items
+        .iter()
+        .any(|item| item.document_reason == "scope")
+    {
         18
     } else if has_doc_signal {
         10
@@ -201,21 +217,25 @@ pub(crate) fn decide_with_profile(
         24
     } else if has_strict_lexical || lexical_count >= 1 {
         16
-    } else if top_group_items.iter().any(|item| item.lexical_broad_rank.is_some()) {
+    } else if top_group_items
+        .iter()
+        .any(|item| item.lexical_broad_rank.is_some())
+    {
         12
     } else {
         0
     };
 
-    breakdown.coverage = if inputs.top_doc_distinct_term_hits >= 3 && inputs.top_doc_term_coverage >= 0.65 {
-        22
-    } else if inputs.top_doc_distinct_term_hits >= 2 && inputs.top_doc_term_coverage >= 0.4 {
-        22
-    } else if inputs.top_doc_distinct_term_hits >= 1 && inputs.top_doc_term_coverage >= 0.2 {
-        8
-    } else {
-        0
-    };
+    breakdown.coverage =
+        if inputs.top_doc_distinct_term_hits >= 3 && inputs.top_doc_term_coverage >= 0.65 {
+            26
+        } else if inputs.top_doc_distinct_term_hits >= 2 && inputs.top_doc_term_coverage >= 0.4 {
+            22
+        } else if inputs.top_doc_distinct_term_hits >= 1 && inputs.top_doc_term_coverage >= 0.2 {
+            8
+        } else {
+            0
+        };
 
     breakdown.multi_chunk = if top_group_chunk_count >= 3 {
         14
@@ -240,10 +260,30 @@ pub(crate) fn decide_with_profile(
     };
 
     let dense_only_top = top.dense_rank.is_some() && !has_any_chunk_lexical(top);
-    breakdown.dense_only_penalty = if dense_only_top && analysis.flags.token_count >= 3 {
-        -18
-    } else if dense_only_top {
-        -10
+    // 充分语义上下文（§3）：纯语义 top 若是「高余弦 + 同源多 chunk 一致命中」（或单 chunk 但余弦极高），
+    // 视为可信语义证据——这是「中文同义不同词被拒」病根的解药，不依赖词法重叠，
+    // 但用余弦阈值 + 多 chunk 一致性兜底，避免单条飘忽向量命中导致误答。
+    let dense_chunk_count = top_group_items
+        .iter()
+        .filter(|item| item.dense_rank.is_some())
+        .count();
+    let top_cosine = top.dense_raw_score.unwrap_or(0.0);
+    // 仅对「解释/回忆型」查询开放语义放行：精确 lookup（点名文件/符号、实现细节）若无词法重叠，
+    // 在模糊语义匹配上作答有幻觉风险，维持原拒答。
+    let semantic_release_eligible = !analysis.flags.is_lookup_like
+        && !matches!(analysis.query_family, QueryFamily::ImplementationLookup);
+    let strong_semantic_context = dense_only_top
+        && semantic_release_eligible
+        && ((dense_chunk_count >= 2 && top_cosine >= DENSE_MULTI_CHUNK_COS_MIN)
+            || top_cosine >= DENSE_SINGLE_CHUNK_COS_MIN);
+
+    // 仅在「非可信语义上下文」时维持原 dense-only 罚分；可信语义证据豁免（并在下方放行）。
+    breakdown.dense_only_penalty = if dense_only_top && !strong_semantic_context {
+        if analysis.flags.token_count >= 3 {
+            -18
+        } else {
+            -10
+        }
     } else {
         0
     };
@@ -268,23 +308,24 @@ pub(crate) fn decide_with_profile(
         + breakdown.dense_only_penalty
         + breakdown.docs_query_boost;
     let threshold = profile.threshold();
-    let has_grounded_single_chunk_release = has_grounded_single_chunk_release(
-        analysis,
-        &top_group_items,
-        &inputs,
-        &breakdown,
-    );
-    let effective_score = if has_grounded_single_chunk_release && total_score < threshold {
+    let has_grounded_single_chunk_release =
+        has_grounded_single_chunk_release(analysis, &top_group_items, &inputs, &breakdown);
+    let effective_score = if (has_grounded_single_chunk_release || strong_semantic_context)
+        && total_score < threshold
+    {
         threshold
     } else {
         total_score
     };
     let passes_threshold = effective_score >= threshold;
-    let refuse = !passes_threshold || !has_grounding_signal;
+    // 可信语义上下文本身即构成 grounding（替代缺失的词法/文档结构信号），不再因 grounding 缺失而拒答。
+    let refuse = !passes_threshold || !(has_grounding_signal || strong_semantic_context);
     let reason = if !passes_threshold {
         "score_below_threshold"
-    } else if !has_grounding_signal {
+    } else if !(has_grounding_signal || strong_semantic_context) {
         "missing_grounding_signal"
+    } else if strong_semantic_context && !has_grounding_signal {
+        "semantic_context_release"
     } else if has_grounded_single_chunk_release
         && matches!(analysis.query_family, QueryFamily::DocsExplanatory)
         && !analysis.flags.is_lookup_like
@@ -300,7 +341,9 @@ pub(crate) fn decide_with_profile(
         "docs_family_multi_chunk_release"
     } else if analysis.flags.is_lookup_like
         && inputs.top_doc_term_coverage >= 0.65
-        && top_group_items.iter().any(|item| item.lexical_broad_rank.is_some())
+        && top_group_items
+            .iter()
+            .any(|item| item.lexical_broad_rank.is_some())
     {
         "high_coverage_lexical_release"
     } else if !analysis.flags.is_lookup_like
@@ -413,7 +456,10 @@ pub(crate) fn compound_part_has_grounded_evidence(
     let top_group = source_group_key(&top.relative_path, &top.chunk.file_path.to_string_lossy());
     let top_group_items = evidence
         .iter()
-        .filter(|item| source_group_key(&item.relative_path, &item.chunk.file_path.to_string_lossy()) == top_group)
+        .filter(|item| {
+            source_group_key(&item.relative_path, &item.chunk.file_path.to_string_lossy())
+                == top_group
+        })
         .collect::<Vec<_>>();
     let (hits, coverage) = compute_top_doc_term_coverage(analysis, &top_group_items);
     hits >= 2 && coverage >= 0.4
@@ -478,8 +524,12 @@ fn has_grounded_single_chunk_release(
         return false;
     }
 
-    let has_lexical = top_group_items.iter().any(|item| has_any_chunk_lexical(item));
-    let has_doc_signal = top_group_items.iter().any(|item| has_document_level_grounding(item));
+    let has_lexical = top_group_items
+        .iter()
+        .any(|item| has_any_chunk_lexical(item));
+    let has_doc_signal = top_group_items
+        .iter()
+        .any(|item| has_document_level_grounding(item));
     if !(has_lexical || has_doc_signal) {
         return false;
     }
@@ -572,5 +622,153 @@ fn source_group_key(relative_path: &str, file_path: &str) -> String {
         canonical_stem
     } else {
         format!("{parent}/{canonical_stem}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn gating_evidence() -> MergedEvidence {
+        MergedEvidence {
+            chunk: DocumentChunk {
+                file_path: PathBuf::from("docs/source.md"),
+                content: "alpha beta gamma".to_string(),
+                chunk_index: 0,
+                heading_path: vec!["source".to_string()],
+                block_kind: memori_parser::ChunkBlockKind::Paragraph,
+            },
+            relative_path: "docs/source.md".to_string(),
+            document_reason: "lexical_strict".to_string(),
+            document_rank: 1,
+            document_raw_score: Some(1.0),
+            document_has_exact_signal: false,
+            document_has_docs_phrase_signal: false,
+            document_docs_phrase_quality: None,
+            document_has_filename_signal: false,
+            document_has_strict_lexical: true,
+            lexical_strict_rank: Some(1),
+            lexical_broad_rank: None,
+            lexical_raw_score: Some(1.0),
+            dense_rank: None,
+            dense_raw_score: None,
+            final_score: 1.0,
+            rerank_score: None,
+        }
+    }
+
+    fn coverage_score(hits: usize, coverage: f64) -> i32 {
+        let analysis = analyze_query("alpha beta gamma");
+        let inputs = EvidenceScoreInputs {
+            top_doc_distinct_term_hits: hits,
+            top_doc_term_coverage: coverage,
+            top_doc_phrase_quality: None,
+            has_grounding_signal: true,
+        };
+        decide_with_profile(
+            &analysis,
+            &[gating_evidence()],
+            RetrievalGatingProfile::Balanced,
+            inputs,
+        )
+        .gate_score
+        .breakdown
+        .coverage
+    }
+
+    #[test]
+    fn coverage_score_uses_high_medium_low_gradient() {
+        assert_eq!(coverage_score(3, 0.65), 26);
+        assert_eq!(coverage_score(2, 0.4), 22);
+        assert_eq!(coverage_score(1, 0.2), 8);
+        assert_eq!(coverage_score(0, 0.0), 0);
+    }
+
+    /// 纯语义证据（无词法、无文档结构信号），仅靠 dense 余弦与 chunk 一致性。
+    fn dense_semantic_evidence(cosine: f32, chunk_index: usize) -> MergedEvidence {
+        MergedEvidence {
+            chunk: DocumentChunk {
+                file_path: PathBuf::from("docs/notes.md"),
+                content: "语义相近但用词不同的内容".to_string(),
+                chunk_index,
+                heading_path: vec!["笔记".to_string()],
+                block_kind: memori_parser::ChunkBlockKind::Paragraph,
+            },
+            relative_path: "docs/notes.md".to_string(),
+            document_reason: "semantic".to_string(),
+            document_rank: 1,
+            document_raw_score: Some(cosine as f64),
+            document_has_exact_signal: false,
+            document_has_docs_phrase_signal: false,
+            document_docs_phrase_quality: None,
+            document_has_filename_signal: false,
+            document_has_strict_lexical: false,
+            lexical_strict_rank: None,
+            lexical_broad_rank: None,
+            lexical_raw_score: None,
+            dense_rank: Some(chunk_index + 1),
+            dense_raw_score: Some(cosine),
+            final_score: cosine as f64,
+            rerank_score: None,
+        }
+    }
+
+    fn decide_dense_only(query: &str, evidence: &[MergedEvidence]) -> GatingDecision {
+        let analysis = analyze_query(query);
+        let inputs = EvidenceScoreInputs {
+            top_doc_distinct_term_hits: 0,
+            top_doc_term_coverage: 0.0,
+            top_doc_phrase_quality: None,
+            has_grounding_signal: false,
+        };
+        decide_with_profile(
+            &analysis,
+            evidence,
+            RetrievalGatingProfile::Balanced,
+            inputs,
+        )
+    }
+
+    #[test]
+    fn explanatory_strong_semantic_context_is_released_not_refused() {
+        // 解释/回忆型查询 + 高余弦多 chunk 一致的纯语义证据 → 放行（修复"同义不同词被拒"）。
+        let evidence = vec![
+            dense_semantic_evidence(0.72, 0),
+            dense_semantic_evidence(0.68, 1),
+        ];
+        let decision = decide_dense_only("我之前对这件事整体的想法和感受是怎样的", &evidence);
+        assert!(
+            !decision.refuse,
+            "strong multi-chunk semantic context should be released, got reason {}",
+            decision.reason
+        );
+        assert_eq!(decision.reason, "semantic_context_release");
+    }
+
+    #[test]
+    fn weak_single_dense_hit_stays_refused() {
+        // 单条中等余弦的飘忽向量命中 → 维持拒答，避免误答。
+        let evidence = vec![dense_semantic_evidence(0.55, 0)];
+        let decision = decide_dense_only("我之前对这件事整体的想法和感受是怎样的", &evidence);
+        assert!(
+            decision.refuse,
+            "a single mid-cosine dense-only hit must not release"
+        );
+    }
+
+    #[test]
+    fn lookup_query_with_strong_semantic_context_stays_refused() {
+        // 精确 lookup（点名文件 + 实现细节）即使高余弦，仍维持拒答，防模糊语义匹配上幻觉。
+        let evidence = vec![
+            dense_semantic_evidence(0.91, 0),
+            dense_semantic_evidence(0.88, 1),
+        ];
+        let decision =
+            decide_dense_only("请总结 week8_report.md 里的长跳转公式和实现细节", &evidence);
+        assert!(
+            decision.refuse,
+            "lookup-style query must keep strict dense-only refusal"
+        );
     }
 }

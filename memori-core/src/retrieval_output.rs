@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use std::collections::HashSet;
 
 pub(crate) fn build_citations(evidence: &[MergedEvidence]) -> Vec<CitationItem> {
@@ -113,17 +113,13 @@ pub(crate) fn select_balanced_final_evidence(
 
     let mut by_group = std::collections::BTreeMap::<String, Vec<MergedEvidence>>::new();
     for item in evidence {
-        let group_key = source_group_id(&item.relative_path, &item.chunk.file_path.to_string_lossy());
+        let group_key =
+            source_group_id(&item.relative_path, &item.chunk.file_path.to_string_lossy());
         by_group.entry(group_key).or_default().push(item);
     }
 
     for items in by_group.values_mut() {
-        items.sort_by(|a, b| {
-            a.document_rank
-                .cmp(&b.document_rank)
-                .then_with(|| b.final_score.total_cmp(&a.final_score))
-                .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index))
-        });
+        items.sort_by(evidence_rank_cmp);
     }
 
     let mut selected = Vec::new();
@@ -144,21 +140,11 @@ pub(crate) fn select_balanced_final_evidence(
 
     if selected.len() < final_answer_k {
         let mut remaining = by_group.into_values().flatten().collect::<Vec<_>>();
-        remaining.sort_by(|a, b| {
-            a.document_rank
-                .cmp(&b.document_rank)
-                .then_with(|| b.final_score.total_cmp(&a.final_score))
-                .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index))
-        });
+        remaining.sort_by(evidence_rank_cmp);
         selected.extend(remaining.into_iter().take(final_answer_k - selected.len()));
     }
 
-    selected.sort_by(|a, b| {
-        a.document_rank
-            .cmp(&b.document_rank)
-            .then_with(|| b.final_score.total_cmp(&a.final_score))
-            .then_with(|| a.chunk.chunk_index.cmp(&b.chunk.chunk_index))
-    });
+    selected.sort_by(evidence_rank_cmp);
     selected.truncate(final_answer_k);
     selected
 }
@@ -201,6 +187,7 @@ pub(crate) fn build_merged_evidence_from_items(items: &[EvidenceItem]) -> Vec<Me
                 .then_some(item.chunk_rank),
             dense_raw_score: item.dense_raw_score,
             final_score: item.final_score,
+            rerank_score: None,
         })
         .collect()
 }
@@ -442,21 +429,27 @@ pub(crate) fn build_answer_question(query: &str, lang: Option<&str>) -> String {
     match normalize_language(lang) {
         Some("zh-CN") => {
             if terse_topic_query {
-                format!("{query}\n\n请仅使用中文回答。若这只是一个项目名、代号或主题名，请直接概述该主题在证据中的核心内容，优先回答负责人、核心规定、关键指标或时间窗口。")
+                format!(
+                    "{query}\n\n请仅使用中文回答。若这只是一个项目名、代号或主题名，请直接概述该主题在证据中的核心内容，优先回答负责人、核心规定、关键指标或时间窗口。"
+                )
             } else {
                 format!("{query}\n\n请仅使用中文回答。")
             }
         }
         Some("en-US") => {
             if terse_topic_query {
-                format!("{query}\n\nPlease answer in English only. If this is only a project name, code, or topic label, give a direct evidence-grounded overview first, prioritizing owner, rule, KPI, or key time window.")
+                format!(
+                    "{query}\n\nPlease answer in English only. If this is only a project name, code, or topic label, give a direct evidence-grounded overview first, prioritizing owner, rule, KPI, or key time window."
+                )
             } else {
                 format!("{query}\n\nPlease answer in English only.")
             }
         }
         _ => {
             if terse_topic_query {
-                format!("{query}\n\nIf this is only a project name, code, or topic label, give a direct evidence-grounded overview first, prioritizing owner, rule, KPI, or key time window.")
+                format!(
+                    "{query}\n\nIf this is only a project name, code, or topic label, give a direct evidence-grounded overview first, prioritizing owner, rule, KPI, or key time window."
+                )
             } else {
                 query.to_string()
             }

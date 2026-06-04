@@ -4,10 +4,11 @@ use std::str::FromStr;
 use crate::{
     DEFAULT_CHAT_ENDPOINT, DEFAULT_CHAT_MODEL_QWEN3, DEFAULT_EMBED_ENDPOINT,
     DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_GRAPH_ENDPOINT, DEFAULT_GRAPH_MODEL_QWEN3,
-    MEMORI_CHAT_API_FORMAT_ENV, MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV,
-    MEMORI_EMBED_ENDPOINT_ENV, MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV,
-    MEMORI_GRAPH_MODEL_ENV, MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_PROTOCOL_ENV,
-    MEMORI_MODEL_PROVIDER_ENV,
+    DEFAULT_RERANK_ENDPOINT, DEFAULT_RERANK_MODEL_GTE, MEMORI_CHAT_API_FORMAT_ENV,
+    MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_ENDPOINT_ENV,
+    MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV, MEMORI_GRAPH_MODEL_ENV,
+    MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_PROTOCOL_ENV, MEMORI_MODEL_PROVIDER_ENV,
+    MEMORI_RERANK_ENABLED_ENV, MEMORI_RERANK_ENDPOINT_ENV, MEMORI_RERANK_MODEL_ENV,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +134,11 @@ pub struct RuntimeModelConfig {
     pub graph_model: String,
     pub embed_endpoint: String,
     pub embed_model: String,
+    /// cross-encoder 重排服务（llama-server --reranking）。第 4 个本地角色，独立端口。
+    pub rerank_endpoint: String,
+    pub rerank_model: String,
+    /// 是否启用召回后重排。关闭或服务不可达时检索自动回落到 RRF 排序。
+    pub rerank_enabled: bool,
     pub api_key: Option<String>,
     pub chat_context_length: Option<u32>,
     pub graph_context_length: Option<u32>,
@@ -169,6 +175,20 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
         .unwrap_or_else(|_| DEFAULT_GRAPH_MODEL_QWEN3.to_string());
     let embed_model = std::env::var(MEMORI_EMBED_MODEL_ENV)
         .unwrap_or_else(|_| DEFAULT_EMBED_MODEL_QWEN3.to_string());
+    let rerank_endpoint = std::env::var(MEMORI_RERANK_ENDPOINT_ENV)
+        .unwrap_or_else(|_| DEFAULT_RERANK_ENDPOINT.to_string());
+    let rerank_model = std::env::var(MEMORI_RERANK_MODEL_ENV)
+        .unwrap_or_else(|_| DEFAULT_RERANK_MODEL_GTE.to_string());
+    // 默认开启；服务不可达时检索层会自动降级，因此 opt-out 而非 opt-in。
+    let rerank_enabled = std::env::var(MEMORI_RERANK_ENABLED_ENV)
+        .ok()
+        .map(|value| {
+            !matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off" | "disabled" | "no"
+            )
+        })
+        .unwrap_or(true);
 
     RuntimeModelConfig {
         provider,
@@ -191,6 +211,9 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
         graph_model,
         embed_endpoint,
         embed_model,
+        rerank_endpoint,
+        rerank_model,
+        rerank_enabled,
         api_key,
         chat_context_length: std::env::var("MEMORI_CHAT_CONTEXT_LENGTH")
             .ok()
@@ -259,6 +282,57 @@ mod tests {
             build_openai_url("https://api.example.com/custom#", "responses"),
             "https://api.example.com/custom"
         );
+    }
+
+    fn sample_remote_runtime(rerank_enabled: bool, rerank_model: &str) -> RuntimeModelConfig {
+        RuntimeModelConfig {
+            provider: ModelProvider::OpenAiCompatible,
+            protocol: RemoteModelProtocol::OpenAiChatCompletions,
+            api_format: ChatApiFormat::Chat,
+            chat_endpoint: "https://models.company.local/v1".to_string(),
+            chat_model: "approved-chat".to_string(),
+            graph_endpoint: "https://models.company.local/v1".to_string(),
+            graph_model: "approved-chat".to_string(),
+            embed_endpoint: "https://models.company.local/v1".to_string(),
+            embed_model: "approved-embed".to_string(),
+            rerank_endpoint: "https://models.company.local/v1".to_string(),
+            rerank_model: rerank_model.to_string(),
+            rerank_enabled,
+            api_key: Some("secret".to_string()),
+            chat_context_length: None,
+            graph_context_length: None,
+            embed_context_length: None,
+            chat_concurrency: None,
+            graph_concurrency: None,
+            embed_concurrency: None,
+        }
+    }
+
+    #[test]
+    fn disabled_rerank_does_not_block_remote_runtime_allowlist() {
+        let policy = EnterpriseModelPolicy {
+            egress_mode: EgressMode::Allowlist,
+            allowed_model_endpoints: vec!["https://models.company.local/v1".to_string()],
+            allowed_models: vec!["approved-chat".to_string(), "approved-embed".to_string()],
+        };
+
+        let runtime = sample_remote_runtime(false, "gte-multilingual-reranker-base");
+        assert!(validate_runtime_model_settings(&policy, &runtime).is_ok());
+    }
+
+    #[test]
+    fn enabled_rerank_still_requires_allowlisted_model() {
+        let policy = EnterpriseModelPolicy {
+            egress_mode: EgressMode::Allowlist,
+            allowed_model_endpoints: vec!["https://models.company.local/v1".to_string()],
+            allowed_models: vec!["approved-chat".to_string(), "approved-embed".to_string()],
+        };
+
+        let runtime = sample_remote_runtime(true, "gte-multilingual-reranker-base");
+        let violation = validate_runtime_model_settings(&policy, &runtime)
+            .expect_err("enabled rerank should still be validated");
+        assert_eq!(violation.code, "model_not_allowlisted");
+        assert!(violation.message.contains("gte-multilingual-reranker-base"));
     }
 }
 
@@ -352,20 +426,40 @@ pub fn validate_runtime_model_settings(
     policy: &EnterpriseModelPolicy,
     runtime: &RuntimeModelConfig,
 ) -> Result<(), PolicyViolation> {
-    for (name, endpoint) in [
-        ("chat", &runtime.chat_endpoint),
-        ("graph", &runtime.graph_endpoint),
-        ("embed", &runtime.embed_endpoint),
+    for (name, endpoint, model, enabled) in [
+        (
+            "chat",
+            runtime.chat_endpoint.as_str(),
+            runtime.chat_model.as_str(),
+            true,
+        ),
+        (
+            "graph",
+            runtime.graph_endpoint.as_str(),
+            runtime.graph_model.as_str(),
+            true,
+        ),
+        (
+            "embed",
+            runtime.embed_endpoint.as_str(),
+            runtime.embed_model.as_str(),
+            true,
+        ),
+        (
+            "rerank",
+            runtime.rerank_endpoint.as_str(),
+            runtime.rerank_model.as_str(),
+            runtime.rerank_enabled,
+        ),
     ] {
+        if !enabled {
+            continue;
+        }
         if let Err(violation) = validate_provider_request(
             policy,
             runtime.provider,
             endpoint,
-            &[
-                runtime.chat_model.clone(),
-                runtime.graph_model.clone(),
-                runtime.embed_model.clone(),
-            ],
+            &[model.to_string()],
         ) {
             return Err(match violation.code.as_str() {
                 "policy_violation" => PolicyViolation {

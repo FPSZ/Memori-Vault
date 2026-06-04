@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use crate::document::chunk_block_kind_to_storage;
 
 impl SqliteStore {
@@ -507,5 +507,4 @@ impl SqliteStore {
 
         Ok(removed_state_rows > 0 || removed_doc_rows > 0)
     }
-
 }
