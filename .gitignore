@@ -35,6 +35,18 @@ Github_Memory
 
 # Local script runtime artifacts
 scripts/.last-smoke-session.json
+scripts/generate-memory-test-regression-suite.py
+__pycache__/
+*.py[cod]
+
+# Generated QA outputs / temporary locks
+docs/qa/retrieval_regression_metrics.xlsx
+~$*
+**/~$*
+
+# Local diagnostic examples
+memori-core/examples/debug_query.rs
+memori-core/examples/phase2_diagnose.rs
 
 # Local AI assistant settings
 .claude/
@@ -42,7 +54,7 @@ scripts/.last-smoke-session.json
 Logo/
 
 # Test data
-Memory_Test/
+Memory_Test/eval_results/
 Memory_Stress_Test
 .playwright-mcp
 docs/Other
