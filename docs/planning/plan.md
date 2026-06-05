@@ -264,7 +264,7 @@ Overall Progress: 92%
 - [x] 收口 answer panel：引用默认折叠、证据按文档聚合去重、检索指标按阶段排行展示
 - [x] 建立内部结构地图文档（`docs/architecture/STRUCTURE.md`）并固定下一轮拆分优先级
 - [ ] 修复中文描述型 docs query 的 broad lexical 污染：让多词覆盖优先于单个高频业务词命中
-- [x] 跑完当前 100 条 `Memory_Test/` live 回归集（2026-06-04：`live_embedding + full_live`，`56/100` 通过）
+- [x] 跑完当前 100 条 `Memory_Test/` live 回归集（2026-06-05：`live_embedding + full_live`，`91/100` 通过，回答题 `80/88`，拒答题 `11/12`）
 - [x] 比较重构前后的 `Top-1 document hit`、`Top-3 document recall`、`Top-5 chunk recall`、citation validity、拒答正确率
 - [ ] 对大规模文档集做本地性能压测并记录 `P50/P95`
 - [ ] 验证无证据问题会正确拒答或切开放模式

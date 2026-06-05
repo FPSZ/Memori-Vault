@@ -76,34 +76,36 @@
   - `live_embedding + full_live`
   - blocked by local llama.cpp / embedding endpoint availability
 
-### 2026-06-04 UTC
+### 2026-06-05 UTC
 
 - live regression 已端到端跑通：
   - mode/profile: `live_embedding + full_live`
   - suite: `docs/qa/retrieval_regression_suite.json`
-  - report JSON: `target/retrieval-regression/live_embedding-full_live-1780575982/report.json`
-  - report Markdown: `target/retrieval-regression/live_embedding-full_live-1780575982/report.md`
+  - report JSON: `target/retrieval-regression/live_embedding-full_live-1780648792/report.json`
+  - report Markdown: `target/retrieval-regression/live_embedding-full_live-1780648792/report.md`
   - local services: `service_health=ready`, `rerank_health=ready`
-  - index preparation: `44,226 ms`
+  - index preparation: `80,251 ms`
   - indexed scope: suite target documents only, not full repository
-  - indexed corpus: `54` documents / `425` chunks
+  - indexed corpus: `100` documents / `801` chunks
 - measured metrics:
   - cases: `100`
-  - passed / failed: `56 / 44`
+  - passed / failed: `91 / 9`
   - answer / refuse cases: `88 / 12`
-  - Top-1 document hit: `35.23%`
-  - Top-3 document recall: `59.09%`
-  - Top-1 chunk hit: `54.55%`
-  - Top-5 chunk recall: `69.32%`
-  - Chunk MRR: `0.5987`
+  - answer cases answered correctly: `80 / 88`
+  - refuse cases refused correctly: `11 / 12`
+  - Top-1 document hit: `87.50%`
+  - Top-3 document recall: `93.18%`
+  - Top-1 chunk hit: `81.82%`
+  - Top-5 chunk recall: `93.18%`
+  - Chunk MRR: `0.8561`
   - citation validity: `100.00%`
-  - reject correctness: `48.00%`
-  - rerank applied: `66.00%`
+  - reject correctness: `91.00%`
+  - rerank applied: `95.00%`
 - 结论：
   - local live retrieval path 已经可运行，不再被 embedding/rerank 服务缺失阻塞。
   - 检索质量仍低于 release-quality claims。
   - 最高优先级 blocker 是中文事实卡直问（`4/20`）和拒答安全/意图处理（越权/注入/常识类 `1/6`）。
-  - `score_below_threshold` 是主导 gating reason（`42/100`），后续必须拆分 `retrieval_miss` 与 `gating_false_refusal`。
+  - current residual recalled-document gating false refusals: `6`; continue tracking them as targeted residuals rather than a broad gate failure.
 
 ## 6. 当前发布口径
 
@@ -111,7 +113,7 @@
 - 检索质量和企业策略是两条不同验收线，不能互相替代。
 - Citation validity 表现稳定，但 mixed corpus / Memory_Test 的真实检索精度仍未达高精度发布口径。
 - 如果当前发布，检索能力应写作 internal preview / beta，不应宣称“大规模高精度知识检索已完成”。
-- `live_embedding + full_live` 已可跑通，但 `56/100` 的结果不足以作为强准确率对外承诺。
+- `live_embedding + full_live` latest 100-case result is `91/100`; release wording may claim this regression corpus result, but must not generalize it to 50k-document high-accuracy validation.
 
 ## 7. Server API 检查
 

@@ -25,7 +25,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUN_DIR = os.path.join(ROOT, "target", "retrieval-regression")
 LOGO_PATH = os.path.join(ROOT, "ui", "src", "assets", "app-logo.png")
-OUT_PATH = os.path.join(ROOT, "docs", "qa", "retrieval_capability_benchmark.html")
+OUT_PATH = os.path.join(ROOT, "docs", "qa", "能力对比图.html")
 
 # 品牌蓝渐变（浅→深），对应 Memori-Vault logo 由后到前的三层蓝；最新版为 hero（最深）。
 VERSIONS = [

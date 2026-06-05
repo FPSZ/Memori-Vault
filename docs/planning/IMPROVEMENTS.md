@@ -1,48 +1,48 @@
 ﻿# Memori-Vault 改进清单（按优先级）
 
-## 2026-06-04 最新检索实测更新
+## 2026-06-05 最新检索实测更新
 
-本次更新来自 100 条 `Memory_Test/` live 回归：
+本次更新来自 100 条 `Memory_Test/` live 回归 #N+5：
 
 - 运行模式：`live_embedding + full_live`
-- 报告：`target/retrieval-regression/live_embedding-full_live-1780575982/report.json`
+- 报告：`target/retrieval-regression/live_embedding-full_live-1780648792/report.json`
 - 本地服务：`service_health=ready`，`rerank_health=ready`
-- 索引准备：`44,226 ms`
-- 索引规模：`54` documents / `425` chunks
+- 索引准备：`80,251 ms`
+- 索引规模：`100` documents / `801` chunks
 - 用例：`100`，其中 `88 answer / 12 refuse`
-- 总体通过：`56/100`
-- Top-1 document hit：`35.23%`
-- Top-3 document recall：`59.09%`
-- Top-1 chunk hit：`54.55%`
-- Top-5 chunk recall：`69.32%`
-- Chunk MRR：`0.5987`
+- 总体通过：`91/100`
+- 回答题正确作答：`80/88`
+- 拒答题正确拒答：`11/12`
+- Top-1 document hit：`87.50%`
+- Top-3 document recall：`93.18%`
+- Top-1 chunk hit：`81.82%`
+- Top-5 chunk recall：`93.18%`
+- Chunk MRR：`0.8561`
 - Citation validity：`100.00%`
-- Reject correctness：`48.00%`
-- Rerank applied：`66.00%`
+- Reject correctness：`91.00%`
+- Rerank applied：`95.00%`
 
-按能力维度看，当前最差的不是多格式解析，而是事实卡直问和拒答安全：
+阶段对比：
 
-| 能力 | 通过 / 总数 | 通过率 |
-| --- | ---: | ---: |
-| 文档类型定位 | 5 / 5 | 100.00% |
-| 反常识/抗参数知识 | 9 / 10 | 90.00% |
-| 多格式抽取 | 6 / 7 | 85.71% |
-| 口语/错别字/省略鲁棒 | 4 / 5 | 80.00% |
-| 长难句/多条件 | 4 / 5 | 80.00% |
-| 跨文档综合(2-3 文档) | 6 / 8 | 75.00% |
-| 相似代号防串 | 3 / 5 | 60.00% |
-| 改写/语义召回 | 9 / 16 | 56.25% |
-| refuse-库中无此事实 | 3 / 6 | 50.00% |
-| 代号/别名/ID 检索 | 2 / 7 | 28.57% |
-| 中文直问-事实卡命中 | 4 / 20 | 20.00% |
-| refuse-越权/注入/常识 | 1 / 6 | 16.67% |
+| 指标 | 起点 | 中途 | #N+5 最终 |
+| --- | ---: | ---: | ---: |
+| 整体 reject_correct | 0.56 | 0.74 | 0.91 |
+| 回答题正确作答 | 45/88 | 63/88 | 80/88 |
+| 拒答题正确拒答 | 11/12 | 11/12 | 11/12 |
+| rerank 应用率 | 0.64 | 0.64 | 0.95 |
+| top1 文档命中 | 0.375 | 0.59 | 0.875 |
+| top3 文档召回 | 0.591 | 0.90 | 0.932 |
+| top5 chunk 召回 | 0.69 | 0.92 | 0.932 |
+| chunk_mrr | 0.55 | 0.83 | 0.856 |
+| gating 误拒(已召回) | 35 | 20 | 6 |
 
 新的 P0 结论：
 
-- `中文直问-事实卡命中` 只有 `4/20`，这是最高优先级精度缺陷；这类问题理论上应最容易命中。
-- `refuse-越权/注入/常识` 只有 `1/6`，拒答安全/意图识别需要单独修。
-- `score_below_threshold` 出现 `42` 次，是最大失败归因；下一轮要区分“正确 chunk 已召回但 gating 误拒”和“根本没召回”。
-- `citation_validity=100%` 说明引用链可信，但排序/门控还不够好，不能对外宣称高精度。
+- `reject_correct=0.91` 已达到本轮验收目标，当前主要风险不再是“链路可用但质量差”。
+- `gating 误拒(已召回)` 从 `35` 降到 `6`，剩余问题适合逐例分析，而不是继续大幅放宽 gate。
+- `citation_validity=100%` 仍然成立，引用链可信。
+- 仍不能对外宣称 50,000 文档规模高精度验证；当前数据只覆盖 `Memory_Test/` 100 题 live 回归。
+- C094 类“实体存在但所问属性资料未覆盖”不应继续硬塞到检索 gate，后续应在 answer-layer 提示词里兜底拒绝臆测。
 
 > 生成日期：2026-06-02
 > 评审范围：当前 `main` 分支代码（Rust workspace ~28k 行 + UI ~10k 行）、文档、CI、QA baseline。
@@ -153,10 +153,10 @@
 **问题**：`RETRIEVAL_BASELINE.md:136` 出现 `Embedding 璇锋眰澶辫触: ...` —— 这是 GBK 字节"请求失败"被当 UTF-8 解读的典型乱码。说明在中文 Windows 上捕获子进程/系统错误串时未按 GBK 正确解码。
 **建议**：捕获外部错误文本时显式按系统码页解码或统一转 UTF-8，避免日志/Trust Panel 里出现乱码。
 
-### P2-10 `[检索]` live embedding 基线已跑通，但真实精度未达标
-**更新**：2026-06-04 已完成 `live_embedding + full_live` 100 条端到端回归，`service_health=ready`，`rerank_health=ready`，报告见 `target/retrieval-regression/live_embedding-full_live-1780575982/report.json`。
-**问题**：服务可用性不再是 blocker，但真实精度仍不达标：`56/100` 通过，`Top-1 document hit=35.23%`，`Top-3 document recall=59.09%`，`Top-5 chunk recall=69.32%`，`reject correctness=48.00%`。
-**建议**：下一步不要再把问题归为“模型没启动”；应拆分 `retrieval_miss / gating_false_refusal / refuse_policy_miss`，优先修 `中文直问-事实卡命中=4/20` 与 `refuse-越权/注入/常识=1/6`。
+### P2-10 `[检索]` live embedding 基线已跑通，当前 100 题回归接近验收线
+**更新**：2026-06-05 已完成 `live_embedding + full_live` 100 条 #N+5 端到端回归，`service_health=ready`，`rerank_health=ready`，报告见 `target/retrieval-regression/live_embedding-full_live-1780648792/report.json`。
+**结果**：当前 100 题通过 `91/100`，回答题正确作答 `80/88`，拒答题正确拒答 `11/12`，`Top-1 document hit=87.50%`，`Top-3 document recall=93.18%`，`Top-5 chunk recall=93.18%`，`chunk_mrr=0.8561`，`reject correctness=91.00%`。
+**建议**：下一步不要再按“大面积质量不达标”处理；应聚焦剩余 `6` 道已召回但仍被 gate 拒的残余 case、C094 类“实体存在但属性缺失”的 answer-layer 兜底，以及 50,000 文档规模下的性能/质量验证。
 
 ### P2-11 `[工程]` PDF/DOCX/HTML 摄入稳定化
 **问题**：README 自列为"仍在推进"。`memori-parser` 仅 738 行单文件，多格式稳健解析（编码、表格、扫描件、HTML 噪声）容易出问题。

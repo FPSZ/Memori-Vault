@@ -226,7 +226,7 @@ Report:
 
 | Profile | Cases Executed | Service Health | Result |
 | --- | ---: | --- | --- |
-| `full_live` | 100 | `ready` | `56/100` passed; `Top-3 doc recall=59.09%`; `Top-5 chunk recall=69.32%`; `rerank_health=ready` |
+| `full_live` | 100 | `ready` | `91/100` passed; `Top-1 doc hit=87.50%`; `Top-3 doc recall=93.18%`; `Top-5 chunk recall=93.18%`; `reject_correct=91.00%`; `rerank_health=ready` |
 
 ## 5. Current Interpretation
 
@@ -244,14 +244,14 @@ Report:
 2. `repo_mixed` regressed versus the previous documented offline snapshot.
    - previous documented snapshot: `Top-1=0.5682`, `Top-3=0.5909`, `Top-5=0.6364`, `Reject=0.9800`
    - latest snapshot: `Top-1=0.4773`, `Top-3=0.4773`, `Top-5=0.5455`, `Reject=0.9400`
-3. Live local-model validation now runs end to end, but precision is still below the delivery bar.
+3. Live local-model validation now runs end to end, and the current 100-case `Memory_Test/` baseline is near the intended quality bar.
 4. No current document should imply that retrieval precision has been validated at 50,000-document scale.
 
 ### Practical delivery posture
 
 - `core_docs`: internal validation baseline, useful for continued regression work.
 - `repo_mixed`: still beta/internal-only quality, not ready for strong accuracy claims.
-- `full_live`: runtime path is validated end to end on this machine, but the 100-case result (`56/100`) is not release-quality yet.
+- `full_live`: runtime path is validated end to end on this machine, with current 100-case result `91/100`; remaining caveat is scale/generalization, not basic live-path quality.
 
 ## 6. Remaining Failure Pattern Summary
 

@@ -114,3 +114,30 @@ let effective_score = if (has_grounded_single_chunk_release
   - 整体 reject_correct **0.51 → ≥0.80**。
   - top3 文档召回不回退（≈0.61+）。
 - **已知遗留（不在本轮 gate 范围）**：C094 一类"实体存在、但所问的具体属性在资料中不存在"的题，gate 无法仅凭检索信号与"属性存在"区分，应由**作答层 LLM 提示词**兜底（"若检索证据未直接覆盖所问属性，则明确说明资料未涉及并拒绝臆测"）。这是 answer-layer follow-up，单列，不要在 gate 里硬塞。
+# 最新验收结果（2026-06-05，#N+5）
+
+本文件下方保留的是 gating 方案形成过程和历史推理，旧数据不再代表当前最新指标。当前 source of truth 是：
+
+- Report JSON: `target/retrieval-regression/live_embedding-full_live-1780648792/report.json`
+- Mode/profile: `live_embedding + full_live`
+- Corpus: `Memory_Test/` 100 cases
+
+| 指标 | 起点 | 中途 | #N+5 最终 |
+| --- | ---: | ---: | ---: |
+| 整体 reject_correct | 0.56 | 0.74 | 0.91 |
+| 回答题正确作答 | 45/88 | 63/88 | 80/88 |
+| 拒答题正确拒答 | 11/12 | 11/12 | 11/12 |
+| rerank 应用率 | 0.64 | 0.64 | 0.95 |
+| top1 文档命中 | 0.375 | 0.59 | 0.875 |
+| top3 文档召回 | 0.591 | 0.90 | 0.932 |
+| top5 chunk 召回 | 0.69 | 0.92 | 0.932 |
+| chunk_mrr | 0.55 | 0.83 | 0.856 |
+| gating 误拒（已召回） | 35 | 20 | 6 |
+
+验收裁决：
+
+- 本轮 gating 目标已达成：整体 `reject_correct=0.91`，超过原目标 `>=0.80`。
+- 回答题正确作答达到 `80/88`，超过原目标 `>=70/88`。
+- 拒答题正确拒答保持 `11/12`，没有因 soft gate 放行出现整体安全回退。
+- 剩余 `6` 道“文档已召回但仍被拒”的 case 应逐例处理，不建议继续粗暴降低 Balanced 阈值。
+- `rerank_confident_release=35` 是当前主要放行路径，说明 reranker 原始置信度已经取代纯词法 coverage 成为更有效的答/拒信号。

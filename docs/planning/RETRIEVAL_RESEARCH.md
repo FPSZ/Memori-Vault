@@ -83,8 +83,9 @@
 - 顺带修复：`set_model_settings`（commands/model.rs）此前**漏写 5 个 `local_rerank_*` 持久化字段**，导致保存后重启丢失重排配置（尤其 model_path）；已补全。
 - 校验：`cargo check --workspace` 通过、`cargo test -p memori-core` 57 全过、`tsc --noEmit` 通过。
 
-**仍待办：**
-- 2026-06-04 已完成一次 `live_embedding + full_live` 100 条实测：`rerank_health=ready`，`rerank_applied=66.00%`，总体 `56/100` 通过，`Top-1 document hit=35.23%`，`Top-3 document recall=59.09%`，`Top-5 chunk recall=69.32%`。这证明 rerank 链路已接入真实回归，但还不是 rerank 净增益 A/B；后续仍需固定同一 suite 跑 `rerank on/off` 对比。
+**最新实测（2026-06-05）：**
+- `live_embedding + full_live` 100 条 #N+5 实测已完成：`rerank_health=ready`，`rerank_applied=95.00%`，总体 `91/100` 通过，`Top-1 document hit=87.50%`，`Top-3 document recall=93.18%`，`Top-5 chunk recall=93.18%`，`chunk_mrr=0.8561`，`reject_correct=91.00%`。
+- 相对起点，`rerank_applied 0.64 -> 0.95`，`Top-1 document hit 0.375 -> 0.875`，`Top-3 document recall 0.591 -> 0.932`，`Top-5 chunk recall 0.69 -> 0.932`。这说明 rerank 链路已经不只是“接入可用”，而是在当前 100 题 live 回归里成为主要质量增益来源；后续仍需固定同一 suite 跑 `rerank on/off` 对比，确认净增益归因。
 
 ---
 
