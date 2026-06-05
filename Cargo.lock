@@ -2093,7 +2093,7 @@ dependencies = [
 
 [[package]]
 name = "memori-core"
-version = "1.0.2"
+version = "1.5.0"
 dependencies = [
  "bincode",
  "dirs",
@@ -2114,7 +2114,7 @@ dependencies = [
 
 [[package]]
 name = "memori-desktop"
-version = "1.0.2"
+version = "1.5.0"
 dependencies = [
  "dirs",
  "memori-core",
@@ -2134,7 +2134,7 @@ dependencies = [
 
 [[package]]
 name = "memori-parser"
-version = "1.0.2"
+version = "1.5.0"
 dependencies = [
  "lopdf",
  "pulldown-cmark",
@@ -2146,7 +2146,7 @@ dependencies = [
 
 [[package]]
 name = "memori-server"
-version = "1.0.2"
+version = "1.5.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2166,7 +2166,7 @@ dependencies = [
 
 [[package]]
 name = "memori-storage"
-version = "1.0.2"
+version = "1.5.0"
 dependencies = [
  "bincode",
  "memori-parser",
@@ -2180,7 +2180,7 @@ dependencies = [
 
 [[package]]
 name = "memori-vault"
-version = "1.0.2"
+version = "1.5.0"
 dependencies = [
  "notify",
  "thiserror 2.0.18",

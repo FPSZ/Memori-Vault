@@ -41,6 +41,9 @@ FORMAL_MIN_CASES = 90
 # _local/_health/_note/_run_id/_pass_rate 为派生键；其余取自 summary 或顶层。
 LEDGER_FIELDS = [
     ("日期时间", "_local", "yyyy-mm-dd hh:mm"),
+    ("程序版本", "app_version", None),
+    ("测试集版本", "suite_version", None),
+    ("报告格式版本", "report_schema_version", None),
     ("模式", "evaluation_mode", None),
     ("Profile", "profile", None),
     ("用例数", "case_count", "0"),
@@ -247,7 +250,7 @@ def build_ledger(wb: Workbook, valid: list[dict[str, Any]], notes: dict[str, str
                 val = run_id
             elif key == "_pass_rate":
                 val = pass_rate(r)
-            elif key in {"evaluation_mode", "profile"}:
+            elif key in {"evaluation_mode", "profile", "app_version", "suite_version", "report_schema_version"}:
                 val = r.get(key, "")
             elif key == "case_count":
                 val = summary.get("case_count", 0)
@@ -362,7 +365,7 @@ def build_failures(wb: Workbook, valid: list[dict[str, Any]], label_by_run: dict
 
 def build_raw(wb: Workbook, all_reports: list[dict[str, Any]]):
     ws = wb.create_sheet("原始字段")
-    headers = ["run_id", "时间(本地)", "模式", "Profile", "用例数", "service_health",
+    headers = ["run_id", "时间(本地)", "程序版本", "测试集版本", "报告格式版本", "模式", "Profile", "用例数", "service_health",
                "rerank_health", "case_timeout", "index_prep_ms", "preparation_error",
                "watch_root", "db_path", "report_json"]
     ws.append(headers)
@@ -370,6 +373,7 @@ def build_raw(wb: Workbook, all_reports: list[dict[str, Any]]):
         s = r.get("summary", {})
         ws.append([
             r.get("_run_id", ""), to_local(r.get("generated_at_utc")),
+            r.get("app_version", ""), r.get("suite_version", ""), r.get("report_schema_version", ""),
             r.get("evaluation_mode", ""), r.get("profile", ""), s.get("case_count", 0),
             r.get("service_health", ""), r.get("rerank_health", ""),
             r.get("case_timeout_count", 0), r.get("index_prep_ms"),

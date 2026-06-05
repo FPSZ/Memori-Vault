@@ -1,36 +1,53 @@
 ﻿# Memori-Vault Retrieval Rebuild Plan
 
-Last Updated: 2026-06-04 UTC
+Last Updated: 2026-06-05 UTC
 Current Phase: Phase 6 - Validation
-Overall Progress: 88%
+Overall Progress: 92%
 
-## 2026-06-04 Live Regression Update
+## 2026-06-05 Live Regression Update
 
-最新 100 条 `Memory_Test/` 回归已经完成一次真实 live 跑数：
+最新 100 条 `Memory_Test/` 回归已经完成 #N+5 live 跑数，作为当前检索质量 source of truth：
 
 - 运行模式：`live_embedding + full_live`
-- 报告：`target/retrieval-regression/live_embedding-full_live-1780575982/report.json`
+- 报告：`target/retrieval-regression/live_embedding-full_live-1780648792/report.json`
 - 本地服务：`service_health=ready`，`rerank_health=ready`
 - 索引范围：当前 suite/profile 的目标文档集合，不再全仓索引
-- 索引规模：`54` documents / `425` chunks
-- 索引准备耗时：`44,226 ms`
+- 索引规模：`100` documents / `801` chunks
+- 索引准备耗时：`80,251 ms`
 - 用例：`100`，其中 `88 answer / 12 refuse`
-- 总体通过：`56/100`
-- Top-1 document hit：`35.23%`
-- Top-3 document recall：`59.09%`
-- Top-1 chunk hit：`54.55%`
-- Top-5 chunk recall：`69.32%`
-- Chunk MRR：`0.5987`
+- 总体通过：`91/100`
+- 回答题正确作答：`80/88`
+- 拒答题正确拒答：`11/12`
+- Top-1 document hit：`87.50%`
+- Top-3 document recall：`93.18%`
+- Top-1 chunk hit：`81.82%`
+- Top-5 chunk recall：`93.18%`
+- Chunk MRR：`0.8561`
 - Citation validity：`100.00%`
-- Reject correctness：`48.00%`
-- Rerank applied：`66.00%`
+- Reject correctness：`91.00%`
+- Rerank applied：`95.00%`
+
+阶段对比：
+
+| 指标 | 起点 | 中途 | #N+5 最终 |
+| --- | ---: | ---: | ---: |
+| 整体 reject_correct | 0.56 | 0.74 | 0.91 |
+| 回答题正确作答 | 45/88 | 63/88 | 80/88 |
+| 拒答题正确拒答 | 11/12 | 11/12 | 11/12 |
+| rerank 应用率 | 0.64 | 0.64 | 0.95 |
+| top1 文档命中 | 0.375 | 0.59 | 0.875 |
+| top3 文档召回 | 0.591 | 0.90 | 0.932 |
+| top5 chunk 召回 | 0.69 | 0.92 | 0.932 |
+| chunk_mrr | 0.55 | 0.83 | 0.856 |
+| gating 误拒(已召回) | 35 | 20 | 6 |
 
 当前判断：
 
 - live local-model 链路已经能端到端跑通，Phase 6 不再被 “local llama.cpp / embedding unavailable” 阻塞。
-- 真实精度仍未达交付线，优先问题是 `中文直问-事实卡命中 = 4/20` 和 `refuse-越权/注入/常识 = 1/6`。
-- `score_below_threshold = 42/100` 是最大 gating reason，下一轮应先把失败拆成 `retrieval_miss` 与 `gating_false_refusal`，不要混成一个“准确率低”。
-- `文档类型定位 = 5/5`、`反常识/抗参数知识 = 9/10`、`多格式抽取 = 6/7` 表现较好，暂时不是优先瓶颈。
+- 当前 #N+5 跑数显示检索和 gating 已接近目标线：`reject_correct=0.91`、回答题 `80/88`、拒答题 `11/12`。
+- reranker 原始置信度放行已经成为主要 soft-gate 修复路径，`rerank_confident_release=35`，把“已召回但被 gate 误拒”的回答题压到 `6`。
+- 仍不能声称已完成 50,000 文档规模验证；当前结论仅覆盖 `Memory_Test/` 100 题 live 回归。
+- 下一步优先处理剩余 6 道已召回误拒和 C094 类“实体存在但属性缺失”的 answer-layer 拒答兜底。
 
 ## Status Rules
 - 任务状态：完成即勾选 `- [x]`，不保留“半完成”状态。

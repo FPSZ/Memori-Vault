@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use memori_core::{
-    AskStatus, MEMORI_DB_PATH_ENV, MemoriEngine, RetrievalInspection, RuntimeRetrievalBaseline,
-    build_query_terms_for_offline_embedding,
+    AskStatus, GatingBreakdown, MEMORI_DB_PATH_ENV, MemoriEngine, RetrievalInspection,
+    RuntimeRetrievalBaseline, build_query_terms_for_offline_embedding,
 };
 use memori_parser::{extract_document_text, parse_and_chunk};
 use serde::{Deserialize, Serialize};
@@ -19,6 +19,7 @@ const DEFAULT_MAX_INDEX_PREP_SECS: u64 = 180;
 const DEFAULT_MAX_CASE_SECS: u64 = 30;
 const DEFAULT_SUITE_PATH: &str = "docs/qa/retrieval_regression_suite.json";
 const BASELINE_DOC_PATH: &str = "docs/qa/RETRIEVAL_BASELINE.md";
+const REGRESSION_REPORT_SCHEMA_VERSION: &str = "1.1";
 
 #[derive(Debug, Clone)]
 struct CliArgs {
@@ -159,6 +160,9 @@ struct RegressionCaseResult {
     citations_count: usize,
     final_evidence_count: usize,
     gating_decision_reason: String,
+    gating_score: i32,
+    gating_breakdown: GatingBreakdown,
+    top_rerank_raw_score: Option<f32>,
     doc_recall_ms: u64,
     doc_dense_ms: u64,
     chunk_lexical_ms: u64,
@@ -186,6 +190,9 @@ struct RegressionSummary {
 #[derive(Debug, Clone, Serialize)]
 struct RegressionReport {
     tool: &'static str,
+    report_schema_version: String,
+    app_version: String,
+    suite_version: u32,
     generated_at_utc: String,
     evaluation_mode: String,
     profile: String,
@@ -253,6 +260,9 @@ async fn main() -> Result<(), AnyError> {
 
     let report = RegressionReport {
         tool: "memori-core/examples/retrieval_regression.rs",
+        report_schema_version: REGRESSION_REPORT_SCHEMA_VERSION.to_string(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        suite_version: suite.version,
         generated_at_utc: unix_timestamp_string(),
         evaluation_mode: args.mode.as_str().to_string(),
         profile: args.profile.as_str().to_string(),
@@ -932,6 +942,10 @@ fn build_case_result(
     let document_hit_rank = find_document_hit_rank(&inspection, effective_document_targets(case));
     let chunk_hit_rank = find_chunk_hit_rank(&inspection, &case.target_clues);
     let citation_valid = citations_are_valid(&inspection, watch_root, scope_paths);
+    let top_rerank_raw_score = inspection
+        .evidence
+        .first()
+        .and_then(|item| item.rerank_raw_score);
     let reject_correct = matches!(
         (&case.mode, inspection.status),
         (RegressionMode::Refuse, AskStatus::InsufficientEvidence)
@@ -966,6 +980,9 @@ fn build_case_result(
         citations_count: inspection.citations.len(),
         final_evidence_count: inspection.evidence.len(),
         gating_decision_reason: inspection.metrics.gating_decision_reason.clone(),
+        gating_score: inspection.metrics.gating_score,
+        gating_breakdown: inspection.metrics.gating_breakdown.clone(),
+        top_rerank_raw_score,
         doc_recall_ms: inspection.metrics.doc_recall_ms,
         doc_dense_ms: inspection.metrics.doc_dense_ms,
         chunk_lexical_ms: inspection.metrics.chunk_lexical_ms,
@@ -1000,6 +1017,9 @@ fn timeout_case_result(case: &RegressionCase) -> RegressionCaseResult {
         citations_count: 0,
         final_evidence_count: 0,
         gating_decision_reason: "timeout".to_string(),
+        gating_score: 0,
+        gating_breakdown: GatingBreakdown::default(),
+        top_rerank_raw_score: None,
         doc_recall_ms: 0,
         doc_dense_ms: 0,
         chunk_lexical_ms: 0,
@@ -1289,6 +1309,12 @@ fn render_report_markdown(report: &RegressionReport) -> String {
     out.push_str("# Retrieval Regression Report\n\n");
     out.push_str(&format!("Generated: `{}`\n\n", report.generated_at_utc));
     out.push_str("## Execution\n");
+    out.push_str(&format!(
+        "- report_schema_version: `{}`\n",
+        report.report_schema_version
+    ));
+    out.push_str(&format!("- app_version: `{}`\n", report.app_version));
+    out.push_str(&format!("- suite_version: `{}`\n", report.suite_version));
     out.push_str(&format!("- mode: `{}`\n", report.evaluation_mode));
     out.push_str(&format!("- profile: `{}`\n", report.profile));
     out.push_str(&format!("- watch_root: `{}`\n", report.watch_root));
@@ -1386,8 +1412,14 @@ fn render_baseline_markdown(report: &RegressionReport) -> String {
     let offline = render_baseline_section(report, EvaluationMode::OfflineDeterministic);
     let live = render_baseline_section(report, EvaluationMode::LiveEmbedding);
     format!(
-        "# Retrieval Baseline Snapshot\n\nUpdated: {} UTC\n\nThis document captures the current measured retrieval baseline for the rebuilt two-stage retrieval pipeline.\n\n## Offline Deterministic Baseline\n{}\n\n## Live Embedding Baseline\n{}\n\n## Report Source\n- suite: `{}`\n- generated report: `target/retrieval-regression/.../report.json`\n- runner: `cargo run -p memori-core --example retrieval_regression -- --suite {DEFAULT_SUITE_PATH} --watch-root .`\n",
-        report.generated_at_utc, offline, live, report.suite_path
+        "# Retrieval Baseline Snapshot\n\nUpdated: {} UTC\n\nThis document captures the current measured retrieval baseline for the rebuilt two-stage retrieval pipeline.\n\n## Offline Deterministic Baseline\n{}\n\n## Live Embedding Baseline\n{}\n\n## Report Source\n- suite: `{}`\n- suite_version: `{}`\n- app_version: `{}`\n- report_schema_version: `{}`\n- generated report: `target/retrieval-regression/.../report.json`\n- runner: `cargo run -p memori-core --example retrieval_regression -- --suite {DEFAULT_SUITE_PATH} --watch-root .`\n",
+        report.generated_at_utc,
+        offline,
+        live,
+        report.suite_path,
+        report.suite_version,
+        report.app_version,
+        report.report_schema_version
     )
 }
 
@@ -1505,7 +1537,7 @@ mod tests {
     };
     use memori_core::{
         AnswerSourceMix, AskStatus, CitationItem, ContextBudgetReport, EvidenceItem, FailureClass,
-        RetrievalInspection, RetrievalMetrics, RuntimeRetrievalBaseline,
+        GatingBreakdown, RetrievalInspection, RetrievalMetrics, RuntimeRetrievalBaseline,
     };
 
     #[test]
@@ -1635,6 +1667,7 @@ mod tests {
                 document_raw_score: Some(1.0),
                 lexical_raw_score: Some(1.0),
                 dense_raw_score: None,
+                rerank_raw_score: None,
                 final_score: 1.0,
                 content: "shared fact".to_string(),
             }],
@@ -1688,6 +1721,9 @@ mod tests {
                 citations_count: 1,
                 final_evidence_count: 1,
                 gating_decision_reason: "semantic_context_release".to_string(),
+                gating_score: 55,
+                gating_breakdown: GatingBreakdown::default(),
+                top_rerank_raw_score: Some(0.42),
                 doc_recall_ms: 10,
                 doc_dense_ms: 4,
                 chunk_lexical_ms: 2,
@@ -1719,6 +1755,9 @@ mod tests {
                 citations_count: 1,
                 final_evidence_count: 1,
                 gating_decision_reason: "lexical_context_release".to_string(),
+                gating_score: 55,
+                gating_breakdown: GatingBreakdown::default(),
+                top_rerank_raw_score: None,
                 doc_recall_ms: 11,
                 doc_dense_ms: 5,
                 chunk_lexical_ms: 2,
@@ -1750,6 +1789,9 @@ mod tests {
                 citations_count: 0,
                 final_evidence_count: 0,
                 gating_decision_reason: "insufficient_evidence".to_string(),
+                gating_score: 0,
+                gating_breakdown: GatingBreakdown::default(),
+                top_rerank_raw_score: None,
                 doc_recall_ms: 0,
                 doc_dense_ms: 0,
                 chunk_lexical_ms: 0,
@@ -1778,6 +1820,9 @@ mod tests {
     fn markdown_report_includes_rerank_health_and_gating_reason() {
         let report = RegressionReport {
             tool: "memori-core/examples/retrieval_regression.rs",
+            report_schema_version: "1.1".to_string(),
+            app_version: "0.1.0".to_string(),
+            suite_version: 2,
             generated_at_utc: "1".to_string(),
             evaluation_mode: "live_embedding".to_string(),
             profile: "full_live".to_string(),
@@ -1835,6 +1880,9 @@ mod tests {
                 citations_count: 1,
                 final_evidence_count: 1,
                 gating_decision_reason: "semantic_context_release".to_string(),
+                gating_score: 55,
+                gating_breakdown: GatingBreakdown::default(),
+                top_rerank_raw_score: Some(0.42),
                 doc_recall_ms: 10,
                 doc_dense_ms: 4,
                 chunk_lexical_ms: 2,
@@ -1846,6 +1894,9 @@ mod tests {
         };
 
         let markdown = render_report_markdown(&report);
+        assert!(markdown.contains("- report_schema_version: `1.1`"));
+        assert!(markdown.contains("- app_version: `0.1.0`"));
+        assert!(markdown.contains("- suite_version: `2`"));
         assert!(markdown.contains("- rerank_health: `ready`"));
         assert!(markdown.contains("- rerank applied: 100.00%"));
         assert!(markdown.contains("- Chunk MRR: 1.0000"));

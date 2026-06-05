@@ -1,8 +1,8 @@
 ﻿# Retrieval Baseline Snapshot
 
-Updated: 2026-06-04 UTC
+Updated: 2026-06-05 UTC
 
-## Latest Live Regression Snapshot (2026-06-04)
+## Latest Live Regression Snapshot (2026-06-05)
 
 This is the current source-of-truth measurement for the local live retrieval path.
 
@@ -11,68 +11,65 @@ Run:
 - Mode/profile: `live_embedding + full_live`
 - Suite: `docs/qa/retrieval_regression_suite.json`
 - Corpus: `Memory_Test/` regression corpus, 100 cases
-- Report JSON: `target/retrieval-regression/live_embedding-full_live-1780575982/report.json`
-- Report Markdown: `target/retrieval-regression/live_embedding-full_live-1780575982/report.md`
+- Report JSON: `target/retrieval-regression/live_embedding-full_live-1780648792/report.json`
+- Report Markdown: `target/retrieval-regression/live_embedding-full_live-1780648792/report.md`
 - Local services: `service_health=ready`, `rerank_health=ready`
-- Index preparation: `44,226 ms`
+- Index preparation: `80,251 ms`
 - Indexed scope: suite target documents only, not the full repository
-- Indexed documents/chunks: `54` documents / `425` chunks
-- Embedding: `Qwen3-Embedding-4B-Q4_K_M`, dim `2560`
+- Indexed documents/chunks: `100` documents / `801` chunks
+- Embedding: `Qwen3-Embedding-4B`, dim `2560`
 
 Summary:
 
 | Metric | Value |
 | --- | ---: |
 | Cases | 100 |
-| Passed / Failed | 56 / 44 |
+| Passed / Failed | 91 / 9 |
 | Answer / Refuse cases | 88 / 12 |
-| Top-1 document hit | 35.23% |
-| Top-3 document recall | 59.09% |
-| Top-1 chunk hit | 54.55% |
-| Top-5 chunk recall | 69.32% |
-| Chunk MRR | 0.5987 |
+| Answer cases answered correctly | 80 / 88 |
+| Refuse cases refused correctly | 11 / 12 |
+| Top-1 document hit | 87.50% |
+| Top-3 document recall | 93.18% |
+| Top-1 chunk hit | 81.82% |
+| Top-5 chunk recall | 93.18% |
+| Chunk MRR | 0.8561 |
 | Citation validity | 100.00% |
-| Reject correctness | 48.00% |
-| Rerank applied | 66.00% |
+| Reject correctness | 91.00% |
+| Rerank applied | 95.00% |
 
-Capability breakdown:
+Regression progress checkpoints:
 
-| Capability | Passed / Total | Pass Rate |
-| --- | ---: | ---: |
-| 中文直问-事实卡命中 | 4 / 20 | 20.00% |
-| 改写/语义召回 | 9 / 16 | 56.25% |
-| 反常识/抗参数知识 | 9 / 10 | 90.00% |
-| 代号/别名/ID 检索 | 2 / 7 | 28.57% |
-| 跨文档综合(2-3 文档) | 6 / 8 | 75.00% |
-| 相似代号防串 | 3 / 5 | 60.00% |
-| 多格式抽取 | 6 / 7 | 85.71% |
-| 文档类型定位 | 5 / 5 | 100.00% |
-| 口语/错别字/省略鲁棒 | 4 / 5 | 80.00% |
-| 长难句/多条件 | 4 / 5 | 80.00% |
-| refuse-库中无此事实 | 3 / 6 | 50.00% |
-| refuse-越权/注入/常识 | 1 / 6 | 16.67% |
+| Metric | Start | Mid | #N+5 Final |
+| --- | ---: | ---: | ---: |
+| Overall reject_correct | 0.56 | 0.74 | 0.91 |
+| Answer cases answered correctly | 45/88 | 63/88 | 80/88 |
+| Refuse cases refused correctly | 11/12 | 11/12 | 11/12 |
+| Rerank applied | 0.64 | 0.64 | 0.95 |
+| Top-1 document hit | 0.375 | 0.59 | 0.875 |
+| Top-3 document recall | 0.591 | 0.90 | 0.932 |
+| Top-5 chunk recall | 0.69 | 0.92 | 0.932 |
+| Chunk MRR | 0.55 | 0.83 | 0.856 |
+| Gating false refusals with document recalled | 35 | 20 | 6 |
 
 Gating reason distribution:
 
 | Gating Reason | Count |
 | --- | ---: |
-| `score_below_threshold` | 42 |
-| `coverage_release` | 15 |
-| `docs_family_multi_chunk_release` | 14 |
-| `high_coverage_lexical_release` | 8 |
-| `intent_blocked` | 6 |
-| `compound_evidence_release` | 6 |
-| `compound_partial_release` | 6 |
-| `score_release` | 2 |
-| `semantic_context_release` | 1 |
+| `rerank_confident_release` | 35 |
+| `docs_family_multi_chunk_release` | 24 |
+| `identifier_grounded_release` | 11 |
+| `compound_evidence_release` | 11 |
+| `entity_not_grounded` | 7 |
+| `score_below_threshold` | 7 |
+| `intent_blocked` | 5 |
 
 Current interpretation:
 
 - Live local-model validation is no longer blocked. The local embed and rerank services are reachable, and the full 100-case live suite ran end to end.
-- The previous `core_docs` live timeout was an index-scope bug: the harness was preparing the full repository. The current harness seeds only target documents from the selected suite/profile.
-- Citation validity is strong (`100%`), but retrieval precision is not yet at delivery bar.
-- The highest-priority quality gaps are direct Chinese fact-card hits (`4/20`) and refusal safety/intent handling (`refuse-越权/注入/常识 = 1/6`).
-- `score_below_threshold` dominates failures (`42/100`), so the next tuning pass should separate real retrieval misses from gating false negatives.
+- The current #N+5 run is the first live baseline where retrieval and gating are both near the target bar: overall `reject_correct=0.91`, answer coverage `80/88`, refusal correctness `11/12`.
+- Reranker raw confidence is now a first-class soft-gate release signal. It accounts for `35` successful releases in the final run and reduced recalled-document gating false refusals from `35` to `6`.
+- Citation validity remains strong (`100%`). The remaining quality work is no longer broad service availability or basic recall; it is the residual false refusals plus the known answer-layer edge case where an entity exists but the asked attribute is absent.
+- No current document should imply that retrieval precision has been validated at 50,000-document scale.
 
 ## Architecture Notes Since This Baseline
 

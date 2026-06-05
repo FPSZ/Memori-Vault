@@ -218,6 +218,7 @@ fn select_balanced_final_evidence_preserves_multi_file_coverage() {
                 lexical_raw_score: Some(10.0),
                 dense_rank: None,
                 dense_raw_score: None,
+                rerank_raw_score: None,
                 final_score,
                 rerank_score: None,
             }
@@ -241,6 +242,60 @@ fn select_balanced_final_evidence_preserves_multi_file_coverage() {
     assert!(distinct_files.len() >= 3);
     assert!(distinct_files.contains("doc_041_供应链_蓝鲸B17_制度.md"));
     assert!(distinct_files.contains("doc_042_供应链_蓝鲸B17_会议纪要.txt"));
+}
+
+#[test]
+fn select_balanced_final_evidence_keeps_top_ranked_chunk_when_group_sorts_late() {
+    // gold chunk 的文件名字母序排最后，但相关性最高（rank1 / final_score 最大）。
+    // 旧实现按组名字母序轮询，会把它挤出最终证据；修复后必须保留 rank1。
+    let make_item = |file_name: &str,
+                     document_rank: usize,
+                     chunk_index: usize,
+                     final_score: f64| MergedEvidence {
+        chunk: DocumentChunk {
+            file_path: PathBuf::from(format!("Memory_Test/{file_name}")),
+            content: format!("content-{file_name}-{chunk_index}"),
+            chunk_index,
+            heading_path: vec!["h".to_string()],
+            block_kind: memori_parser::ChunkBlockKind::Paragraph,
+        },
+        relative_path: file_name.to_string(),
+        document_reason: "filename".to_string(),
+        document_rank,
+        document_raw_score: Some(100.0 - document_rank as f64),
+        document_has_exact_signal: false,
+        document_has_docs_phrase_signal: false,
+        document_docs_phrase_quality: None,
+        document_has_filename_signal: true,
+        document_has_strict_lexical: true,
+        lexical_strict_rank: Some(chunk_index + 1),
+        lexical_broad_rank: None,
+        lexical_raw_score: Some(10.0),
+        dense_rank: None,
+        dense_raw_score: None,
+        rerank_raw_score: None,
+        final_score,
+        rerank_score: Some(final_score as f32),
+    };
+
+    // 7 个不同来源，gold = doc_099（字母序最后）但相关性最高。
+    let evidence = vec![
+        make_item("doc_010_a.md", 7, 0, 1.0),
+        make_item("doc_020_b.md", 6, 0, 2.0),
+        make_item("doc_030_c.md", 5, 0, 3.0),
+        make_item("doc_040_d.md", 4, 0, 4.0),
+        make_item("doc_050_e.md", 3, 0, 5.0),
+        make_item("doc_060_f.md", 2, 0, 6.0),
+        make_item("doc_099_gold.md", 1, 0, 9.9),
+    ];
+
+    let selected = super::select_balanced_final_evidence(evidence, 6);
+    assert!(
+        selected
+            .iter()
+            .any(|item| item.relative_path == "doc_099_gold.md"),
+        "rank1 gold chunk 必须被保留在最终证据中"
+    );
 }
 
 #[test]
@@ -498,6 +553,7 @@ fn build_citations_dedupes_identical_rendered_excerpt_from_same_file() {
             lexical_raw_score: Some(1.0),
             dense_rank: None,
             dense_raw_score: None,
+            rerank_raw_score: None,
             final_score: 1.0,
             rerank_score: None,
         },
@@ -523,6 +579,7 @@ fn build_citations_dedupes_identical_rendered_excerpt_from_same_file() {
             lexical_raw_score: Some(0.9),
             dense_rank: Some(1),
             dense_raw_score: Some(0.8),
+            rerank_raw_score: None,
             final_score: 0.95,
             rerank_score: None,
         },
@@ -1221,6 +1278,7 @@ fn generic_docs_phrase_is_not_treated_as_strong_signal() {
         lexical_raw_score: Some(0.8),
         dense_rank: None,
         dense_raw_score: None,
+        rerank_raw_score: None,
         final_score: 1.0,
         rerank_score: None,
     };
@@ -1274,6 +1332,7 @@ fn lookup_query_with_filename_and_lexical_support_is_not_rejected() {
             lexical_raw_score: Some(1.0),
             dense_rank: None,
             dense_raw_score: None,
+            rerank_raw_score: None,
             final_score: 1.0,
             rerank_score: None,
         },
@@ -1299,6 +1358,7 @@ fn lookup_query_with_filename_and_lexical_support_is_not_rejected() {
             lexical_raw_score: Some(0.9),
             dense_rank: None,
             dense_raw_score: None,
+            rerank_raw_score: None,
             final_score: 0.9,
             rerank_score: None,
         },
@@ -1341,6 +1401,7 @@ fn hyphenless_identifier_evidence_is_not_rejected() {
             lexical_raw_score: Some(1.1),
             dense_rank: Some(2),
             dense_raw_score: Some(0.72),
+            rerank_raw_score: None,
             final_score: 1.1,
             rerank_score: None,
         }];
@@ -1375,6 +1436,7 @@ fn dense_only_long_query_is_rejected() {
         lexical_raw_score: None,
         dense_rank: Some(1),
         dense_raw_score: Some(0.91),
+        rerank_raw_score: None,
         final_score: 1.0,
         rerank_score: None,
     }];
@@ -1409,6 +1471,7 @@ fn non_lookup_coverage_release_populates_metrics() {
         lexical_raw_score: Some(0.6),
         dense_rank: None,
         dense_raw_score: None,
+        rerank_raw_score: None,
         final_score: 1.0,
         rerank_score: None,
     }];
@@ -1448,6 +1511,7 @@ fn lookup_like_high_coverage_lexical_evidence_is_not_rejected() {
             lexical_raw_score: Some(1.0),
             dense_rank: Some(1),
             dense_raw_score: Some(0.9),
+            rerank_raw_score: None,
             final_score: 1.0,
             rerank_score: None,
         }];
@@ -1493,6 +1557,7 @@ fn docs_explanatory_multi_chunk_internal_evidence_is_not_rejected() {
             lexical_raw_score: Some(1.1),
             dense_rank: Some(2),
             dense_raw_score: Some(0.7),
+            rerank_raw_score: None,
             final_score: 1.1,
             rerank_score: None,
         },
@@ -1518,6 +1583,7 @@ fn docs_explanatory_multi_chunk_internal_evidence_is_not_rejected() {
             lexical_raw_score: Some(1.0),
             dense_rank: Some(3),
             dense_raw_score: Some(0.69),
+            rerank_raw_score: None,
             final_score: 1.0,
             rerank_score: None,
         },
@@ -1557,6 +1623,7 @@ fn missing_file_lookup_without_document_signal_is_rejected() {
         lexical_raw_score: Some(0.2),
         dense_rank: None,
         dense_raw_score: None,
+        rerank_raw_score: None,
         final_score: 0.6,
         rerank_score: None,
     }];
@@ -1641,6 +1708,7 @@ fn rerank_test_evidence(
         lexical_raw_score: Some(1.0),
         dense_rank: None,
         dense_raw_score: None,
+        rerank_raw_score: None,
         final_score,
         rerank_score,
     }

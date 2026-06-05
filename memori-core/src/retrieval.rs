@@ -24,8 +24,11 @@ pub(crate) fn evidence_rank_cmp(a: &MergedEvidence, b: &MergedEvidence) -> Order
 
 /// 构造送入 cross-encoder 的文档文本：标题路径 + 正文，截断以控制重排延迟与上下文。
 pub(crate) fn rerank_document_text(item: &MergedEvidence) -> String {
-    // 放宽截断上限，缓解代码 chunk 被砍掉目标函数体（query-aware 窗口留作后续）。
-    const MAX_RERANK_DOC_CHARS: usize = 1600;
+    // 截断上限必须保证单条 rerank 输入 query+doc 不超过重排模型的序列预算：
+    // gte-multilingual-reranker 经 llama-server 默认 ubatch=512 token，超限会 HTTP 500，
+    // 导致整批 rerank 失败、静默降级到加性记分卡，命中文档因此被门控误拒。
+    // CJK 约 1.2 token/字，320 字 ≈ 400 token，留足空间给 query 与特殊符，稳妥落在 512 内。
+    const MAX_RERANK_DOC_CHARS: usize = 320;
     let body = if item.chunk.heading_path.is_empty() {
         item.chunk.content.clone()
     } else {
@@ -557,6 +560,7 @@ pub(crate) fn merge_chunk_evidence(
                 lexical_raw_score: Some(item.score),
                 dense_rank: None,
                 dense_raw_score: None,
+                rerank_raw_score: None,
                 final_score,
                 rerank_score: None,
             });
@@ -613,6 +617,7 @@ pub(crate) fn merge_chunk_evidence(
                 lexical_raw_score: Some(item.score),
                 dense_rank: None,
                 dense_raw_score: None,
+                rerank_raw_score: None,
                 final_score,
                 rerank_score: None,
             });
@@ -659,6 +664,7 @@ pub(crate) fn merge_chunk_evidence(
                 lexical_raw_score: None,
                 dense_rank: Some(index + 1),
                 dense_raw_score: Some(dense_score),
+                rerank_raw_score: None,
                 final_score,
                 rerank_score: None,
             });

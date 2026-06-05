@@ -299,6 +299,8 @@ pub struct EvidenceItem {
     pub document_raw_score: Option<f64>,
     pub lexical_raw_score: Option<f64>,
     pub dense_raw_score: Option<f32>,
+    #[serde(default)]
+    pub rerank_raw_score: Option<f32>,
     pub final_score: f64,
     pub content: String,
 }
@@ -594,6 +596,7 @@ struct MergedEvidence {
     lexical_raw_score: Option<f64>,
     dense_rank: Option<usize>,
     dense_raw_score: Option<f32>,
+    rerank_raw_score: Option<f32>,
     final_score: f64,
     /// cross-encoder 重排分数。存在时作为排序首要键；None 表示未重排。
     rerank_score: Option<f32>,

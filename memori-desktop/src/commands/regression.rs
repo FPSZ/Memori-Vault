@@ -21,6 +21,9 @@ pub(crate) struct RetrievalRegressionReportEntry {
     pub(crate) path: String,
     pub(crate) json_path: String,
     pub(crate) md_path: Option<String>,
+    pub(crate) report_schema_version: String,
+    pub(crate) app_version: String,
+    pub(crate) suite_version: String,
     pub(crate) mode: String,
     pub(crate) profile: String,
     pub(crate) generated_at_utc: String,
@@ -380,6 +383,9 @@ fn list_reports() -> Result<Vec<RetrievalRegressionReportEntry>, String> {
                 .join("report.md")
                 .exists()
                 .then(|| path.join("report.md").to_string_lossy().to_string()),
+            report_schema_version: json_string(&report, "report_schema_version"),
+            app_version: json_string(&report, "app_version"),
+            suite_version: json_scalar_string(&report, "suite_version"),
             mode: json_string(&report, "evaluation_mode"),
             profile: json_string(&report, "profile"),
             generated_at_utc: json_string(&report, "generated_at_utc"),
@@ -464,6 +470,18 @@ fn json_string(report: &Value, key: &str) -> String {
         .and_then(|value| value.as_str())
         .unwrap_or("")
         .to_string()
+}
+
+fn json_scalar_string(report: &Value, key: &str) -> String {
+    report
+        .get(key)
+        .map(|value| {
+            value
+                .as_str()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| value.to_string())
+        })
+        .unwrap_or_default()
 }
 
 fn system_time_ms(time: SystemTime) -> Option<u128> {

@@ -352,6 +352,9 @@ export function RetrievalRegressionLab({ open, onClose }: RetrievalRegressionLab
                     <span className="w-full truncate">
                       {modeLabel(item.mode)} / {profileLabel(item.profile)}
                     </span>
+                    <span className="w-full truncate">
+                      程序 {formatVersion(item.app_version)} / 测试集 {formatVersion(item.suite_version)}
+                    </span>
                     <span className="w-full truncate">{formatReportTimestamp(item.generated_at_utc)}</span>
                     <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 tabular-nums">
                       <span>T1 {formatPct(item.summary.top1_document_hit_rate)}</span>
@@ -453,7 +456,7 @@ function OverviewTab({
             </div>
             <div className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
               {report
-                ? `${report.generated_at_utc} | ${report.watch_root}`
+                ? `${report.generated_at_utc} | 程序 ${formatVersion(report.app_version)} | 测试集 ${formatVersion(report.suite_version)} | ${report.watch_root}`
                 : loadingReport
                   ? "正在加载报告..."
                   : "请选择一份报告，或先启动一次新的回归。"}
@@ -463,6 +466,8 @@ function OverviewTab({
             <div className="flex flex-wrap items-center gap-2">
               <HealthBadge value={report.service_health} />
               <HealthBadge value={report.rerank_health} label="重排" />
+              <span className="lab-chip">程序 {formatVersion(report.app_version)}</span>
+              <span className="lab-chip">测试集 {formatVersion(report.suite_version)}</span>
               <span className="lab-chip">用例 {summary?.case_count ?? 0}</span>
               <span className="lab-chip">超时 {report.case_timeout_count}</span>
               <span className="lab-chip">索引 {formatMs(report.index_prep_ms)}</span>
@@ -1094,6 +1099,13 @@ function formatReportTimestamp(value: string | null | undefined) {
     second: "2-digit",
     hour12: false
   }).format(date);
+}
+
+function formatVersion(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") {
+    return "未记录";
+  }
+  return String(value);
 }
 
 function rankLabel(value: number | null) {

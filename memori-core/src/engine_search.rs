@@ -398,6 +398,19 @@ impl MemoriEngine {
             });
         }
 
+        // 兜底：确保门控前 merged 一定经过 cross-encoder 重排。
+        // compound（"和"/"与"误触发）、fallback 等路径会产出未重排的证据，
+        // 否则 rerank_confident_release 无从触发——命中文档已在 top3，却因加性记分卡差几分被拒。
+        // 主路径已重排时（带 rerank:applied 标记）跳过，不重复调用重排服务。
+        if !metrics
+            .query_flags
+            .iter()
+            .any(|flag| flag.contains("rerank:applied"))
+        {
+            self.rerank_merged_evidence(&analysis, &mut merged, &mut metrics)
+                .await;
+        }
+
         let profile = self.retrieval_gating_profile();
         if apply_gating_metrics_with_profile(&mut metrics, &analysis, &merged, profile) {
             info!(reason = %metrics.gating_decision_reason, "gating blocked answer as insufficient evidence");

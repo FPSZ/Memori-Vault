@@ -283,6 +283,9 @@ export type RetrievalRegressionReportEntry = {
   path: string;
   json_path: string;
   md_path: string | null;
+  report_schema_version?: string;
+  app_version?: string;
+  suite_version?: string;
   mode: string;
   profile: string;
   generated_at_utc: string;
@@ -295,6 +298,9 @@ export type RetrievalRegressionReportEntry = {
 
 export type RetrievalRegressionReport = {
   tool: string;
+  report_schema_version?: string;
+  app_version?: string;
+  suite_version?: number;
   generated_at_utc: string;
   evaluation_mode: string;
   profile: string;

@@ -180,7 +180,7 @@ impl MemoriEngine {
     /// 召回后的 cross-encoder 重排（最高杠杆精度改进）。
     /// 取头部候选送本地重排服务，写回 rerank_score 并按 evidence_rank_cmp 重排。
     /// 未启用 / 服务不可达 / 返回异常时静默降级到 RRF 排序，绝不让检索失败。
-    async fn rerank_merged_evidence(
+    pub(crate) async fn rerank_merged_evidence(
         &self,
         analysis: &QueryAnalysis,
         evidence: &mut [MergedEvidence],
@@ -219,6 +219,7 @@ impl MemoriEngine {
                 let (rrf_min, rrf_max) = min_max(&rrf_scores);
                 for (index, item) in evidence[..span].iter_mut().enumerate() {
                     let raw = scores[index] as f64;
+                    item.rerank_raw_score = raw.is_finite().then_some(scores[index]);
                     let rerank_value = if raw.is_finite() { raw } else { rerank_min };
                     let rerank_norm = norm01(rerank_value, rerank_min, rerank_max);
                     let rrf_norm = norm01(item.final_score, rrf_min, rrf_max);
@@ -306,6 +307,7 @@ impl MemoriEngine {
                     lexical_raw_score,
                     dense_rank: None,
                     dense_raw_score: None,
+                    rerank_raw_score: None,
                     final_score: doc.document_final_score + bonus_score,
                     rerank_score: None,
                 });

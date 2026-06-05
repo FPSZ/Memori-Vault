@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 
+const RERANK_ANSWER_CONF: f32 = 1.5;
+
 /// 纯语义 top 放行的余弦阈值（多 chunk 一致命中时的较低门槛）。
 /// 注：与 embedding 模型强相关（当前默认 Qwen3-Embedding），无回归集前为保守经验值，易于调参。
 const DENSE_MULTI_CHUNK_COS_MIN: f32 = 0.50;
@@ -320,9 +322,15 @@ pub(crate) fn decide_with_profile(
         has_grounded_single_chunk_release(analysis, &top_group_items, &inputs, &breakdown);
     let identifier_grounded_release =
         has_grounded_identifier_terms(analysis, &top_group_items) && has_any_chunk_lexical(top);
+    let rerank_confident = top
+        .rerank_raw_score
+        .is_some_and(|score| score >= RERANK_ANSWER_CONF);
+    let rerank_confident_release = rerank_confident
+        && (has_grounding_signal || strong_semantic_context || identifier_grounded_release);
     let effective_score = if (has_grounded_single_chunk_release
         || strong_semantic_context
-        || identifier_grounded_release)
+        || identifier_grounded_release
+        || rerank_confident_release)
         && total_score < threshold
     {
         threshold
@@ -331,8 +339,10 @@ pub(crate) fn decide_with_profile(
     };
     let passes_threshold = effective_score >= threshold;
     // 可信语义上下文本身即构成 grounding（替代缺失的词法/文档结构信号），不再因 grounding 缺失而拒答。
-    let has_release_grounding =
-        has_grounding_signal || strong_semantic_context || identifier_grounded_release;
+    let has_release_grounding = has_grounding_signal
+        || strong_semantic_context
+        || identifier_grounded_release
+        || rerank_confident_release;
     let refuse = !passes_threshold || !has_release_grounding;
     let reason = if !passes_threshold {
         "score_below_threshold"
@@ -340,6 +350,8 @@ pub(crate) fn decide_with_profile(
         "missing_grounding_signal"
     } else if strong_semantic_context && !has_grounding_signal {
         "semantic_context_release"
+    } else if rerank_confident_release && total_score < threshold {
+        "rerank_confident_release"
     } else if identifier_grounded_release {
         "identifier_grounded_release"
     } else if has_grounded_single_chunk_release
@@ -438,6 +450,7 @@ pub(crate) fn accumulate_compound_metrics(
     metrics.chunk_strict_lexical_ms += part_metrics.chunk_strict_lexical_ms;
     metrics.chunk_lexical_ms += part_metrics.chunk_lexical_ms;
     metrics.chunk_dense_ms += part_metrics.chunk_dense_ms;
+    metrics.rerank_ms += part_metrics.rerank_ms;
     metrics.merge_ms += part_metrics.merge_ms;
     metrics.doc_candidate_count = metrics
         .doc_candidate_count
@@ -806,6 +819,7 @@ mod tests {
             lexical_raw_score: Some(1.0),
             dense_rank: None,
             dense_raw_score: None,
+            rerank_raw_score: None,
             final_score: 1.0,
             rerank_score: None,
         }
@@ -874,7 +888,9 @@ mod tests {
     #[test]
     fn identifier_query_without_grounded_entity_is_hard_blocked() {
         let analysis = analyze_query("NOVA-404 的负责人是谁");
-        let decision = evaluate_gating_decision(&analysis, &[gating_evidence()]);
+        let mut evidence = gating_evidence();
+        evidence.rerank_raw_score = Some(RERANK_ANSWER_CONF + 10.0);
+        let decision = evaluate_gating_decision(&analysis, &[evidence]);
 
         assert!(decision.refuse);
         assert_eq!(decision.reason, "entity_not_grounded");
@@ -940,6 +956,56 @@ mod tests {
         assert!(!decision.refuse);
         assert_eq!(decision.reason, "coverage_release");
         assert!(decision.gate_score.breakdown.lexical_grounding >= 22);
+    }
+
+    #[test]
+    fn rerank_confident_top_chunk_releases_grounded_answer() {
+        let analysis = analyze_query("alpha beta gamma");
+        let mut evidence = gating_evidence_with_content("alpha beta gamma");
+        evidence.rerank_raw_score = Some(RERANK_ANSWER_CONF);
+        let inputs = EvidenceScoreInputs {
+            top_doc_distinct_term_hits: 0,
+            top_doc_term_coverage: 0.0,
+            top_doc_phrase_quality: None,
+            has_grounding_signal: true,
+        };
+
+        let decision = decide_with_profile(
+            &analysis,
+            &[evidence],
+            RetrievalGatingProfile::Balanced,
+            inputs,
+        );
+
+        assert!(!decision.refuse);
+        assert_eq!(decision.reason, "rerank_confident_release");
+        assert_eq!(
+            decision.gate_score.score,
+            RetrievalGatingProfile::Balanced.threshold()
+        );
+    }
+
+    #[test]
+    fn low_rerank_confidence_falls_back_to_scorecard() {
+        let analysis = analyze_query("alpha beta gamma");
+        let mut evidence = gating_evidence_with_content("alpha beta gamma");
+        evidence.rerank_raw_score = Some(RERANK_ANSWER_CONF - 0.01);
+        let inputs = EvidenceScoreInputs {
+            top_doc_distinct_term_hits: 0,
+            top_doc_term_coverage: 0.0,
+            top_doc_phrase_quality: None,
+            has_grounding_signal: true,
+        };
+
+        let decision = decide_with_profile(
+            &analysis,
+            &[evidence],
+            RetrievalGatingProfile::Balanced,
+            inputs,
+        );
+
+        assert!(decision.refuse);
+        assert_eq!(decision.reason, "score_below_threshold");
     }
 
     #[test]
@@ -1020,6 +1086,7 @@ mod tests {
             lexical_raw_score: None,
             dense_rank: Some(chunk_index + 1),
             dense_raw_score: Some(cosine),
+            rerank_raw_score: None,
             final_score: cosine as f64,
             rerank_score: None,
         }

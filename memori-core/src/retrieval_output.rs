@@ -97,6 +97,7 @@ pub(crate) fn build_evidence_items(evidence: &[MergedEvidence]) -> Vec<EvidenceI
             document_raw_score: item.document_raw_score,
             lexical_raw_score: item.lexical_raw_score,
             dense_raw_score: item.dense_raw_score,
+            rerank_raw_score: item.rerank_raw_score,
             final_score: item.final_score,
             content: item.chunk.content.clone(),
         })
@@ -123,8 +124,21 @@ pub(crate) fn select_balanced_final_evidence(
     }
 
     let mut selected = Vec::new();
+    // 按「每组最相关 chunk」的排序来访问分组，而不是组名字母序。
+    // 否则轮询会按文件名（doc_001…doc_104）取前 k 组，把真正 rank1 的 gold chunk
+    // 挤出最终证据——P-B 拓宽候选后该 bug 会几乎必然丢掉命中文档。
     let mut group_keys = by_group.keys().cloned().collect::<Vec<_>>();
-    group_keys.sort();
+    group_keys.sort_by(|a, b| {
+        match (
+            by_group.get(a).and_then(|items| items.first()),
+            by_group.get(b).and_then(|items| items.first()),
+        ) {
+            (Some(x), Some(y)) => evidence_rank_cmp(x, y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
 
     for key in &group_keys {
         if selected.len() >= final_answer_k {
@@ -186,6 +200,7 @@ pub(crate) fn build_merged_evidence_from_items(items: &[EvidenceItem]) -> Vec<Me
             dense_rank: matches!(item.reason.as_str(), "dense" | "mixed")
                 .then_some(item.chunk_rank),
             dense_raw_score: item.dense_raw_score,
+            rerank_raw_score: item.rerank_raw_score,
             final_score: item.final_score,
             rerank_score: None,
         })
