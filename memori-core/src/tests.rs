@@ -5,8 +5,9 @@ use super::{
     RetrievalMetrics, RuntimeModelConfig, WatchEvent, WatchEventKind, analyze_query,
     apply_gating_metrics, build_citations, build_memory_context_for_prompt, detect_compound_query,
     document_signal_query, evidence_rank_cmp, has_strong_document_signal, is_implementation_lookup,
-    merge_document_candidates, process_file_event, should_allow_memory_only_answer,
-    should_refuse_for_insufficient_evidence, validate_runtime_model_settings,
+    is_plain_text_reference_file, merge_document_candidates, process_file_event,
+    should_allow_memory_only_answer, should_refuse_for_insufficient_evidence,
+    validate_runtime_model_settings,
 };
 use memori_parser::DocumentChunk;
 use memori_storage::RebuildState;
@@ -592,6 +593,17 @@ fn build_citations_dedupes_identical_rendered_excerpt_from_same_file() {
     assert_eq!(citations[0].relative_path, "notes/metrics.md");
 
     let _ = fs::remove_file(file_path);
+}
+
+#[test]
+fn reference_excerpt_reads_plain_text_files_without_binary_extraction() {
+    assert!(is_plain_text_reference_file(Path::new("notes/summary.md")));
+    assert!(is_plain_text_reference_file(Path::new("notes/summary.txt")));
+    assert!(is_plain_text_reference_file(Path::new(
+        "notes/summary.markdown"
+    )));
+    assert!(!is_plain_text_reference_file(Path::new("docs/report.pdf")));
+    assert!(!is_plain_text_reference_file(Path::new("docs/report.docx")));
 }
 
 #[test]

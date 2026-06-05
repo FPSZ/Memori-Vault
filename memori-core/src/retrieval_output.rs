@@ -357,11 +357,13 @@ fn canonical_source_title(relative_path: &str, file_path: &str) -> String {
 pub(crate) fn build_reference_excerpt(file_path: &Path, chunk_content: &str) -> String {
     const TARGET_EXCERPT_CHARS: usize = 1600;
 
-    let raw = if let Some(text) = memori_parser::extract_document_text(file_path) {
-        text
-    } else if let Ok(text) = std::fs::read_to_string(file_path) {
-        text
+    let raw = if is_plain_text_reference_file(file_path) {
+        std::fs::read_to_string(file_path).ok()
     } else {
+        memori_parser::extract_document_text(file_path)
+            .or_else(|| std::fs::read_to_string(file_path).ok())
+    };
+    let Some(raw) = raw else {
         return chunk_content.to_string();
     };
 
@@ -425,6 +427,17 @@ pub(crate) fn build_reference_excerpt(file_path: &Path, chunk_content: &str) -> 
     }
 
     paragraphs[start..end].join("\n\n")
+}
+
+pub(crate) fn is_plain_text_reference_file(file_path: &Path) -> bool {
+    matches!(
+        file_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("md" | "markdown" | "txt")
+    )
 }
 
 pub(crate) fn build_answer_question(query: &str, lang: Option<&str>) -> String {
