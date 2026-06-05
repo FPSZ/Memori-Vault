@@ -120,6 +120,8 @@ struct RegressionCase {
     #[serde(default)]
     target_documents: Vec<String>,
     #[serde(default)]
+    acceptable_documents: Vec<String>,
+    #[serde(default)]
     target_clues: Vec<String>,
     #[serde(default)]
     profile_tags: Vec<String>,
@@ -142,6 +144,8 @@ struct RegressionCaseResult {
     timed_out: bool,
     scope_paths: Vec<String>,
     target_documents: Vec<String>,
+    acceptable_documents: Vec<String>,
+    exact_document_hit_rank: Option<usize>,
     target_clues: Vec<String>,
     document_hit_rank: Option<usize>,
     chunk_hit_rank: Option<usize>,
@@ -707,7 +711,11 @@ fn collect_target_documents(suite: &RegressionSuite) -> Vec<String> {
         if case.mode != RegressionMode::Answer {
             continue;
         }
-        for document in &case.target_documents {
+        for document in case
+            .target_documents
+            .iter()
+            .chain(case.acceptable_documents.iter())
+        {
             let normalized = normalize_rel(document);
             if !normalized.is_empty() && seen.insert(normalized.clone()) {
                 documents.push(normalized);
@@ -920,7 +928,8 @@ fn build_case_result(
     inspection: RetrievalInspection,
     timed_out: bool,
 ) -> RegressionCaseResult {
-    let document_hit_rank = find_document_hit_rank(&inspection, &case.target_documents);
+    let exact_document_hit_rank = find_document_hit_rank(&inspection, &case.target_documents);
+    let document_hit_rank = find_document_hit_rank(&inspection, effective_document_targets(case));
     let chunk_hit_rank = find_chunk_hit_rank(&inspection, &case.target_clues);
     let citation_valid = citations_are_valid(&inspection, watch_root, scope_paths);
     let reject_correct = matches!(
@@ -938,6 +947,8 @@ fn build_case_result(
         timed_out,
         scope_paths: case.scope_paths.clone(),
         target_documents: case.target_documents.clone(),
+        acceptable_documents: case.acceptable_documents.clone(),
+        exact_document_hit_rank,
         target_clues: case.target_clues.clone(),
         document_hit_rank,
         chunk_hit_rank,
@@ -974,6 +985,8 @@ fn timeout_case_result(case: &RegressionCase) -> RegressionCaseResult {
         timed_out: true,
         scope_paths: case.scope_paths.clone(),
         target_documents: case.target_documents.clone(),
+        acceptable_documents: case.acceptable_documents.clone(),
+        exact_document_hit_rank: None,
         target_clues: case.target_clues.clone(),
         document_hit_rank: None,
         chunk_hit_rank: None,
@@ -994,6 +1007,14 @@ fn timeout_case_result(case: &RegressionCase) -> RegressionCaseResult {
         merge_ms: 0,
         rerank_ms: 0,
         notes: case.notes.clone(),
+    }
+}
+
+fn effective_document_targets(case: &RegressionCase) -> &[String] {
+    if case.acceptable_documents.is_empty() {
+        &case.target_documents
+    } else {
+        &case.acceptable_documents
     }
 }
 
@@ -1479,10 +1500,13 @@ mod tests {
     use super::{
         DEFAULT_OFFLINE_EMBEDDING_DIM, EvaluationMode, RegressionCase, RegressionCaseResult,
         RegressionMode, RegressionProfile, RegressionReport, RegressionSummary,
-        build_deterministic_query_embedding, collect_target_documents, render_report_markdown,
-        summarize,
+        build_deterministic_query_embedding, collect_target_documents, find_document_hit_rank,
+        render_report_markdown, summarize,
     };
-    use memori_core::{AskStatus, RuntimeRetrievalBaseline};
+    use memori_core::{
+        AnswerSourceMix, AskStatus, CitationItem, ContextBudgetReport, EvidenceItem, FailureClass,
+        RetrievalInspection, RetrievalMetrics, RuntimeRetrievalBaseline,
+    };
 
     #[test]
     fn deterministic_query_embedding_is_stable() {
@@ -1514,6 +1538,7 @@ mod tests {
             mode: RegressionMode::Answer,
             scope_paths: Vec::new(),
             target_documents: vec!["docs/planning/plan.md".to_string()],
+            acceptable_documents: Vec::new(),
             target_clues: vec!["plan".to_string()],
             profile_tags: vec!["core_docs".to_string()],
             notes: None,
@@ -1541,6 +1566,7 @@ mod tests {
                         ".\\Memory_Test\\doc_001_产品策略_极光账本_制度.md".to_string(),
                         "Memory_Test/doc_002_产品策略_极光账本_会议纪要.txt".to_string(),
                     ],
+                    acceptable_documents: vec!["Memory_Test/doc_003_topic_SOP.docx".to_string()],
                     target_clues: vec!["clue".to_string()],
                     profile_tags: vec!["core_docs".to_string()],
                     notes: None,
@@ -1553,6 +1579,7 @@ mod tests {
                     target_documents: vec![
                         "Memory_Test/doc_001_产品策略_极光账本_制度.md".to_string(),
                     ],
+                    acceptable_documents: Vec::new(),
                     target_clues: vec!["clue".to_string()],
                     profile_tags: vec!["core_docs".to_string()],
                     notes: None,
@@ -1563,6 +1590,7 @@ mod tests {
                     mode: RegressionMode::Refuse,
                     scope_paths: Vec::new(),
                     target_documents: vec!["README.md".to_string()],
+                    acceptable_documents: Vec::new(),
                     target_clues: Vec::new(),
                     profile_tags: vec!["core_docs".to_string()],
                     notes: None,
@@ -1575,8 +1603,63 @@ mod tests {
             vec![
                 "Memory_Test/doc_001_产品策略_极光账本_制度.md".to_string(),
                 "Memory_Test/doc_002_产品策略_极光账本_会议纪要.txt".to_string(),
+                "Memory_Test/doc_003_topic_SOP.docx".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn acceptable_documents_can_match_sibling_fact_card_document() {
+        let inspection = RetrievalInspection {
+            status: AskStatus::Answered,
+            question: "q".to_string(),
+            scope_paths: Vec::new(),
+            citations: vec![CitationItem {
+                index: 1,
+                file_path: "D:/repo/Memory_Test/doc_002_topic_meeting.txt".to_string(),
+                relative_path: "Memory_Test/doc_002_topic_meeting.txt".to_string(),
+                chunk_index: 0,
+                heading_path: Vec::new(),
+                excerpt: "shared fact".to_string(),
+            }],
+            evidence: vec![EvidenceItem {
+                file_path: "D:/repo/Memory_Test/doc_002_topic_meeting.txt".to_string(),
+                relative_path: "Memory_Test/doc_002_topic_meeting.txt".to_string(),
+                chunk_index: 0,
+                heading_path: Vec::new(),
+                block_kind: "paragraph".to_string(),
+                document_reason: "lexical_strict".to_string(),
+                reason: "lexical_strict".to_string(),
+                document_rank: 1,
+                chunk_rank: 1,
+                document_raw_score: Some(1.0),
+                lexical_raw_score: Some(1.0),
+                dense_raw_score: None,
+                final_score: 1.0,
+                content: "shared fact".to_string(),
+            }],
+            metrics: RetrievalMetrics::default(),
+            answer_source_mix: AnswerSourceMix::DocumentOnly,
+            memory_context: Vec::new(),
+            source_groups: Vec::new(),
+            failure_class: FailureClass::None,
+            context_budget_report: ContextBudgetReport::default(),
+        };
+
+        let exact_rank = find_document_hit_rank(
+            &inspection,
+            &["Memory_Test/doc_001_topic_policy.md".to_string()],
+        );
+        let acceptable_rank = find_document_hit_rank(
+            &inspection,
+            &[
+                "Memory_Test/doc_001_topic_policy.md".to_string(),
+                "Memory_Test/doc_002_topic_meeting.txt".to_string(),
+            ],
+        );
+
+        assert_eq!(exact_rank, None);
+        assert_eq!(acceptable_rank, Some(1));
     }
 
     #[test]
@@ -1590,6 +1673,8 @@ mod tests {
                 timed_out: false,
                 scope_paths: Vec::new(),
                 target_documents: vec!["README.md".to_string()],
+                acceptable_documents: Vec::new(),
+                exact_document_hit_rank: Some(1),
                 target_clues: vec!["desktop-first".to_string()],
                 document_hit_rank: Some(1),
                 chunk_hit_rank: Some(1),
@@ -1619,6 +1704,8 @@ mod tests {
                 timed_out: false,
                 scope_paths: Vec::new(),
                 target_documents: vec!["docs/guides/TUTORIAL.md".to_string()],
+                acceptable_documents: Vec::new(),
+                exact_document_hit_rank: Some(2),
                 target_clues: vec!["low".to_string()],
                 document_hit_rank: Some(2),
                 chunk_hit_rank: Some(4),
@@ -1648,6 +1735,8 @@ mod tests {
                 timed_out: false,
                 scope_paths: Vec::new(),
                 target_documents: Vec::new(),
+                acceptable_documents: Vec::new(),
+                exact_document_hit_rank: None,
                 target_clues: Vec::new(),
                 document_hit_rank: None,
                 chunk_hit_rank: None,
@@ -1731,6 +1820,8 @@ mod tests {
                 timed_out: false,
                 scope_paths: Vec::new(),
                 target_documents: vec!["README.md".to_string()],
+                acceptable_documents: Vec::new(),
+                exact_document_hit_rank: Some(1),
                 target_clues: vec!["desktop-first".to_string()],
                 document_hit_rank: Some(1),
                 chunk_hit_rank: Some(1),
