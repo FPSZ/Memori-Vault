@@ -1,6 +1,7 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::cmp::Reverse;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -397,7 +398,7 @@ fn list_reports() -> Result<Vec<RetrievalRegressionReportEntry>, String> {
         });
     }
 
-    reports.sort_by(|a, b| b.last_modified_ms.cmp(&a.last_modified_ms));
+    reports.sort_by_key(|item| Reverse(item.last_modified_ms));
     Ok(reports)
 }
 
