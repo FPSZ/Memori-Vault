@@ -4,7 +4,7 @@
 
 `1.5.0` is the retrieval-quality and local-model runtime release for Memori-Vault. It consolidates the work from the `dev` line after `1.0.2`: local-first model policy hardening, four-role llama.cpp runtime support, rerank integration, a real Chinese Memory_Test regression suite, visual regression reporting, and the first measured 100-case live retrieval baseline for the rebuilt retrieval pipeline.
 
-This release keeps the product boundary unchanged: Memori-Vault is still a local-first, verifiable knowledge retrieval and long-term memory system. The major change is that retrieval quality is now measured with a realistic internal corpus instead of mostly project-development documents.
+This release keeps the product boundary unchanged: Memori-Vault is still a local-first, verifiable Memory OS Lite for knowledge retrieval and long-term memory. The major change is that retrieval quality is now measured with a realistic internal corpus instead of mostly project-development documents.
 
 ## Highlights
 

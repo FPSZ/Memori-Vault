@@ -6,7 +6,7 @@
 
 **Ask your documents. Know exactly where the answer came from.**
 
-[中文](./README.md) | [Contributing](./CONTRIBUTING.en.md) | [Tutorial](./docs/TUTORIAL.md) | [Memory OS Lite Architecture](./docs/MEMORY_OS_LITE.md)
+[中文](./README.md) | [Contributing](./CONTRIBUTING.en.md) | [Tutorial](./docs/TUTORIAL.md) | [Memory OS Lite Architecture](./docs/architecture/MEMORY_OS_LITE.md)
 
 ---
 
@@ -90,7 +90,7 @@ Implemented or partially implemented today:
 - Trust Panel for answer source mix, failure class, token budget, source groups, and memory context.
 - Evidence compression so ordinary QA sends only the strongest evidence to the answer model.
 
-See [docs/MEMORY_OS_LITE.md](./docs/MEMORY_OS_LITE.md) for the full architecture.
+See [docs/architecture/MEMORY_OS_LITE.md](./docs/architecture/MEMORY_OS_LITE.md) for the full architecture.
 
 ### 4. SQLite Single-File Runtime
 
