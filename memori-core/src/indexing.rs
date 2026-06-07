@@ -3,6 +3,14 @@
 const EMBEDDING_CHUNK_TIMEOUT_SECS: u64 = 120;
 const EMBEDDING_BATCH_SIZE: usize = 16;
 
+/// Skip indexing files larger than this (raw bytes). Protects against
+/// pathological huge files exhausting memory or flooding the graph queue.
+const MAX_INDEX_FILE_BYTES: u64 = 50 * 1024 * 1024;
+/// Cap chunks indexed per document. ~400 chunks ≈ 400k chars; beyond this we
+/// truncate so one document cannot enqueue an unbounded number of embedding +
+/// graph-extraction tasks.
+const MAX_CHUNKS_PER_DOC: usize = 400;
+
 pub(crate) fn retryable_rebuild_reason(retryable_count: usize, last_error: Option<&str>) -> String {
     let clean_error = last_error
         .map(str::trim)
@@ -96,6 +104,20 @@ pub(crate) async fn process_file_event(
         }
     };
     let file_size = i64::try_from(metadata.len()).unwrap_or(i64::MAX);
+
+    // Guardrail 1: skip pathologically large files outright, so a single huge
+    // document cannot stall indexing or flood the graph-extraction queue.
+    if metadata.len() > MAX_INDEX_FILE_BYTES {
+        warn!(
+            path = %event.path.display(),
+            file_bytes = metadata.len(),
+            limit_bytes = MAX_INDEX_FILE_BYTES,
+            "文件超过索引大小上限，已跳过"
+        );
+        set_runtime_idle(state, None).await;
+        return;
+    }
+
     let mtime_secs = metadata
         .modified()
         .ok()
@@ -201,7 +223,18 @@ pub(crate) async fn process_file_event(
     }
 
     let chunks = match parse_and_chunk(&event.path, &raw_text) {
-        Ok(chunks) => {
+        Ok(mut chunks) => {
+            // Guardrail 2: cap chunks per document so an extremely long file
+            // produces a bounded number of embedding + graph-extraction tasks.
+            if chunks.len() > MAX_CHUNKS_PER_DOC {
+                warn!(
+                    path = %event.path.display(),
+                    chunk_count = chunks.len(),
+                    limit = MAX_CHUNKS_PER_DOC,
+                    "文档文本块数超过上限，已截断（仅索引前 N 块）"
+                );
+                chunks.truncate(MAX_CHUNKS_PER_DOC);
+            }
             info!(
                 path = %event.path.display(),
                 chunk_count = chunks.len(),
