@@ -1,0 +1,2738 @@
+{
+  "company": "星衡智能",
+  "seed": 20260605,
+  "signal_count": 280,
+  "noise_count": 220,
+  "special_count": 6,
+  "total": 506,
+  "format_counts": {
+    "md": 81,
+    "txt": 120,
+    "docx": 78,
+    "pdf": 76,
+    "xlsx": 75,
+    "pptx": 76
+  },
+  "signal_genres": [
+    [
+      "制度",
+      "md"
+    ],
+    [
+      "邮件",
+      "txt"
+    ],
+    [
+      "群聊",
+      "txt"
+    ],
+    [
+      "纪要",
+      "docx"
+    ],
+    [
+      "复盘",
+      "pdf"
+    ],
+    [
+      "参数表",
+      "xlsx"
+    ],
+    [
+      "幻灯片",
+      "pptx"
+    ]
+  ],
+  "dossiers": [
+    {
+      "code": "AUR-17",
+      "project": "极光账本",
+      "category": "产品策略",
+      "owner": "林知远",
+      "department": "企业产品部",
+      "decoy_code": "AUR-71",
+      "anti_common": "不要按通用 SaaS 写成 DAU 或转化率。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "禾川物流、南屿商贸、钧石制造",
+          "carrier": "Memory_Test_V2/sig_001_产品策略_极光账本_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "一期北极星指标目标(已核销对账单数)",
+          "clue": "18,600 张",
+          "carrier": "Memory_Test_V2/sig_006_产品策略_极光账本_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "字段契约评审",
+          "carrier": "Memory_Test_V2/sig_004_产品策略_极光账本_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "customer_alias",
+          "carrier": "Memory_Test_V2/sig_002_产品策略_极光账本_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "灰度放量比例到底定多少",
+          "clue": "2.7%",
+          "carrier": "Memory_Test_V2/sig_003_产品策略_极光账本_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "网关侧对账校验阈值",
+          "old": "0.55%",
+          "clue": "0.47%",
+          "carrier": "Memory_Test_V2/sig_005_产品策略_极光账本_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "18,600 张已核销对账单",
+          "carrier": "Memory_Test_V2/sig_007_产品策略_极光账本_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        1,
+        7
+      ]
+    },
+    {
+      "code": "GROW-29",
+      "project": "青梧留存",
+      "category": "运营增长",
+      "owner": "陈夏",
+      "department": "增长运营组",
+      "decoy_code": "GROW-92",
+      "anti_common": "不要回答行业常见的新注册用户定义。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "14 天内访问过但未创建项目",
+          "carrier": "Memory_Test_V2/sig_008_运营增长_青梧留存_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "D14 二次创建率暂停投放线",
+          "clue": "29%",
+          "carrier": "Memory_Test_V2/sig_013_运营增长_青梧留存_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先看 cohort 再决定素材预算",
+          "carrier": "Memory_Test_V2/sig_011_运营增长_青梧留存_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "放宽到 27.8%",
+          "carrier": "Memory_Test_V2/sig_009_运营增长_青梧留存_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "投放暂停到底卡哪个数",
+          "clue": "31.5%",
+          "carrier": "Memory_Test_V2/sig_010_运营增长_青梧留存_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "核心阈值 D14 二次创建率",
+          "old": "33%",
+          "clue": "31.5%",
+          "carrier": "Memory_Test_V2/sig_012_运营增长_青梧留存_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "D14 二次创建率 31.5%",
+          "carrier": "Memory_Test_V2/sig_014_运营增长_青梧留存_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        8,
+        14
+      ]
+    },
+    {
+      "code": "SEC-41",
+      "project": "玄武密钥",
+      "category": "安全合规",
+      "owner": "周曼青",
+      "department": "安全办公室",
+      "decoy_code": "SEC-14",
+      "anti_common": "不要写成常见的 90 天轮换。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "每月第二个周四 22:10",
+          "carrier": "Memory_Test_V2/sig_015_安全合规_玄武密钥_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "服务端密钥最大存活期",
+          "clue": "43 天",
+          "carrier": "Memory_Test_V2/sig_020_安全合规_玄武密钥_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "影子校验",
+          "carrier": "Memory_Test_V2/sig_018_安全合规_玄武密钥_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "payment-salt",
+          "carrier": "Memory_Test_V2/sig_016_安全合规_玄武密钥_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "服务端密钥到底几天过期",
+          "clue": "43 天",
+          "carrier": "Memory_Test_V2/sig_017_安全合规_玄武密钥_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "移动端派生密钥存活期",
+          "old": "12 天",
+          "clue": "9 天",
+          "carrier": "Memory_Test_V2/sig_019_安全合规_玄武密钥_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "服务端密钥最大存活期为 43 天",
+          "carrier": "Memory_Test_V2/sig_021_安全合规_玄武密钥_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        15,
+        21
+      ]
+    },
+    {
+      "code": "ARC-17",
+      "project": "银杏-17",
+      "category": "技术架构",
+      "owner": "苏澈",
+      "department": "平台架构组",
+      "decoy_code": "ARC-71",
+      "anti_common": "不要回答成常见的 5% 灰度或任意时间发布。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "每周三 19:40 至 21:10",
+          "carrier": "Memory_Test_V2/sig_022_技术架构_银杏-17_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "网关错误率自动回滚阈值",
+          "clue": "0.47%",
+          "carrier": "Memory_Test_V2/sig_027_技术架构_银杏-17_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先 shadow-read，再 2.7% 灰度",
+          "carrier": "Memory_Test_V2/sig_025_技术架构_银杏-17_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "invoice-core",
+          "carrier": "Memory_Test_V2/sig_023_技术架构_银杏-17_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "灰度第一档到底多少",
+          "clue": "2.7%",
+          "carrier": "Memory_Test_V2/sig_024_技术架构_银杏-17_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "自动回滚的持续时间门槛",
+          "old": "4 分钟",
+          "clue": "6 分钟",
+          "carrier": "Memory_Test_V2/sig_026_技术架构_银杏-17_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "0.47% 持续 6 分钟",
+          "carrier": "Memory_Test_V2/sig_028_技术架构_银杏-17_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        22,
+        28
+      ]
+    },
+    {
+      "code": "CS-08",
+      "project": "白鹭工单",
+      "category": "客户成功",
+      "owner": "马溪",
+      "department": "客户成功部",
+      "decoy_code": "CS-80",
+      "anti_common": "不要套用通用 15/30/60 分钟工单 SLA。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "P1 升级 SLA 是 11 分钟",
+          "carrier": "Memory_Test_V2/sig_029_客户成功_白鹭工单_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "一线首次响应满意度目标",
+          "clue": "92.4%",
+          "carrier": "Memory_Test_V2/sig_034_客户成功_白鹭工单_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先补齐租户号再同步研发值班",
+          "carrier": "Memory_Test_V2/sig_032_客户成功_白鹭工单_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "仍按 37 分钟统计",
+          "carrier": "Memory_Test_V2/sig_030_客户成功_白鹭工单_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "P1 到底几分钟升级",
+          "clue": "11 分钟",
+          "carrier": "Memory_Test_V2/sig_031_客户成功_白鹭工单_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "P2 升级 SLA",
+          "old": "45 分钟",
+          "clue": "37 分钟",
+          "carrier": "Memory_Test_V2/sig_033_客户成功_白鹭工单_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "P1 升级 SLA 为 11 分钟",
+          "carrier": "Memory_Test_V2/sig_035_客户成功_白鹭工单_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        29,
+        35
+      ]
+    },
+    {
+      "code": "FIN-33",
+      "project": "赤松预算",
+      "category": "财务风控",
+      "owner": "何砚",
+      "department": "财务风控组",
+      "decoy_code": "FIN-83",
+      "anti_common": "不要回答成传统金额越大越高层审批。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "预算池剩余率低于 18%",
+          "carrier": "Memory_Test_V2/sig_036_财务风控_赤松预算_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "试点期单笔采购上限",
+          "clue": "78,000 元",
+          "carrier": "Memory_Test_V2/sig_041_财务风控_赤松预算_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先填成本标签",
+          "carrier": "Memory_Test_V2/sig_039_财务风控_赤松预算_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "RND-EMG",
+          "carrier": "Memory_Test_V2/sig_037_财务风控_赤松预算_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "单笔采购上限到底多少",
+          "clue": "78,000 元",
+          "carrier": "Memory_Test_V2/sig_038_财务风控_赤松预算_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "升级 CFO 的预算池剩余率门槛",
+          "old": "22%",
+          "clue": "18%",
+          "carrier": "Memory_Test_V2/sig_040_财务风控_赤松预算_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "单笔采购上限 78,000 元",
+          "carrier": "Memory_Test_V2/sig_042_财务风控_赤松预算_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        36,
+        42
+      ]
+    },
+    {
+      "code": "DATA-12",
+      "project": "松塔标签",
+      "category": "数据治理",
+      "owner": "顾安",
+      "department": "数据平台组",
+      "decoy_code": "DATA-21",
+      "anti_common": "不要按零售常见日活门店口径回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "10 天内完成过库存盘点",
+          "carrier": "Memory_Test_V2/sig_043_数据治理_松塔标签_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "标签产出延迟 SLO",
+          "clue": "T+38 分钟",
+          "carrier": "Memory_Test_V2/sig_048_数据治理_松塔标签_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "登记口径、回填范围、下游看板和撤销策略",
+          "carrier": "Memory_Test_V2/sig_046_数据治理_松塔标签_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "放宽到 13 天",
+          "carrier": "Memory_Test_V2/sig_044_数据治理_松塔标签_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "活跃门店到底几天口径",
+          "clue": "10 天",
+          "carrier": "Memory_Test_V2/sig_045_数据治理_松塔标签_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "标签产出延迟 SLO",
+          "old": "T+1 天",
+          "clue": "T+38 分钟",
+          "carrier": "Memory_Test_V2/sig_047_数据治理_松塔标签_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "T+38 分钟",
+          "carrier": "Memory_Test_V2/sig_049_数据治理_松塔标签_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        43,
+        49
+      ]
+    },
+    {
+      "code": "HR-22",
+      "project": "石竹梯队",
+      "category": "人力组织",
+      "owner": "赵闻笛",
+      "department": "组织发展部",
+      "decoy_code": "HR-202",
+      "anti_common": "不要写成通用绩效评分或团队规模决定晋升。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "主持过一次跨部门复盘",
+          "carrier": "Memory_Test_V2/sig_050_人力组织_石竹梯队_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "2026 上半年 L3 名额上限",
+          "clue": "14 人",
+          "carrier": "Memory_Test_V2/sig_055_人力组织_石竹梯队_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "失败案例复盘页",
+          "carrier": "Memory_Test_V2/sig_053_人力组织_石竹梯队_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "仍占总名额",
+          "carrier": "Memory_Test_V2/sig_051_人力组织_石竹梯队_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "L3 名额一共多少",
+          "clue": "14 人",
+          "carrier": "Memory_Test_V2/sig_052_人力组织_石竹梯队_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "技术序列 L3 名额上限",
+          "old": "8 人",
+          "clue": "6 人",
+          "carrier": "Memory_Test_V2/sig_054_人力组织_石竹梯队_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "技术序列最多 6 人",
+          "carrier": "Memory_Test_V2/sig_056_人力组织_石竹梯队_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        50,
+        56
+      ]
+    },
+    {
+      "code": "SCM-17",
+      "project": "蓝鲸B17",
+      "category": "供应链",
+      "owner": "唐稚",
+      "department": "供应链协同组",
+      "decoy_code": "SCM-71",
+      "anti_common": "不要按制造业常见天数库存回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "143 台关键模组",
+          "carrier": "Memory_Test_V2/sig_057_供应链_蓝鲸B17_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "Bin-7 库位红色预警阈值",
+          "clue": "23 台",
+          "carrier": "Memory_Test_V2/sig_062_供应链_蓝鲸B17_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先通知唐稚再通知采购",
+          "carrier": "Memory_Test_V2/sig_060_供应链_蓝鲸B17_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "提高到 67 台",
+          "carrier": "Memory_Test_V2/sig_058_供应链_蓝鲸B17_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "安全库存到底多少台",
+          "clue": "143 台",
+          "carrier": "Memory_Test_V2/sig_059_供应链_蓝鲸B17_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "Bin-7 黄色预警阈值",
+          "old": "60 台",
+          "clue": "51 台",
+          "carrier": "Memory_Test_V2/sig_061_供应链_蓝鲸B17_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "安全库存为 143 台关键模组",
+          "carrier": "Memory_Test_V2/sig_063_供应链_蓝鲸B17_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        57,
+        63
+      ]
+    },
+    {
+      "code": "MKT-05",
+      "project": "雾凇发布",
+      "category": "品牌市场",
+      "owner": "沈乔",
+      "department": "品牌市场部",
+      "decoy_code": "MKT-50",
+      "anti_common": "不要输出营销通用夸张词。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "颠覆行业、零成本替代、全自动合规",
+          "carrier": "Memory_Test_V2/sig_064_品牌市场_雾凇发布_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "目标客户闭门演示预约数下限",
+          "clue": "19 家",
+          "carrier": "Memory_Test_V2/sig_069_品牌市场_雾凇发布_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先过法务术语检查",
+          "carrier": "Memory_Test_V2/sig_067_品牌市场_雾凇发布_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "必须删除零风险",
+          "carrier": "Memory_Test_V2/sig_065_品牌市场_雾凇发布_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "禁用词到底有哪几个",
+          "clue": "全自动合规",
+          "carrier": "Memory_Test_V2/sig_066_品牌市场_雾凇发布_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "闭门演示预约目标",
+          "old": "15 家",
+          "clue": "19 家",
+          "carrier": "Memory_Test_V2/sig_068_品牌市场_雾凇发布_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "至少 19 家完成闭门演示预约",
+          "carrier": "Memory_Test_V2/sig_070_品牌市场_雾凇发布_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        64,
+        70
+      ]
+    },
+    {
+      "code": "LAW-19",
+      "project": "琥珀条款",
+      "category": "法务合同",
+      "owner": "魏蓝",
+      "department": "法务部",
+      "decoy_code": "LAW-91",
+      "anti_common": "不要写成普通 SaaS 数据处理协议。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "本地模型不出域附件 A-3",
+          "carrier": "Memory_Test_V2/sig_071_法务合同_琥珀条款_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "合同回传时限",
+          "clue": "5 个工作日",
+          "carrier": "Memory_Test_V2/sig_076_法务合同_琥珀条款_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "只能引用附件 A-3",
+          "carrier": "Memory_Test_V2/sig_074_法务合同_琥珀条款_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "新增模块必须附",
+          "carrier": "Memory_Test_V2/sig_072_法务合同_琥珀条款_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "回传时限到底几天",
+          "clue": "5 个工作日",
+          "carrier": "Memory_Test_V2/sig_073_法务合同_琥珀条款_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "合同回传超时标记阈值",
+          "old": "7 个工作日",
+          "clue": "5 个工作日",
+          "carrier": "Memory_Test_V2/sig_075_法务合同_琥珀条款_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "回传时限为 5 个工作日",
+          "carrier": "Memory_Test_V2/sig_077_法务合同_琥珀条款_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        71,
+        77
+      ]
+    },
+    {
+      "code": "DEV-26",
+      "project": "蜂巢流水线",
+      "category": "研发效能",
+      "owner": "于北辰",
+      "department": "研发效能组",
+      "decoy_code": "DEV-62",
+      "anti_common": "不要只回答提高单测覆盖率。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "迁移脚本缺少回滚段",
+          "carrier": "Memory_Test_V2/sig_078_研发效能_蜂巢流水线_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "主干构建绿色时限",
+          "clue": "18 分钟",
+          "carrier": "Memory_Test_V2/sig_083_研发效能_蜂巢流水线_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "hcx_build_review",
+          "carrier": "Memory_Test_V2/sig_081_研发效能_蜂巢流水线_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "产品仓库不允许",
+          "carrier": "Memory_Test_V2/sig_079_研发效能_蜂巢流水线_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "构建多久算绿色",
+          "clue": "18 分钟",
+          "carrier": "Memory_Test_V2/sig_080_研发效能_蜂巢流水线_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "红色构建时限门槛",
+          "old": "28 分钟",
+          "clue": "31 分钟",
+          "carrier": "Memory_Test_V2/sig_082_研发效能_蜂巢流水线_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "18 分钟内算绿色",
+          "carrier": "Memory_Test_V2/sig_084_研发效能_蜂巢流水线_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        78,
+        84
+      ]
+    },
+    {
+      "code": "PRE-09",
+      "project": "云帆模板",
+      "category": "售前方案",
+      "owner": "梁其",
+      "department": "解决方案部",
+      "decoy_code": "PRE-90",
+      "anti_common": "不要按通用售前写成越完整越好。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "3 节点轻量集群",
+          "carrier": "Memory_Test_V2/sig_085_售前方案_云帆模板_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "标准演示时长",
+          "clue": "28 分钟",
+          "carrier": "Memory_Test_V2/sig_090_售前方案_云帆模板_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "未开启证据面板的回答截图",
+          "carrier": "Memory_Test_V2/sig_088_售前方案_云帆模板_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "保留 7 分钟证据讲解",
+          "carrier": "Memory_Test_V2/sig_086_售前方案_云帆模板_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "私有化默认几个节点",
+          "clue": "3 节点",
+          "carrier": "Memory_Test_V2/sig_087_售前方案_云帆模板_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "知识库问答演示时长上限",
+          "old": "10 分钟",
+          "clue": "7 分钟",
+          "carrier": "Memory_Test_V2/sig_089_售前方案_云帆模板_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "知识库问答控制在 7 分钟内",
+          "carrier": "Memory_Test_V2/sig_091_售前方案_云帆模板_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        85,
+        91
+      ]
+    },
+    {
+      "code": "QA-31",
+      "project": "晴川验收",
+      "category": "质量保障",
+      "owner": "董霁",
+      "department": "质量保障部",
+      "decoy_code": "QA-13",
+      "anti_common": "不要回答成普通测试通过率。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "完成 9 条端到端证据链",
+          "carrier": "Memory_Test_V2/sig_092_质量保障_晴川验收_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "验收抽样比例",
+          "clue": "17%",
+          "carrier": "Memory_Test_V2/sig_097_质量保障_晴川验收_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "复现实录、修复提交和二次验证",
+          "carrier": "Memory_Test_V2/sig_095_质量保障_晴川验收_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "检索证据缺陷不能合并关闭",
+          "carrier": "Memory_Test_V2/sig_093_质量保障_晴川验收_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "可交付要几条证据链",
+          "clue": "9 条",
+          "carrier": "Memory_Test_V2/sig_094_质量保障_晴川验收_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "验收抽样比例",
+          "old": "20%",
+          "clue": "17%",
+          "carrier": "Memory_Test_V2/sig_096_质量保障_晴川验收_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "抽样比例固定 17%",
+          "carrier": "Memory_Test_V2/sig_098_质量保障_晴川验收_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        92,
+        98
+      ]
+    },
+    {
+      "code": "AUD-14",
+      "project": "镜湖审计",
+      "category": "内控审计",
+      "owner": "郝映",
+      "department": "内控审计组",
+      "decoy_code": "AUD-41",
+      "anti_common": "不要套用通用随机抽样审计。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "最近 5 次异常回滚",
+          "carrier": "Memory_Test_V2/sig_099_内控审计_镜湖审计_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "每次审计追踪角色数",
+          "clue": "4 个",
+          "carrier": "Memory_Test_V2/sig_104_内控审计_镜湖审计_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "系统证据和人工解释的分界",
+          "carrier": "Memory_Test_V2/sig_102_内控审计_镜湖审计_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "补足最近 30 天",
+          "carrier": "Memory_Test_V2/sig_100_内控审计_镜湖审计_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "样本取最近几次回滚",
+          "clue": "5 次",
+          "carrier": "Memory_Test_V2/sig_101_内控审计_镜湖审计_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "审计追踪角色数",
+          "old": "3 个",
+          "clue": "4 个",
+          "carrier": "Memory_Test_V2/sig_103_内控审计_镜湖审计_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "追踪.*4 个角色",
+          "carrier": "Memory_Test_V2/sig_105_内控审计_镜湖审计_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        99,
+        105
+      ]
+    },
+    {
+      "code": "KM-07",
+      "project": "栈桥知识库",
+      "category": "知识管理",
+      "owner": "黎鸥",
+      "department": "知识管理组",
+      "decoy_code": "KM-70",
+      "anti_common": "不要回答普通文档生命周期管理。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "75 天无人引用即进入复审",
+          "carrier": "Memory_Test_V2/sig_106_知识管理_栈桥知识库_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "核心知识卡必含要素数",
+          "clue": "3 项",
+          "carrier": "Memory_Test_V2/sig_111_知识管理_栈桥知识库_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先由知识所有人判断",
+          "carrier": "Memory_Test_V2/sig_109_知识管理_栈桥知识库_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "不自动过期",
+          "carrier": "Memory_Test_V2/sig_107_知识管理_栈桥知识库_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "多久没人用就复审",
+          "clue": "75 天",
+          "carrier": "Memory_Test_V2/sig_108_知识管理_栈桥知识库_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "无人引用过期天数",
+          "old": "90 天",
+          "clue": "75 天",
+          "carrier": "Memory_Test_V2/sig_110_知识管理_栈桥知识库_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "75 天无人引用",
+          "carrier": "Memory_Test_V2/sig_112_知识管理_栈桥知识库_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        106,
+        112
+      ]
+    },
+    {
+      "code": "CHN-11",
+      "project": "翠微伙伴",
+      "category": "渠道生态",
+      "owner": "秦若",
+      "department": "渠道生态部",
+      "decoy_code": "CHN-110",
+      "anti_common": "不要按销售额或返点比例回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "联合交付成功次数",
+          "carrier": "Memory_Test_V2/sig_113_渠道生态_翠微伙伴_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "金级所需成功交付次数",
+          "clue": "5 次",
+          "carrier": "Memory_Test_V2/sig_118_渠道生态_翠微伙伴_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先由交付经理确认",
+          "carrier": "Memory_Test_V2/sig_116_渠道生态_翠微伙伴_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "不能跳过金级",
+          "carrier": "Memory_Test_V2/sig_114_渠道生态_翠微伙伴_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "金级要几次成功交付",
+          "clue": "5 次",
+          "carrier": "Memory_Test_V2/sig_115_渠道生态_翠微伙伴_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "黑松级所需交付次数",
+          "old": "8 次",
+          "clue": "9 次",
+          "carrier": "Memory_Test_V2/sig_117_渠道生态_翠微伙伴_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "黑松级需 9 次",
+          "carrier": "Memory_Test_V2/sig_119_渠道生态_翠微伙伴_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        113,
+        119
+      ]
+    },
+    {
+      "code": "PRI-28",
+      "project": "芦苇脱敏",
+      "category": "隐私评估",
+      "owner": "薛宁",
+      "department": "隐私委员会",
+      "decoy_code": "PRI-82",
+      "anti_common": "不要写成全部字段简单删除。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "保留后 2 位用于排障",
+          "carrier": "Memory_Test_V2/sig_120_隐私评估_芦苇脱敏_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "脱敏任务超时人工复核门槛",
+          "clue": "13 分钟",
+          "carrier": "Memory_Test_V2/sig_125_隐私评估_芦苇脱敏_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "sample_scope_id",
+          "carrier": "Memory_Test_V2/sig_123_隐私评估_芦苇脱敏_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "不得保留详细地址",
+          "carrier": "Memory_Test_V2/sig_121_隐私评估_芦苇脱敏_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "电话保留几位",
+          "clue": "后 2 位",
+          "carrier": "Memory_Test_V2/sig_122_隐私评估_芦苇脱敏_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "脱敏超时复核门槛",
+          "old": "20 分钟",
+          "clue": "13 分钟",
+          "carrier": "Memory_Test_V2/sig_124_隐私评估_芦苇脱敏_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "超 13 分钟进人工复核",
+          "carrier": "Memory_Test_V2/sig_126_隐私评估_芦苇脱敏_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        120,
+        126
+      ]
+    },
+    {
+      "code": "INC-44",
+      "project": "灯塔演练",
+      "category": "应急响应",
+      "owner": "任栎",
+      "department": "SRE 值班组",
+      "decoy_code": "INC-04",
+      "anti_common": "不要按通用 SRE 手册写 30 分钟同步。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "4 分钟内声明 incident commander",
+          "carrier": "Memory_Test_V2/sig_127_应急响应_灯塔演练_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "SEV-2 内部同步频率",
+          "clue": "17 分钟",
+          "carrier": "Memory_Test_V2/sig_132_应急响应_灯塔演练_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "错误假设、证据截图和下一次演练触发器",
+          "carrier": "Memory_Test_V2/sig_130_应急响应_灯塔演练_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "放宽到 23 分钟",
+          "carrier": "Memory_Test_V2/sig_128_应急响应_灯塔演练_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "几分钟内要声明指挥官",
+          "clue": "4 分钟",
+          "carrier": "Memory_Test_V2/sig_129_应急响应_灯塔演练_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "SEV-2 同步频率",
+          "old": "30 分钟",
+          "clue": "17 分钟",
+          "carrier": "Memory_Test_V2/sig_131_应急响应_灯塔演练_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "每 17 分钟一次",
+          "carrier": "Memory_Test_V2/sig_133_应急响应_灯塔演练_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        127,
+        133
+      ]
+    },
+    {
+      "code": "BI-16",
+      "project": "海棠看板",
+      "category": "商业分析",
+      "owner": "白予墨",
+      "department": "商业分析组",
+      "decoy_code": "BI-61",
+      "anti_common": "不要按普通 ARR 看板只回答收入。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "排除一次性迁移服务费",
+          "carrier": "Memory_Test_V2/sig_134_商业分析_海棠看板_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "证据引用率外发红线",
+          "clue": "72%",
+          "carrier": "Memory_Test_V2/sig_139_商业分析_海棠看板_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "净收入留存 NRR 和证据引用率",
+          "carrier": "Memory_Test_V2/sig_137_商业分析_海棠看板_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "不能隐藏证据引用率",
+          "carrier": "Memory_Test_V2/sig_135_商业分析_海棠看板_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "周报要看哪两个指标",
+          "clue": "证据引用率",
+          "carrier": "Memory_Test_V2/sig_136_商业分析_海棠看板_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "证据引用率外发红线",
+          "old": "80%",
+          "clue": "72%",
+          "carrier": "Memory_Test_V2/sig_138_商业分析_海棠看板_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "低于 72% 证据引用率",
+          "carrier": "Memory_Test_V2/sig_140_商业分析_海棠看板_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        134,
+        140
+      ]
+    },
+    {
+      "code": "MOD-23",
+      "project": "黛山评测",
+      "category": "模型治理",
+      "owner": "卢屿",
+      "department": "模型治理组",
+      "decoy_code": "MOD-32",
+      "anti_common": "不要用公开榜单分数代替内部对齐分。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "离线对齐分不低于 0.82",
+          "carrier": "Memory_Test_V2/sig_141_模型治理_黛山评测_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "越权拒答率下线",
+          "clue": "0.97",
+          "carrier": "Memory_Test_V2/sig_146_模型治理_黛山评测_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先跑红队套件",
+          "carrier": "Memory_Test_V2/sig_144_模型治理_黛山评测_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "不得豁免越权拒答率",
+          "carrier": "Memory_Test_V2/sig_142_模型治理_黛山评测_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "越权拒答率卡多少",
+          "clue": "0.97",
+          "carrier": "Memory_Test_V2/sig_143_模型治理_黛山评测_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "对齐分上线门槛",
+          "old": "0.78",
+          "clue": "0.82",
+          "carrier": "Memory_Test_V2/sig_145_模型治理_黛山评测_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "越权拒答率不低于 0.97",
+          "carrier": "Memory_Test_V2/sig_147_模型治理_黛山评测_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        141,
+        147
+      ]
+    },
+    {
+      "code": "LAKE-38",
+      "project": "砚池湖仓",
+      "category": "数据底座",
+      "owner": "卫鸣",
+      "department": "数据底座组",
+      "decoy_code": "LAKE-83",
+      "anti_common": "不要按通用数仓 365 天一刀切。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "明细层保留 540 天",
+          "carrier": "Memory_Test_V2/sig_148_数据底座_砚池湖仓_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "小文件合并触发阈值",
+          "clue": "256 个",
+          "carrier": "Memory_Test_V2/sig_153_数据底座_砚池湖仓_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先锁血缘",
+          "carrier": "Memory_Test_V2/sig_151_数据底座_砚池湖仓_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "压到 180 天",
+          "carrier": "Memory_Test_V2/sig_149_数据底座_砚池湖仓_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "小文件多少个触发合并",
+          "clue": "256 个",
+          "carrier": "Memory_Test_V2/sig_150_数据底座_砚池湖仓_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "明细层保留天数",
+          "old": "365 天",
+          "clue": "540 天",
+          "carrier": "Memory_Test_V2/sig_152_数据底座_砚池湖仓_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "汇总层永久",
+          "carrier": "Memory_Test_V2/sig_154_数据底座_砚池湖仓_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        148,
+        154
+      ]
+    },
+    {
+      "code": "FE-47",
+      "project": "竹影前端",
+      "category": "前端体验",
+      "owner": "钱临",
+      "department": "前端体验组",
+      "decoy_code": "FE-74",
+      "anti_common": "不要套用通用 3 秒首屏经验值。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "首屏可交互时间预算是 1.8 秒",
+          "carrier": "Memory_Test_V2/sig_155_前端体验_竹影前端_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "包体积红线",
+          "clue": "2.4 MB",
+          "carrier": "Memory_Test_V2/sig_160_前端体验_竹影前端_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先过无障碍检查",
+          "carrier": "Memory_Test_V2/sig_158_前端体验_竹影前端_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "放宽包体积到 3.1 MB",
+          "carrier": "Memory_Test_V2/sig_156_前端体验_竹影前端_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "包体积红线多少",
+          "clue": "2.4 MB",
+          "carrier": "Memory_Test_V2/sig_157_前端体验_竹影前端_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "首屏可交互预算",
+          "old": "2.5 秒",
+          "clue": "1.8 秒",
+          "carrier": "Memory_Test_V2/sig_159_前端体验_竹影前端_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "首屏可交互预算 1.8 秒",
+          "carrier": "Memory_Test_V2/sig_161_前端体验_竹影前端_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        155,
+        161
+      ]
+    },
+    {
+      "code": "APP-52",
+      "project": "归帆移动",
+      "category": "移动端",
+      "owner": "孟岚",
+      "department": "移动端组",
+      "decoy_code": "APP-25",
+      "anti_common": "不要用通用千分之一崩溃率回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "崩溃率红线是万分之 6",
+          "carrier": "Memory_Test_V2/sig_162_移动端_归帆移动_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "冷启动时长目标",
+          "clue": "1.3 秒",
+          "carrier": "Memory_Test_V2/sig_167_移动端_归帆移动_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "100 台真机验证",
+          "carrier": "Memory_Test_V2/sig_165_移动端_归帆移动_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "不得豁免崩溃率红线",
+          "carrier": "Memory_Test_V2/sig_163_移动端_归帆移动_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "冷启动目标多少秒",
+          "clue": "1.3 秒",
+          "carrier": "Memory_Test_V2/sig_164_移动端_归帆移动_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "崩溃率红线",
+          "old": "万分之 10",
+          "clue": "万分之 6",
+          "carrier": "Memory_Test_V2/sig_166_移动端_归帆移动_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "崩溃率红线为万分之 6",
+          "carrier": "Memory_Test_V2/sig_168_移动端_归帆移动_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        162,
+        168
+      ]
+    },
+    {
+      "code": "BILL-61",
+      "project": "潮汐计费",
+      "category": "计费体系",
+      "owner": "范晓",
+      "department": "计费平台组",
+      "decoy_code": "BILL-16",
+      "anti_common": "不要按通用千分比容忍度回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "对账差异超过 0.3 元即冻结出账",
+          "carrier": "Memory_Test_V2/sig_169_计费体系_潮汐计费_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "出账重试上限",
+          "clue": "3 次",
+          "carrier": "Memory_Test_V2/sig_174_计费体系_潮汐计费_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先生效价目快照",
+          "carrier": "Memory_Test_V2/sig_172_计费体系_潮汐计费_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "放宽到 1.5 元",
+          "carrier": "Memory_Test_V2/sig_170_计费体系_潮汐计费_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "出账重试几次封顶",
+          "clue": "3 次",
+          "carrier": "Memory_Test_V2/sig_171_计费体系_潮汐计费_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "对账差异冻结阈值",
+          "old": "1 元",
+          "clue": "0.3 元",
+          "carrier": "Memory_Test_V2/sig_173_计费体系_潮汐计费_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "超 0.3 元即冻结出账",
+          "carrier": "Memory_Test_V2/sig_175_计费体系_潮汐计费_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        169,
+        175
+      ]
+    },
+    {
+      "code": "OPS-70",
+      "project": "苍梧运维",
+      "category": "平台运维",
+      "owner": "邵冉",
+      "department": "平台运维组",
+      "decoy_code": "OPS-07",
+      "anti_common": "不要按通用 15 分钟告警响应回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "3 分钟内有人认领",
+          "carrier": "Memory_Test_V2/sig_176_平台运维_苍梧运维_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "磁盘水位预警线",
+          "clue": "82%",
+          "carrier": "Memory_Test_V2/sig_181_平台运维_苍梧运维_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先扩只读副本",
+          "carrier": "Memory_Test_V2/sig_179_平台运维_苍梧运维_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "上调到 88%",
+          "carrier": "Memory_Test_V2/sig_177_平台运维_苍梧运维_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "磁盘多少水位预警",
+          "clue": "82%",
+          "carrier": "Memory_Test_V2/sig_178_平台运维_苍梧运维_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "告警认领时限",
+          "old": "5 分钟",
+          "clue": "3 分钟",
+          "carrier": "Memory_Test_V2/sig_180_平台运维_苍梧运维_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "3 分钟未认领即自动升级",
+          "carrier": "Memory_Test_V2/sig_182_平台运维_苍梧运维_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        176,
+        182
+      ]
+    },
+    {
+      "code": "EXP-83",
+      "project": "麦穗实验",
+      "category": "增长实验",
+      "owner": "穆青",
+      "department": "增长实验组",
+      "decoy_code": "EXP-38",
+      "anti_common": "不要按通用 7 天实验周期回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "最短运行 11 天",
+          "carrier": "Memory_Test_V2/sig_183_增长实验_麦穗实验_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "最小可检测提升",
+          "clue": "1.5%",
+          "carrier": "Memory_Test_V2/sig_188_增长实验_麦穗实验_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先登记假设",
+          "carrier": "Memory_Test_V2/sig_186_增长实验_麦穗实验_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "延长到 18 天",
+          "carrier": "Memory_Test_V2/sig_184_增长实验_麦穗实验_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "最小可检测提升多少",
+          "clue": "1.5%",
+          "carrier": "Memory_Test_V2/sig_185_增长实验_麦穗实验_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "实验最短运行天数",
+          "old": "7 天",
+          "clue": "11 天",
+          "carrier": "Memory_Test_V2/sig_187_增长实验_麦穗实验_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "最短运行 11 天才读结论",
+          "carrier": "Memory_Test_V2/sig_189_增长实验_麦穗实验_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        183,
+        189
+      ]
+    },
+    {
+      "code": "MOD2-90",
+      "project": "白桦审核",
+      "category": "内容审核",
+      "owner": "时也",
+      "department": "内容安全组",
+      "decoy_code": "MOD2-09",
+      "anti_common": "不要用通用内容审核阈值回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "涉敏内容必须双人复核",
+          "carrier": "Memory_Test_V2/sig_190_内容审核_白桦审核_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "机审置信度自动放行线",
+          "clue": "0.94",
+          "carrier": "Memory_Test_V2/sig_195_内容审核_白桦审核_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先影子运行 72 小时",
+          "carrier": "Memory_Test_V2/sig_193_内容审核_白桦审核_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "下调到 0.90",
+          "carrier": "Memory_Test_V2/sig_191_内容审核_白桦审核_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "机审多少分自动放行",
+          "clue": "0.94",
+          "carrier": "Memory_Test_V2/sig_192_内容审核_白桦审核_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "机审自动放行线",
+          "old": "0.90",
+          "clue": "0.94",
+          "carrier": "Memory_Test_V2/sig_194_内容审核_白桦审核_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "0.94 以上才自动放行",
+          "carrier": "Memory_Test_V2/sig_196_内容审核_白桦审核_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        190,
+        196
+      ]
+    },
+    {
+      "code": "I18N-12",
+      "project": "远帆出海",
+      "category": "国际化",
+      "owner": "於洲",
+      "department": "国际化组",
+      "decoy_code": "I18N-21",
+      "anti_common": "不要按通用全球统一存储回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "欧盟区数据必须落地法兰克福节点",
+          "carrier": "Memory_Test_V2/sig_197_国际化_远帆出海_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "默认时区基准",
+          "clue": "UTC+0",
+          "carrier": "Memory_Test_V2/sig_202_国际化_远帆出海_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先过术语库校验",
+          "carrier": "Memory_Test_V2/sig_200_国际化_远帆出海_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "不得保留地址明文",
+          "carrier": "Memory_Test_V2/sig_198_国际化_远帆出海_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "默认时区用哪个",
+          "clue": "UTC+0",
+          "carrier": "Memory_Test_V2/sig_199_国际化_远帆出海_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "欧盟数据落地节点",
+          "old": "都柏林",
+          "clue": "法兰克福",
+          "carrier": "Memory_Test_V2/sig_201_国际化_远帆出海_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "落地法兰克福节点",
+          "carrier": "Memory_Test_V2/sig_203_国际化_远帆出海_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        197,
+        203
+      ]
+    },
+    {
+      "code": "HW-55",
+      "project": "磐石终端",
+      "category": "硬件协同",
+      "owner": "聂川",
+      "department": "硬件协同组",
+      "decoy_code": "HW-505",
+      "anti_common": "不要按通用手机 500 次电池循环回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "50 台工程机跑满 48 小时",
+          "carrier": "Memory_Test_V2/sig_204_硬件协同_磐石终端_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "电池循环质保次数",
+          "clue": "800 次",
+          "carrier": "Memory_Test_V2/sig_209_硬件协同_磐石终端_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先停 OTA",
+          "carrier": "Memory_Test_V2/sig_207_硬件协同_磐石终端_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "放宽计为 600 次",
+          "carrier": "Memory_Test_V2/sig_205_硬件协同_磐石终端_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "电池质保多少次循环",
+          "clue": "800 次",
+          "carrier": "Memory_Test_V2/sig_206_硬件协同_磐石终端_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "工程机验证时长",
+          "old": "24 小时",
+          "clue": "48 小时",
+          "carrier": "Memory_Test_V2/sig_208_硬件协同_磐石终端_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "跑满 48 小时",
+          "carrier": "Memory_Test_V2/sig_210_硬件协同_磐石终端_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        204,
+        210
+      ]
+    },
+    {
+      "code": "COMP-66",
+      "project": "青简合规",
+      "category": "合规审查",
+      "owner": "祁年",
+      "department": "合规审查组",
+      "decoy_code": "COMP-06",
+      "anti_common": "不要按通用 90 天日志留存回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "必须留存调用方真实主体",
+          "carrier": "Memory_Test_V2/sig_211_合规审查_青简合规_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "日志最短留存",
+          "clue": "180 天",
+          "carrier": "Memory_Test_V2/sig_216_合规审查_青简合规_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先过数据分级",
+          "carrier": "Memory_Test_V2/sig_214_合规审查_青简合规_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "缩短到 30 天",
+          "carrier": "Memory_Test_V2/sig_212_合规审查_青简合规_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "日志至少留几天",
+          "clue": "180 天",
+          "carrier": "Memory_Test_V2/sig_213_合规审查_青简合规_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "日志最短留存天数",
+          "old": "90 天",
+          "clue": "180 天",
+          "carrier": "Memory_Test_V2/sig_215_合规审查_青简合规_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "日志最短留存 180 天",
+          "carrier": "Memory_Test_V2/sig_217_合规审查_青简合规_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        211,
+        217
+      ]
+    },
+    {
+      "code": "SRCH-29",
+      "project": "听澜搜索",
+      "category": "搜索体验",
+      "owner": "甘棠",
+      "department": "搜索体验组",
+      "decoy_code": "SRCH-92",
+      "anti_common": "不要用通用点击率作为搜索好坏标准。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "前三条覆盖意图",
+          "carrier": "Memory_Test_V2/sig_218_搜索体验_听澜搜索_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "零结果率红线",
+          "clue": "3.5%",
+          "carrier": "Memory_Test_V2/sig_223_搜索体验_听澜搜索_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先离线评测",
+          "carrier": "Memory_Test_V2/sig_221_搜索体验_听澜搜索_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "不得豁免零结果率红线",
+          "carrier": "Memory_Test_V2/sig_219_搜索体验_听澜搜索_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "前几条要覆盖意图",
+          "clue": "前三条",
+          "carrier": "Memory_Test_V2/sig_220_搜索体验_听澜搜索_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "零结果率红线",
+          "old": "5%",
+          "clue": "3.5%",
+          "carrier": "Memory_Test_V2/sig_222_搜索体验_听澜搜索_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "零结果率红线为 3.5%",
+          "carrier": "Memory_Test_V2/sig_224_搜索体验_听澜搜索_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        218,
+        224
+      ]
+    },
+    {
+      "code": "REC-41",
+      "project": "繁星推荐",
+      "category": "推荐系统",
+      "owner": "宇文澈",
+      "department": "推荐系统组",
+      "decoy_code": "REC-14",
+      "anti_common": "不要按通用无限曝光逻辑回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "单日同类内容曝光不超过 5 条",
+          "carrier": "Memory_Test_V2/sig_225_推荐系统_繁星推荐_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "冷启动探索流量占比",
+          "clue": "12%",
+          "carrier": "Memory_Test_V2/sig_230_推荐系统_繁星推荐_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先离线 AB",
+          "carrier": "Memory_Test_V2/sig_228_推荐系统_繁星推荐_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "放宽到 8 条",
+          "carrier": "Memory_Test_V2/sig_226_推荐系统_繁星推荐_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "同类曝光每天几条上限",
+          "clue": "5 条",
+          "carrier": "Memory_Test_V2/sig_227_推荐系统_繁星推荐_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "探索流量占比",
+          "old": "8%",
+          "clue": "12%",
+          "carrier": "Memory_Test_V2/sig_229_推荐系统_繁星推荐_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "不超过 5 条",
+          "carrier": "Memory_Test_V2/sig_231_推荐系统_繁星推荐_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        225,
+        231
+      ]
+    },
+    {
+      "code": "NOTI-77",
+      "project": "晨钟触达",
+      "category": "通知触达",
+      "owner": "上官岚",
+      "department": "触达平台组",
+      "decoy_code": "NOTI-07",
+      "anti_common": "不要按通用全天可推送回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "9:00 至 21:00 发送",
+          "carrier": "Memory_Test_V2/sig_232_通知触达_晨钟触达_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "单用户单日推送上限",
+          "clue": "3 条",
+          "carrier": "Memory_Test_V2/sig_237_通知触达_晨钟触达_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先过文案合规",
+          "carrier": "Memory_Test_V2/sig_235_通知触达_晨钟触达_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "不得夹带营销内容",
+          "carrier": "Memory_Test_V2/sig_233_通知触达_晨钟触达_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "营销推送几点截止",
+          "clue": "21:00",
+          "carrier": "Memory_Test_V2/sig_234_通知触达_晨钟触达_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "单日推送上限",
+          "old": "5 条",
+          "clue": "3 条",
+          "carrier": "Memory_Test_V2/sig_236_通知触达_晨钟触达_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "限 9:00 至 21:00",
+          "carrier": "Memory_Test_V2/sig_238_通知触达_晨钟触达_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        232,
+        238
+      ]
+    },
+    {
+      "code": "OBSV-34",
+      "project": "星图观测",
+      "category": "可观测性",
+      "owner": "南风",
+      "department": "可观测性组",
+      "decoy_code": "OBSV-43",
+      "anti_common": "不要按通用 1% 采样率回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "核心链路采样率不得低于 20%",
+          "carrier": "Memory_Test_V2/sig_239_可观测性_星图观测_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "Trace 保留时长",
+          "clue": "15 天",
+          "carrier": "Memory_Test_V2/sig_244_可观测性_星图观测_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先过基数评估",
+          "carrier": "Memory_Test_V2/sig_242_可观测性_星图观测_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "临时拉到 100%",
+          "carrier": "Memory_Test_V2/sig_240_可观测性_星图观测_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "核心链路采样率下线",
+          "clue": "20%",
+          "carrier": "Memory_Test_V2/sig_241_可观测性_星图观测_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "Trace 保留时长",
+          "old": "7 天",
+          "clue": "15 天",
+          "carrier": "Memory_Test_V2/sig_243_可观测性_星图观测_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "采样率不低于 20%",
+          "carrier": "Memory_Test_V2/sig_245_可观测性_星图观测_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        239,
+        245
+      ]
+    },
+    {
+      "code": "RBAC-19",
+      "project": "司南权限",
+      "category": "权限体系",
+      "owner": "易遥",
+      "department": "权限体系组",
+      "decoy_code": "RBAC-91",
+      "anti_common": "不要按通用单因子鉴权回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "高危操作必须二次人脸核身",
+          "carrier": "Memory_Test_V2/sig_246_权限体系_司南权限_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "权限到期自动回收天数",
+          "clue": "90 天",
+          "carrier": "Memory_Test_V2/sig_251_权限体系_司南权限_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "不允许先生效后补审批",
+          "carrier": "Memory_Test_V2/sig_249_权限体系_司南权限_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "最长 30 天",
+          "carrier": "Memory_Test_V2/sig_247_权限体系_司南权限_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "高危操作要几次核身",
+          "clue": "二次人脸核身",
+          "carrier": "Memory_Test_V2/sig_248_权限体系_司南权限_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "权限自动回收天数",
+          "old": "180 天",
+          "clue": "90 天",
+          "carrier": "Memory_Test_V2/sig_250_权限体系_司南权限_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "需二次人脸核身",
+          "carrier": "Memory_Test_V2/sig_252_权限体系_司南权限_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        246,
+        252
+      ]
+    },
+    {
+      "code": "COST-58",
+      "project": "秤心成本",
+      "category": "成本治理",
+      "owner": "柏舟",
+      "department": "成本治理组",
+      "decoy_code": "COST-85",
+      "anti_common": "不要按通用月度清理回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "闲置资源超过 7 天自动回收",
+          "carrier": "Memory_Test_V2/sig_253_成本治理_秤心成本_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "单团队月度预算软上限",
+          "clue": "42 万元",
+          "carrier": "Memory_Test_V2/sig_258_成本治理_秤心成本_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先附容量预测",
+          "carrier": "Memory_Test_V2/sig_256_成本治理_秤心成本_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "临时关闭闲置自动回收",
+          "carrier": "Memory_Test_V2/sig_254_成本治理_秤心成本_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "月度预算软上限多少",
+          "clue": "42 万元",
+          "carrier": "Memory_Test_V2/sig_255_成本治理_秤心成本_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "闲置回收天数",
+          "old": "14 天",
+          "clue": "7 天",
+          "carrier": "Memory_Test_V2/sig_257_成本治理_秤心成本_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "超 7 天自动回收",
+          "carrier": "Memory_Test_V2/sig_259_成本治理_秤心成本_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        253,
+        259
+      ]
+    },
+    {
+      "code": "DR-46",
+      "project": "磐安灾备",
+      "category": "灾备体系",
+      "owner": "邬桐",
+      "department": "灾备体系组",
+      "decoy_code": "DR-64",
+      "anti_common": "不要按通用小时级 RTO 回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "RPO 不超过 30 秒",
+          "carrier": "Memory_Test_V2/sig_260_灾备体系_磐安灾备_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "异地副本最少份数",
+          "clue": "3 份",
+          "carrier": "Memory_Test_V2/sig_265_灾备体系_磐安灾备_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先切只读",
+          "carrier": "Memory_Test_V2/sig_263_灾备体系_磐安灾备_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "RPO 仍按 30 秒",
+          "carrier": "Memory_Test_V2/sig_261_灾备体系_磐安灾备_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "异地副本至少几份",
+          "clue": "3 份",
+          "carrier": "Memory_Test_V2/sig_262_灾备体系_磐安灾备_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "核心库 RTO",
+          "old": "15 分钟",
+          "clue": "8 分钟",
+          "carrier": "Memory_Test_V2/sig_264_灾备体系_磐安灾备_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "RTO 不超过 8 分钟",
+          "carrier": "Memory_Test_V2/sig_266_灾备体系_磐安灾备_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        260,
+        266
+      ]
+    },
+    {
+      "code": "GW-73",
+      "project": "津渡网关",
+      "category": "API 网关",
+      "owner": "司空岭",
+      "department": "API 网关组",
+      "decoy_code": "GW-37",
+      "anti_common": "不要按通用每秒 100 次限流回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "默认限流是每秒 800 次",
+          "carrier": "Memory_Test_V2/sig_267_API_网关_津渡网关_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "熔断错误率阈值",
+          "clue": "35%",
+          "carrier": "Memory_Test_V2/sig_272_API_网关_津渡网关_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先灰度 5%",
+          "carrier": "Memory_Test_V2/sig_270_API_网关_津渡网关_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "上调到每秒 2000 次",
+          "carrier": "Memory_Test_V2/sig_268_API_网关_津渡网关_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "熔断错误率多少",
+          "clue": "35%",
+          "carrier": "Memory_Test_V2/sig_269_API_网关_津渡网关_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "默认限流",
+          "old": "每秒 500 次",
+          "clue": "每秒 800 次",
+          "carrier": "Memory_Test_V2/sig_271_API_网关_津渡网关_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "默认限流每秒 800 次",
+          "carrier": "Memory_Test_V2/sig_273_API_网关_津渡网关_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        267,
+        273
+      ]
+    },
+    {
+      "code": "CC-39",
+      "project": "和声客服",
+      "category": "客服中台",
+      "owner": "向晚",
+      "department": "客服中台组",
+      "decoy_code": "CC-93",
+      "anti_common": "不要按通用关键词触发转人工回答。",
+      "facts": {
+        "anchor": {
+          "hint": "核心事实",
+          "clue": "连续 2 次表达不满",
+          "carrier": "Memory_Test_V2/sig_274_客服中台_和声客服_制度.md",
+          "format": "md",
+          "genre": "制度"
+        },
+        "table": {
+          "hint": "机器人首解率目标",
+          "clue": "68%",
+          "carrier": "Memory_Test_V2/sig_279_客服中台_和声客服_参数表.xlsx",
+          "format": "xlsx",
+          "genre": "参数表"
+        },
+        "workflow": {
+          "hint": "执行流程",
+          "clue": "先过合规审校",
+          "carrier": "Memory_Test_V2/sig_277_客服中台_和声客服_纪要.docx",
+          "format": "docx",
+          "genre": "纪要"
+        },
+        "exception": {
+          "hint": "特殊例外",
+          "clue": "仍须记录转接原因",
+          "carrier": "Memory_Test_V2/sig_275_客服中台_和声客服_邮件.txt",
+          "format": "txt",
+          "genre": "邮件"
+        },
+        "chat": {
+          "hint": "几次不满转人工",
+          "clue": "2 次",
+          "carrier": "Memory_Test_V2/sig_276_客服中台_和声客服_群聊.txt",
+          "format": "txt",
+          "genre": "群聊"
+        },
+        "temporal": {
+          "hint": "智能客服首解率目标",
+          "old": "60%",
+          "clue": "68%",
+          "carrier": "Memory_Test_V2/sig_278_客服中台_和声客服_复盘.pdf",
+          "format": "pdf",
+          "genre": "复盘"
+        },
+        "slide": {
+          "hint": "关键数字",
+          "clue": "首解率目标为 68%",
+          "carrier": "Memory_Test_V2/sig_280_客服中台_和声客服_幻灯片.pptx",
+          "format": "pptx",
+          "genre": "幻灯片"
+        }
+      },
+      "signal_serials": [
+        274,
+        280
+      ]
+    }
+  ],
+  "specials": [
+    {
+      "name": "鸿图长卷",
+      "carrier": "Memory_Test_V2/special_001_长文_鸿图长卷_汇编.md",
+      "format": "md",
+      "kind": "long",
+      "facts": [
+        {
+          "hint": "归档密钥轮换",
+          "clue": "每 19 天轮换一次",
+          "extractable": true
+        }
+      ]
+    },
+    {
+      "name": "云梯手册",
+      "carrier": "Memory_Test_V2/special_002_长文_云梯手册_细则.docx",
+      "format": "docx",
+      "kind": "long",
+      "facts": [
+        {
+          "hint": "客诉分级阈值",
+          "clue": "客诉分级阈值固定为 23 分",
+          "extractable": true
+        }
+      ]
+    },
+    {
+      "name": "晨曦项目",
+      "carrier": "Memory_Test_V2/special_003_图文_晨曦_带图.docx",
+      "format": "docx",
+      "kind": "image",
+      "facts": [
+        {
+          "hint": "灰度比例",
+          "clue": "灰度比例固定为 6.3%",
+          "extractable": true
+        },
+        {
+          "hint": "回滚阈值",
+          "clue": "回滚阈值是 0.9%",
+          "extractable": false
+        }
+      ]
+    },
+    {
+      "name": "暮山项目",
+      "carrier": "Memory_Test_V2/special_004_纯图_暮山_规格.docx",
+      "format": "docx",
+      "kind": "image_only",
+      "facts": [
+        {
+          "hint": "密钥长度",
+          "clue": "密钥长度为 47 位",
+          "extractable": false
+        }
+      ]
+    },
+    {
+      "name": "苍岭项目",
+      "carrier": "Memory_Test_V2/special_005_扫描件_苍岭_对账.pdf",
+      "format": "pdf",
+      "kind": "scanned",
+      "facts": [
+        {
+          "hint": "对账窗口",
+          "clue": "对账窗口为每月 8 号",
+          "extractable": false
+        }
+      ]
+    },
+    {
+      "name": "白川项目",
+      "carrier": "Memory_Test_V2/special_006_图文_白川_幻灯片.pptx",
+      "format": "pptx",
+      "kind": "image",
+      "facts": [
+        {
+          "hint": "负责人",
+          "clue": "白川项目负责人是文澜",
+          "extractable": true
+        },
+        {
+          "hint": "预算上限",
+          "clue": "预算上限是 88 万",
+          "extractable": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+# 二进制语料 / 测试 fixture：禁止任何行尾转换，避免 checkout 时损坏
+*.pdf  binary
+*.docx binary
+*.xlsx binary
+*.pptx binary
+*.doc  binary
+*.ppt  binary
+*.xls  binary
+*.png  binary
+*.jpg  binary
+*.gguf binary

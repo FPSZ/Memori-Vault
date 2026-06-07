@@ -31,7 +31,7 @@ pub use embedding_client::LocalEmbeddingClient;
 pub use error::*;
 pub use filter::IndexFilterConfig;
 pub use graph_extractor::GraphData;
-use graph_extractor::extract_entities;
+pub use graph_extractor::extract_entities;
 use llm_generator::generate_answer as generate_llm_answer;
 pub use memori_parser::DocumentChunk;
 use memori_parser::{ParserStub, parse_and_chunk};

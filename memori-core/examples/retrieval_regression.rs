@@ -32,6 +32,9 @@ struct CliArgs {
     profile: RegressionProfile,
     max_index_prep_secs: u64,
     max_case_secs: u64,
+    /// When set, the live seeder indexes every supported file under watch_root
+    /// (haystack / distractor corpus), not just suite target documents.
+    index_all: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -169,6 +172,10 @@ struct RegressionCaseResult {
     chunk_dense_ms: u64,
     merge_ms: u64,
     rerank_ms: u64,
+    /// Wall-clock latency for the whole retrieval+gating pass of this case.
+    /// Note: the harness does not invoke the answer LLM, so this is
+    /// retrieval/gating latency, not end-to-end answer-generation time.
+    case_total_ms: u64,
     notes: Option<String>,
 }
 
@@ -185,6 +192,13 @@ struct RegressionSummary {
     citation_validity_rate: f64,
     reject_correctness_rate: f64,
     rerank_applied_rate: f64,
+    /// Retrieval+gating latency stats across non-timed-out cases (ms).
+    avg_case_ms: f64,
+    min_case_ms: u64,
+    max_case_ms: u64,
+    /// Record (not a scored metric): which cases were slowest / fastest.
+    slowest_case_id: Option<String>,
+    fastest_case_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -327,6 +341,7 @@ fn parse_args() -> Result<CliArgs, AnyError> {
     let mut profile = RegressionProfile::CoreDocs;
     let mut max_index_prep_secs = DEFAULT_MAX_INDEX_PREP_SECS;
     let mut max_case_secs = DEFAULT_MAX_CASE_SECS;
+    let mut index_all = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -354,6 +369,7 @@ fn parse_args() -> Result<CliArgs, AnyError> {
                 );
             }
             "--write-baseline-doc" => write_baseline_doc = true,
+            "--index-all" => index_all = true,
             "--mode" => {
                 let value = args.next().ok_or("--mode requires a value")?;
                 mode = EvaluationMode::parse(&value)?;
@@ -393,6 +409,7 @@ fn parse_args() -> Result<CliArgs, AnyError> {
         profile,
         max_index_prep_secs,
         max_case_secs,
+        index_all,
     })
 }
 
@@ -560,7 +577,7 @@ async fn prepare_live_engine(
     let started_at = Instant::now();
     match timeout(
         Duration::from_secs(args.max_index_prep_secs),
-        seed_live_index(engine, &args.watch_root, suite),
+        seed_live_index(engine, &args.watch_root, suite, args.index_all),
     )
     .await
     {
@@ -650,13 +667,21 @@ async fn seed_live_index(
     engine: &MemoriEngine,
     watch_root: &Path,
     suite: &RegressionSuite,
+    index_all: bool,
 ) -> Result<(), AnyError> {
     let state = engine.state();
     let store = state.vector_store.clone();
     store.begin_full_rebuild("live_regression_seed").await?;
     store.purge_all_index_data().await?;
 
-    let documents = collect_target_documents(suite);
+    // Default: index only suite target/acceptable docs. With --index-all, index
+    // every supported file under watch_root so distractor docs form a haystack;
+    // suite target_documents still define what counts as a correct hit.
+    let documents = if index_all {
+        collect_supported_corpus_files(watch_root)?
+    } else {
+        collect_target_documents(suite)
+    };
     for relative_path in documents {
         let absolute_path = watch_root.join(&relative_path);
         if !absolute_path.exists() {
@@ -736,6 +761,36 @@ fn collect_target_documents(suite: &RegressionSuite) -> Vec<String> {
     documents
 }
 
+/// Walk `watch_root` recursively and return every supported corpus file as a
+/// path relative to `watch_root`. Used by `--index-all` to index the full
+/// haystack (signal + distractor docs), not just suite target documents.
+fn collect_supported_corpus_files(watch_root: &Path) -> Result<Vec<String>, AnyError> {
+    const EXTS: &[&str] = &[
+        "md", "txt", "docx", "pdf", "pptx", "xlsx", "doc", "ppt", "xls",
+    ];
+    let mut out = Vec::new();
+    let mut stack = vec![watch_root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Some(ext) = path.extension().and_then(|s| s.to_str())
+                && EXTS.contains(&ext.to_ascii_lowercase().as_str())
+                && let Ok(rel) = path.strip_prefix(watch_root)
+            {
+                let normalized = normalize_rel(&rel.to_string_lossy());
+                if !normalized.is_empty() {
+                    out.push(normalized);
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
 fn read_regression_document_text(path: &Path) -> Result<String, AnyError> {
     let ext = path
         .extension()
@@ -743,7 +798,10 @@ fn read_regression_document_text(path: &Path) -> Result<String, AnyError> {
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
 
-    if ext == "docx" || ext == "pdf" {
+    if matches!(
+        ext.as_str(),
+        "docx" | "pdf" | "pptx" | "xlsx" | "doc" | "ppt" | "xls"
+    ) {
         extract_document_text(path)
             .ok_or_else(|| format!("failed to extract text from {}", path.display()).into())
     } else {
@@ -828,7 +886,8 @@ async fn run_suite_cases(
             &args.watch_root,
             RegressionProgress::running(suite.cases.len(), index, index + 1, case, passed, failed),
         );
-        let outcome = match args.mode {
+        let case_started = Instant::now();
+        let mut outcome = match args.mode {
             EvaluationMode::OfflineDeterministic => {
                 run_case(
                     engine,
@@ -857,6 +916,7 @@ async fn run_suite_cases(
                 }
             }
         }?;
+        outcome.case_total_ms = case_started.elapsed().as_millis() as u64;
         if progress_case_passed(&outcome) {
             passed += 1;
         } else {
@@ -989,6 +1049,7 @@ fn build_case_result(
         chunk_dense_ms: inspection.metrics.chunk_dense_ms,
         merge_ms: inspection.metrics.merge_ms,
         rerank_ms: inspection.metrics.rerank_ms,
+        case_total_ms: 0,
         notes: case.notes.clone(),
     }
 }
@@ -1026,6 +1087,7 @@ fn timeout_case_result(case: &RegressionCase) -> RegressionCaseResult {
         chunk_dense_ms: 0,
         merge_ms: 0,
         rerank_ms: 0,
+        case_total_ms: 0,
         notes: case.notes.clone(),
     }
 }
@@ -1301,6 +1363,40 @@ fn summarize(results: &[RegressionCaseResult]) -> RegressionSummary {
             results.iter().filter(|case| case.rerank_applied).count(),
             results.len(),
         ),
+        avg_case_ms: {
+            let timed: Vec<u64> = results
+                .iter()
+                .filter(|case| !case.timed_out)
+                .map(|case| case.case_total_ms)
+                .collect();
+            if timed.is_empty() {
+                0.0
+            } else {
+                timed.iter().sum::<u64>() as f64 / timed.len() as f64
+            }
+        },
+        min_case_ms: results
+            .iter()
+            .filter(|case| !case.timed_out)
+            .map(|case| case.case_total_ms)
+            .min()
+            .unwrap_or(0),
+        max_case_ms: results
+            .iter()
+            .filter(|case| !case.timed_out)
+            .map(|case| case.case_total_ms)
+            .max()
+            .unwrap_or(0),
+        slowest_case_id: results
+            .iter()
+            .filter(|case| !case.timed_out)
+            .max_by_key(|case| case.case_total_ms)
+            .map(|case| case.id.clone()),
+        fastest_case_id: results
+            .iter()
+            .filter(|case| !case.timed_out)
+            .min_by_key(|case| case.case_total_ms)
+            .map(|case| case.id.clone()),
     }
 }
 
@@ -1730,6 +1826,7 @@ mod tests {
                 chunk_dense_ms: 3,
                 merge_ms: 1,
                 rerank_ms: 6,
+                case_total_ms: 12,
                 notes: None,
             },
             RegressionCaseResult {
@@ -1764,6 +1861,7 @@ mod tests {
                 chunk_dense_ms: 4,
                 merge_ms: 1,
                 rerank_ms: 0,
+                case_total_ms: 5,
                 notes: None,
             },
             RegressionCaseResult {
@@ -1798,6 +1896,7 @@ mod tests {
                 chunk_dense_ms: 0,
                 merge_ms: 0,
                 rerank_ms: 0,
+                case_total_ms: 5,
                 notes: None,
             },
         ];
@@ -1856,6 +1955,11 @@ mod tests {
                 citation_validity_rate: 1.0,
                 reject_correctness_rate: 1.0,
                 rerank_applied_rate: 1.0,
+                avg_case_ms: 12.0,
+                min_case_ms: 12,
+                max_case_ms: 12,
+                slowest_case_id: Some("R1".to_string()),
+                fastest_case_id: Some("R1".to_string()),
             },
             cases: vec![RegressionCaseResult {
                 id: "R1".to_string(),
@@ -1889,6 +1993,7 @@ mod tests {
                 chunk_dense_ms: 3,
                 merge_ms: 1,
                 rerank_ms: 6,
+                case_total_ms: 12,
                 notes: None,
             }],
         };
