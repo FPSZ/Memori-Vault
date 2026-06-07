@@ -2152,7 +2152,7 @@ dependencies = [
 
 [[package]]
 name = "memori-core"
-version = "1.5.0"
+version = "1.5.2"
 dependencies = [
  "bincode",
  "dirs",
@@ -2173,7 +2173,7 @@ dependencies = [
 
 [[package]]
 name = "memori-desktop"
-version = "1.5.0"
+version = "1.5.2"
 dependencies = [
  "dirs",
  "memori-core",
@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "memori-parser"
-version = "1.5.0"
+version = "1.5.2"
 dependencies = [
  "calamine",
  "cfb 0.14.0",
@@ -2207,7 +2207,7 @@ dependencies = [
 
 [[package]]
 name = "memori-server"
-version = "1.5.0"
+version = "1.5.2"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "memori-storage"
-version = "1.5.0"
+version = "1.5.2"
 dependencies = [
  "bincode",
  "memori-parser",
@@ -2241,7 +2241,7 @@ dependencies = [
 
 [[package]]
 name = "memori-vault"
-version = "1.5.0"
+version = "1.5.2"
 dependencies = [
  "notify",
  "thiserror 2.0.18",
