@@ -21,10 +21,20 @@ struct ChatMessageResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct JsonResponseFormat {
+    #[serde(rename = "type")]
+    kind: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 struct OpenAiChatCompletionRequest<'a> {
     model: &'a str,
     temperature: f32,
     messages: Vec<ChatMessage<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<JsonResponseFormat>,
     #[serde(skip_serializing_if = "Option::is_none")]
     think: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -41,6 +51,8 @@ struct OpenAiResponsesRequest<'a> {
     temperature: f32,
     instructions: &'a str,
     input: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -80,6 +92,19 @@ struct OpenAiResponseContentItem {
     text: Option<String>,
 }
 
+/// Optional decoding controls shared across LLM calls.
+///
+/// `max_tokens` bounds the generated output (prevents runaway/looping decode on
+/// dense inputs); `json_object` asks an OpenAI-compatible server to constrain the
+/// output to a single JSON object (eliminates prose/markdown around the payload,
+/// which otherwise wastes decode time and triggers parse-failure retries).
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct GenerationOptions {
+    pub max_tokens: Option<u32>,
+    pub json_object: bool,
+}
+
+#[allow(clippy::too_many_arguments)] // internal HTTP helper; args are all distinct request fields
 pub(crate) async fn request_llm_text(
     runtime: &RuntimeModelConfig,
     endpoint: &str,
@@ -88,6 +113,7 @@ pub(crate) async fn request_llm_text(
     system: &str,
     user: &str,
     timeout_secs: u64,
+    options: GenerationOptions,
 ) -> Result<String, LlmHttpError> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
@@ -102,6 +128,7 @@ pub(crate) async fn request_llm_text(
                 temperature,
                 instructions: system,
                 input: user,
+                max_output_tokens: options.max_tokens,
             })
         }
         ChatApiFormat::Chat => {
@@ -119,6 +146,10 @@ pub(crate) async fn request_llm_text(
                         content: user,
                     },
                 ],
+                max_tokens: options.max_tokens,
+                response_format: options.json_object.then_some(JsonResponseFormat {
+                    kind: "json_object",
+                }),
                 think: None,
                 thinking: None,
                 enable_thinking: None,

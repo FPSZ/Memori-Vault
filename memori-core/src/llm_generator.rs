@@ -1,4 +1,4 @@
-use crate::llm_http::{LlmHttpError, request_llm_text};
+use crate::llm_http::{GenerationOptions, LlmHttpError, request_llm_text};
 use crate::{EngineError, resolve_runtime_model_config_from_env};
 
 const ANSWER_TEMPERATURE: f32 = 0.1;
@@ -45,6 +45,7 @@ pub async fn generate_answer(
         system_prompt,
         &user_prompt,
         timeout_secs,
+        GenerationOptions::default(),
     )
     .await
     .map_err(answer_error_from_llm_http)?;

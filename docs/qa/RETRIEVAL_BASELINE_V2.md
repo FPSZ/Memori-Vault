@@ -77,6 +77,26 @@ bench：`cargo run -p memori-core --example graph_bench -- <files>`（对每个 
 
 **结论：图谱构建瓶颈 = 每 chunk 一次 8B LLM 调用，且耗时随 chunk 大小增长**——小/半块 ≈10s，满 1000 字块 **≈60s**。粗略 **≈1 分钟 / 千字**（满密度长文）。一份 **2.5 万字文档 ≈ 33 分钟**图谱构建；3 万字长文 ≈ 半小时。这量化了"长文对图谱极贵"，也正是下面护栏要挡的场景。
 
+## 图谱构建速度优化（本轮，实测 4–5×）
+研究方向：图谱构建 = `N_chunk × 单调用延迟 / 并发`，而单调用延迟由**解码输出 token 数**主导（自回归，~线性）。对照 GraphRAG / LightRAG 文献，安全（不降质量）的杠杆是 ① 压输出 token、② 杜绝解析失败重试、③ 提并发（continuous batching）。落地四项（均不动召回质量）：
+
+1. **精简输出 schema**（`graph_extractor.rs`）：模型只产 `name/type/desc?`，边**按 name 互引**；`id` 改为 Rust 端按名称稳定派生（`slug`，CJK 保留）。既省 token，又消除"节点 id ≠ 边引用 id"这一最常见抽取错误（边↔节点一致性反而更好）。`desc` 保留但要求一句话以内。
+2. **约束 + 封顶解码**：请求带 `response_format=json_object` + `max_tokens=1536`（env `MEMORI_GRAPH_MAX_TOKENS` 可调）。前者去掉 JSON 外的散文/markdown，后者**斩断 runaway 解码**（旧版无上限，密块曾跑到 1174+ token / 40s）。
+3. **<think> 兜底剥离**：解析前去掉可能泄漏的思考块，避免一次思考前缀就触发解析失败→重试（旧版重试是 3× 浪费）。
+4. **默认并发 2→4**（`indexing_graph.rs`）：图谱解码受限于 LLM，llama.cpp `--parallel N --cont-batching` 下并发槽近似线性提吞吐；`MEMORI_GRAPH_CONCURRENCY` 对齐服务端 `--parallel`。
+
+**实测（Qwen3-8B-Q4_K_M @ :18002，HIP GPU，长文 `special_001` 的 8 个满 1000 字密块）：**
+
+| 配置 | 8 块总耗时 | 每块 | 说明 |
+|---|--:|--:|---|
+| 旧（verbose schema, 并发2） | 76.3s | 9.53s | 含 runaway 长尾块（40s/块） |
+| 新（slim+cap+json, 并发4） | **15.4s** | **1.92s** | **端到端 4.96×（快 80%）** |
+
+分解：同并发=2 下，仅 schema+cap+json 即 **3.5×**（76.3→21.6s，主因封顶斩断 runaway 长尾）；并发 2→4 再叠 **1.41×**（21.6→15.3s）。短/普通块（`sig_001/sig_015` 单块）输出 token 减 **27%**、墙钟减 **26%**，解析成功率不变（2/2）。质量抽查：`sig_001` 仍抽出 14 节点 / 11 边（极光账本/项目·含代号 AUR-17、林知远/负责人、对接客户等），结构完整。
+
+**影响：** 长文 2.5 万字图谱构建从 ~33 分钟 → **~7 分钟**量级；普通文档同步变快。bench 工具：`scripts/graph_ab_bench.py`（schema A/B）、`graph_concurrency_bench.py`（并发吞吐）、`graph_combined_bench.py`（端到端前后对比）。
+> 服务端建议：`llama-server ... --parallel 4 --cont-batching`，并令 `MEMORI_GRAPH_CONCURRENCY` 与之一致。
+
 ## 长文 / 图片 / 扫描件 的真实处理结论（专门样本实测）
 - **长文（3 万字）**：索引/分块正常（切成 ~35 个 ≤1000 字块），检索能把长文**召回到 doc rank 1**；但埋在深处的事实其片段只排到 rank 2–4，两道长文题（`V101/V102`）最终被 **gating 判拒**——长文通过"埋点深 + gating 保守"双重打击降低可答率。图谱构建则极贵（见上）。
 - **图片内容**：`extract_*` 只取文本，**图片一律忽略、全链路无 OCR**。实测：

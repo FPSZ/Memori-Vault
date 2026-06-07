@@ -221,5 +221,9 @@ fn graph_worker_batch_size() -> usize {
         })
         .filter(|value| *value > 0)
         .map(|value| value.min(16))
-        .unwrap_or(2)
+        // Default to 4 parallel extractions: graph build is decode-bound and
+        // llama.cpp continuous batching (--parallel N --cont-batching) scales
+        // throughput near-linearly with concurrent slots. Match this to the
+        // server's --parallel via MEMORI_GRAPH_CONCURRENCY for best throughput.
+        .unwrap_or(4)
 }
