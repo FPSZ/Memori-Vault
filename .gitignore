@@ -54,7 +54,14 @@ memori-core/examples/phase2_diagnose.rs
 Logo/
 
 # Test data
-Memory_Test/eval_results/
 Memory_Stress_Test
+Memory_Test_V2/target/
 .playwright-mcp
 docs/Other
+
+# v1 语料已退役：untrack 但保留本地，避免重新加入仓库（v2 在 Memory_Test_V2/）
+Memory_Test/doc_*
+Memory_Test/internal_corpus_qa.json
+Memory_Test/generate_test_docs.py
+Memory_Test/eval_results/
+Memory_Test/stress_5000/
