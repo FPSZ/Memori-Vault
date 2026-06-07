@@ -23,7 +23,9 @@ pub const DEFAULT_DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
 
 /// 事件通道容量：8192（按架构要求固定）
 pub const DEFAULT_EVENT_CHANNEL_CAPACITY: usize = 8192;
-pub const SUPPORTED_CONTENT_EXTENSIONS: &[&str] = &["md", "txt", "docx", "pdf"];
+pub const SUPPORTED_CONTENT_EXTENSIONS: &[&str] = &[
+    "md", "txt", "docx", "pdf", "pptx", "xlsx", "doc", "ppt", "xls",
+];
 
 /// 对外暴露的标准化文件事件类型。
 #[derive(Debug, Clone, PartialEq, Eq)]

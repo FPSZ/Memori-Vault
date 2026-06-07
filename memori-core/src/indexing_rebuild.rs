@@ -216,7 +216,7 @@ pub(crate) fn is_supported_text_file(path: &std::path::Path) -> bool {
     is_supported_content_file(path)
 }
 
-/// Read document text. For binary formats (docx/pdf) delegates to memori-parser extraction.
+/// Read document text. For binary formats (docx/pdf/pptx/xlsx/doc/ppt/xls) delegates to memori-parser extraction.
 pub(crate) async fn read_document_text(path: &std::path::Path) -> Result<String, std::io::Error> {
     let ext = path
         .extension()
@@ -224,7 +224,10 @@ pub(crate) async fn read_document_text(path: &std::path::Path) -> Result<String,
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_default();
 
-    if ext == "docx" || ext == "pdf" {
+    if matches!(
+        ext.as_str(),
+        "docx" | "pdf" | "pptx" | "xlsx" | "doc" | "ppt" | "xls"
+    ) {
         // Binary formats: run extraction on blocking thread pool
         let path_buf = path.to_path_buf();
         match tokio::task::spawn_blocking(move || memori_parser::extract_document_text(&path_buf))
