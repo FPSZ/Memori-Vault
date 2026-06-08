@@ -115,10 +115,16 @@ bench：`cargo run -p memori-core --example graph_bench -- <files>`（对每个 
 - **B. 拒答题被泄露作答（困难语料触发误放行）**：`refuse-库中无此事实` 仅 4/8。诱饵代号 / 不存在属性触发 `identifier_grounded_release` / `rerank_confident_release` / 复合查询 `compound_partial_release`（gate=0 绕过）。**复合查询路径是当前拒答安全的主要缺口，PII/越权类最该优先修。**
 - **C. 图片/扫描（B 类预期 miss）**：非 bug，是无 OCR 的能力边界，已用 4 道题固定记录。
 
+## 重排模型 A/B（本轮，同 embed/同语料/同代码，仅换 :18004 重排服务）
+- **bge-reranker-v2-m3（现默认）**：Top-1 文档 69.6% / Top-3 文档 91.3% / Top-1 chunk 75.0% / Top-5 chunk 95.7% / chunk MRR 0.8301 / 拒答 83.3% / 平均检索 ≈1.5s。平滑 logit（−7.5~8.0），与现有"裸分 min-max 融合 + gating 阈值"调校天然兼容。
+- **Qwen3-Reranker-0.6B（已否决）**：Top-1 文档 46.7%（−22.9pp）/ Top-3 文档 71.7% / 拒答 52.8%（−30.5pp）/ 平均检索 3.4s。**Top-5 chunk 仅 −3.3pp 说明候选召回正常，是重排把正确文档往下压**——经 llama.cpp 输出近二值相关概率（0.0001~1.0，87% 的 top 分 >0.9），中段无法区分、gating 被满屏"1.0"骗到过度放行。"已召回却排不进 top3"错排率从 bge 的 7% 飙到 26%。要可用须重调融合权重 + 重标定 gating 阈值，工程量大、收益存疑。
+- **gte-multilingual-reranker-base（已不可用）**：gguf 为 `new` 架构，当前 llama-server 构建报 `unknown model architecture: 'new'` 加载失败，三个本地 build 均不支持；v2 从未在 gte 上测过。
+- **代码默认对齐**：`memori-core` 常量 `DEFAULT_RERANK_MODEL_GTE` → `DEFAULT_RERANK_MODEL_BGE = "bge-reranker-v2-m3"`，桌面/服务端默认值、UI 预设、一键下载（`gpustack/bge-reranker-v2-m3-GGUF` Q4_K_M, ~390MB）同步更新。
+
 ## 下一步杠杆（仅记录，不在本轮）
 1. gating 对"单事实低词法覆盖"证据的放行（A 类）。
 2. 复合查询路径补 gating 与越权/PII 拦截（B 类）。
 3. 诱饵代号 / 不存在属性的拒答硬化。
 4. 长文：分块/gating 对深埋事实的处理（长文题 0/2）。
 5. OCR：图片/扫描件可检索（C 类，大功能，需接 tesseract 或视觉模型）。
-6. llama-server 升级支持 gte `new` 架构后，重排换回 gte 复测对比。
+6. 重排已切到 bge-reranker-v2-m3（见上节 A/B）。若日后要上 Qwen3-Reranker，需先为其近二值分数重调融合权重 + 重标定 gating 阈值，再复测。

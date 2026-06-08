@@ -666,7 +666,7 @@ pub(crate) fn resolve_active_runtime_settings(
         },
         // server 端暂未暴露 rerank 配置，默认使用本地第 4 角色端口；服务不可达时 core 会自动降级。
         rerank_endpoint: memori_core::DEFAULT_RERANK_ENDPOINT.to_string(),
-        rerank_model: memori_core::DEFAULT_RERANK_MODEL_GTE.to_string(),
+        rerank_model: memori_core::DEFAULT_RERANK_MODEL_BGE.to_string(),
         rerank_enabled: true,
         chat_context_length: if active_provider == ModelProvider::OpenAiCompatible {
             settings.remote_profile.chat_context_length

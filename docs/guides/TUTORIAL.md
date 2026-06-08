@@ -58,7 +58,9 @@ If a model is missing, place the corresponding `.gguf` file under your configure
 llama-server -m /path/to/qwen3-14b.gguf --host 127.0.0.1 --port 18001
 llama-server -m /path/to/qwen3-8b.gguf --host 127.0.0.1 --port 18002
 llama-server -m /path/to/Qwen3-Embedding-4B.gguf --embedding --host 127.0.0.1 --port 18003
+llama-server -m /path/to/bge-reranker-v2-m3-Q4_K_M.gguf --reranking --pooling rank --host 127.0.0.1 --port 18004
 ```
+The rerank server (port 18004) must be launched with `--reranking --pooling rank`. Note: the older `gte-multilingual-reranker-base` (`new` architecture) no longer loads on current llama.cpp builds, which is why the default rerank model is now `bge-reranker-v2-m3`.
 
 ## 4. Search Workflow
 

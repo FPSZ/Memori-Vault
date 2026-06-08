@@ -546,11 +546,14 @@ pub(crate) async fn scan_local_model_files(root: Option<String>) -> Result<Vec<S
     scan_local_model_files_from_root(&PathBuf::from(root))
 }
 
-// 一键下载的轻量重排模型：gte-multilingual-reranker-base（FP16, ~590MB）。
-// 编码器架构、多语言、llama.cpp `--reranking` 兼容成熟，是全栈里最轻的一环。
-const RERANK_MODEL_DOWNLOAD_URL: &str = "https://huggingface.co/gpustack/gte-multilingual-reranker-base-GGUF/resolve/main/gte-multilingual-reranker-base-FP16.gguf";
-const RERANK_MODEL_FILE_NAME: &str = "gte-multilingual-reranker-base-FP16.gguf";
-const RERANK_MODEL_DIR_NAME: &str = "gte-multilingual-reranker-base";
+// 一键下载的轻量重排模型：bge-reranker-v2-m3（Q4_K_M, ~390MB）。
+// 经典 cross-encoder、多语言、平滑 logit 输出，与现有融合/gating 调校天然兼容，
+// 且能在当前 llama.cpp 构建上以 `--reranking --pooling rank` 直接加载。
+// 注：旧默认 gte-multilingual-reranker-base 的 `new` 架构已不被新版 llama.cpp 支持，
+// 实测会以 `unknown model architecture: 'new'` 加载失败、静默回退到 RRF。
+const RERANK_MODEL_DOWNLOAD_URL: &str = "https://huggingface.co/gpustack/bge-reranker-v2-m3-GGUF/resolve/main/bge-reranker-v2-m3-Q4_K_M.gguf";
+const RERANK_MODEL_FILE_NAME: &str = "bge-reranker-v2-m3-Q4_K_M.gguf";
+const RERANK_MODEL_DIR_NAME: &str = "bge-reranker-v2-m3";
 const RERANK_DOWNLOAD_PROGRESS_EVENT: &str = "rerank_model_download_progress";
 
 #[derive(Clone, serde::Serialize)]

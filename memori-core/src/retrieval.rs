@@ -25,7 +25,7 @@ pub(crate) fn evidence_rank_cmp(a: &MergedEvidence, b: &MergedEvidence) -> Order
 /// 构造送入 cross-encoder 的文档文本：标题路径 + 正文，截断以控制重排延迟与上下文。
 pub(crate) fn rerank_document_text(item: &MergedEvidence) -> String {
     // 截断上限必须保证单条 rerank 输入 query+doc 不超过重排模型的序列预算：
-    // gte-multilingual-reranker 经 llama-server 默认 ubatch=512 token，超限会 HTTP 500，
+    // bge-reranker-v2-m3 经 llama-server 默认 ubatch=512 token，超限会 HTTP 500，
     // 导致整批 rerank 失败、静默降级到加性记分卡，命中文档因此被门控误拒。
     // CJK 约 1.2 token/字，320 字 ≈ 400 token，留足空间给 query 与特殊符，稳妥落在 512 内。
     const MAX_RERANK_DOC_CHARS: usize = 320;

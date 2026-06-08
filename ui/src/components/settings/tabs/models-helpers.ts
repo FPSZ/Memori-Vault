@@ -169,7 +169,7 @@ export const ROLE_META: Record<
     label: "重排模型",
     icon: ListOrdered,
     color: "text-amber-400",
-    defaultModel: "gte-multilingual-reranker-base",
+    defaultModel: "bge-reranker-v2-m3",
     defaultPort: "18004"
   }
 };

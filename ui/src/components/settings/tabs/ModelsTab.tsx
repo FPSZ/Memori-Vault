@@ -305,7 +305,7 @@ export function ModelsTab({
       const fileName = fileNameFromPath(path);
       const stem = fileName.replace(/\.gguf$/i, "");
       updateProfile({
-        rerank_model: stem || "gte-multilingual-reranker-base",
+        rerank_model: stem || "bge-reranker-v2-m3",
         rerank_model_path: path
       });
       clearLocalValidationForRole("rerank");

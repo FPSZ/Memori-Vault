@@ -4,7 +4,7 @@ use std::str::FromStr;
 use crate::{
     DEFAULT_CHAT_ENDPOINT, DEFAULT_CHAT_MODEL_QWEN3, DEFAULT_EMBED_ENDPOINT,
     DEFAULT_EMBED_MODEL_QWEN3, DEFAULT_GRAPH_ENDPOINT, DEFAULT_GRAPH_MODEL_QWEN3,
-    DEFAULT_RERANK_ENDPOINT, DEFAULT_RERANK_MODEL_GTE, MEMORI_CHAT_API_FORMAT_ENV,
+    DEFAULT_RERANK_ENDPOINT, DEFAULT_RERANK_MODEL_BGE, MEMORI_CHAT_API_FORMAT_ENV,
     MEMORI_CHAT_ENDPOINT_ENV, MEMORI_CHAT_MODEL_ENV, MEMORI_EMBED_ENDPOINT_ENV,
     MEMORI_EMBED_MODEL_ENV, MEMORI_GRAPH_ENDPOINT_ENV, MEMORI_GRAPH_MODEL_ENV,
     MEMORI_MODEL_API_KEY_ENV, MEMORI_MODEL_PROTOCOL_ENV, MEMORI_MODEL_PROVIDER_ENV,
@@ -178,7 +178,7 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
     let rerank_endpoint = std::env::var(MEMORI_RERANK_ENDPOINT_ENV)
         .unwrap_or_else(|_| DEFAULT_RERANK_ENDPOINT.to_string());
     let rerank_model = std::env::var(MEMORI_RERANK_MODEL_ENV)
-        .unwrap_or_else(|_| DEFAULT_RERANK_MODEL_GTE.to_string());
+        .unwrap_or_else(|_| DEFAULT_RERANK_MODEL_BGE.to_string());
     // 默认开启；服务不可达时检索层会自动降级，因此 opt-out 而非 opt-in。
     let rerank_enabled = std::env::var(MEMORI_RERANK_ENABLED_ENV)
         .ok()

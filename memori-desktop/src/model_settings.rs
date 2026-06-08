@@ -156,7 +156,7 @@ pub(crate) fn resolve_model_settings(settings: &AppSettings) -> ModelSettingsDto
                 None
             }
         })
-        .unwrap_or_else(|| DEFAULT_RERANK_MODEL_GTE.to_string());
+        .unwrap_or_else(|| DEFAULT_RERANK_MODEL_BGE.to_string());
 
     let remote_chat_model = settings
         .remote_chat_model
@@ -400,7 +400,7 @@ pub(crate) fn normalize_model_settings_payload(
     let local_rerank_model = {
         let trimmed = payload.local_profile.rerank_model.trim();
         if trimmed.is_empty() {
-            DEFAULT_RERANK_MODEL_GTE.to_string()
+            DEFAULT_RERANK_MODEL_BGE.to_string()
         } else {
             trimmed.to_string()
         }

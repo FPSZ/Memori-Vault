@@ -51,7 +51,7 @@ export const DEFAULT_MODEL_SETTINGS: ModelSettingsDto = {
     chat_model: "qwen3-14b",
     graph_model: "qwen3-8b",
     embed_model: "Qwen3-Embedding-4B",
-    rerank_model: "gte-multilingual-reranker-base",
+    rerank_model: "bge-reranker-v2-m3",
     chat_model_path: "",
     graph_model_path: "",
     embed_model_path: "",
