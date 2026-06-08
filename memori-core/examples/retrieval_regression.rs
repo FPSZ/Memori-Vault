@@ -153,6 +153,9 @@ struct RegressionCaseResult {
     target_clues: Vec<String>,
     document_hit_rank: Option<usize>,
     chunk_hit_rank: Option<usize>,
+    /// Deduplicated ranked document paths (citations first, then evidence),
+    /// truncated to the first few — diagnostic for *which* doc beat the target.
+    top_documents: Vec<String>,
     top1_document_hit: bool,
     top1_chunk_hit: bool,
     top3_document_recall: bool,
@@ -774,6 +777,17 @@ fn collect_supported_corpus_files(watch_root: &Path) -> Result<Vec<String>, AnyE
         for entry in fs::read_dir(&dir)? {
             let path = entry?.path();
             if path.is_dir() {
+                // Skip build/output dirs: the harness writes its own report.md/json
+                // under `<watch_root>/target/retrieval-regression/...`. Indexing those
+                // would pollute the haystack with documents that quote every query
+                // (incl. decoy codes), inflating grounding and defeating refuse gating.
+                let dir_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default();
+                if dir_name == "target" || dir_name.starts_with('.') {
+                    continue;
+                }
                 stack.push(path);
             } else if let Some(ext) = path.extension().and_then(|s| s.to_str())
                 && EXTS.contains(&ext.to_ascii_lowercase().as_str())
@@ -1026,6 +1040,10 @@ fn build_case_result(
         target_clues: case.target_clues.clone(),
         document_hit_rank,
         chunk_hit_rank,
+        top_documents: ranked_document_paths(&inspection)
+            .into_iter()
+            .take(5)
+            .collect(),
         top1_document_hit: document_hit_rank == Some(1),
         top1_chunk_hit: chunk_hit_rank == Some(1),
         top3_document_recall: document_hit_rank.is_some_and(|rank| rank <= 3),
@@ -1068,6 +1086,7 @@ fn timeout_case_result(case: &RegressionCase) -> RegressionCaseResult {
         target_clues: case.target_clues.clone(),
         document_hit_rank: None,
         chunk_hit_rank: None,
+        top_documents: Vec::new(),
         top1_document_hit: false,
         top1_chunk_hit: false,
         top3_document_recall: false,
@@ -1098,6 +1117,27 @@ fn effective_document_targets(case: &RegressionCase) -> &[String] {
     } else {
         &case.acceptable_documents
     }
+}
+
+/// Deduplicated ranked document paths (citations first, then any extra evidence
+/// docs). Diagnostic only — used for the `top_documents` field to reveal *which*
+/// doc beat the target. Does NOT drive `document_hit_rank` (kept byte-identical
+/// to the original to avoid shifting the baseline metric).
+fn ranked_document_paths(inspection: &RetrievalInspection) -> Vec<String> {
+    let mut ranked_paths = Vec::new();
+    for citation in &inspection.citations {
+        let candidate = normalize_rel(&citation.relative_path);
+        if !ranked_paths.contains(&candidate) {
+            ranked_paths.push(candidate);
+        }
+    }
+    for evidence in &inspection.evidence {
+        let candidate = normalize_rel(&evidence.relative_path);
+        if !ranked_paths.contains(&candidate) {
+            ranked_paths.push(candidate);
+        }
+    }
+    ranked_paths
 }
 
 fn find_document_hit_rank(
