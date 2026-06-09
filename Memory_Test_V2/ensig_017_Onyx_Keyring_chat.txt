@@ -1,0 +1,11 @@
+[Fictional internal test material] For Memori-Vault local retrieval evaluation only; contains no real secrets.
+[Onyx Keyring ENS-37 project chat - exported]
+
+09:02 Priya Rao: morning all, let's nail down the rotation drill duration the team agreed on today ok
+09:03 Sky: i have a number but not 100% sure, scared i mixed it up
+09:05 Priya Rao: no worries, we go by the policy
+09:11 Amber: i checked the minutes, should be this range
+09:14 Priya Rao: right, final call is 90 minutes, pls don't change it again
+09:15 Sky: got it, i'll sync downstream
+09:16 Priya Rao: yep, the rotation drill duration the team agreed on is set to 90 minutes, thanks everyone
+09:20 (someone posted an unrelated sticker, omitted)

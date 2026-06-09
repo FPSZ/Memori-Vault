@@ -1,0 +1,11 @@
+[Fictional internal test material] For Memori-Vault local retrieval evaluation only; contains no real secrets.
+[Harbor Tickets ENC-08 project chat - exported]
+
+09:02 Marco Silva: morning all, let's nail down the war-room headcount the team agreed on today ok
+09:03 Sky: i have a number but not 100% sure, scared i mixed it up
+09:05 Marco Silva: no worries, we go by the policy
+09:11 Amber: i checked the minutes, should be this range
+09:14 Marco Silva: right, final call is 4 people, pls don't change it again
+09:15 Sky: got it, i'll sync downstream
+09:16 Marco Silva: yep, the war-room headcount the team agreed on is set to 4 people, thanks everyone
+09:20 (someone posted an unrelated sticker, omitted)

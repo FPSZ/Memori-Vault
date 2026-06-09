@@ -1,17 +1,19 @@
 {
   "company": "星衡智能",
+  "en_company": "Stellar Insight Inc.",
   "seed": 20260605,
   "signal_count": 280,
+  "en_signal_count": 42,
   "noise_count": 220,
   "special_count": 6,
-  "total": 506,
+  "total": 548,
   "format_counts": {
-    "md": 81,
-    "txt": 120,
-    "docx": 78,
-    "pdf": 76,
-    "xlsx": 75,
-    "pptx": 76
+    "md": 87,
+    "txt": 132,
+    "docx": 84,
+    "pdf": 82,
+    "xlsx": 81,
+    "pptx": 82
   },
   "signal_genres": [
     [
@@ -40,6 +42,36 @@
     ],
     [
       "幻灯片",
+      "pptx"
+    ]
+  ],
+  "en_signal_genres": [
+    [
+      "policy",
+      "md"
+    ],
+    [
+      "email",
+      "txt"
+    ],
+    [
+      "chat",
+      "txt"
+    ],
+    [
+      "minutes",
+      "docx"
+    ],
+    [
+      "postmortem",
+      "pdf"
+    ],
+    [
+      "params",
+      "xlsx"
+    ],
+    [
+      "slides",
       "pptx"
     ]
   ],
@@ -2643,6 +2675,380 @@
         274,
         280
       ]
+    }
+  ],
+  "en_dossiers": [
+    {
+      "code": "ENX-11",
+      "project": "Aurora Ledger",
+      "category": "Product Strategy",
+      "owner": "Nathan Lin",
+      "department": "Enterprise Product",
+      "decoy_code": "ENX-71",
+      "anti_common": "Do not answer with generic SaaS metrics such as DAU or conversion rate.",
+      "lang": "en",
+      "facts": {
+        "anchor": {
+          "hint": "core fact",
+          "clue": "exactly four named tenants",
+          "carrier": "Memory_Test_V2/ensig_001_Aurora_Ledger_policy.md",
+          "format": "md",
+          "genre": "policy"
+        },
+        "table": {
+          "hint": "Phase-1 settled-statement target",
+          "clue": "21,450 statements",
+          "carrier": "Memory_Test_V2/ensig_006_Aurora_Ledger_params.xlsx",
+          "format": "xlsx",
+          "genre": "params"
+        },
+        "workflow": {
+          "hint": "procedure",
+          "clue": "clear the field-contract review before it enters the canary allowlist",
+          "carrier": "Memory_Test_V2/ensig_004_Aurora_Ledger_minutes.docx",
+          "format": "docx",
+          "genre": "minutes"
+        },
+        "exception": {
+          "hint": "exception",
+          "clue": "customer_alias field is granted a one-time rename waiver",
+          "carrier": "Memory_Test_V2/ensig_002_Aurora_Ledger_email.txt",
+          "format": "txt",
+          "genre": "email"
+        },
+        "chat": {
+          "hint": "the canary ramp percentage",
+          "clue": "3.4%",
+          "carrier": "Memory_Test_V2/ensig_003_Aurora_Ledger_chat.txt",
+          "format": "txt",
+          "genre": "chat"
+        },
+        "temporal": {
+          "hint": "the gateway reconciliation tolerance",
+          "old": "0.61%",
+          "clue": "0.52%",
+          "carrier": "Memory_Test_V2/ensig_005_Aurora_Ledger_postmortem.pdf",
+          "format": "pdf",
+          "genre": "postmortem"
+        },
+        "slide": {
+          "hint": "key number",
+          "clue": "21,450 settled statements",
+          "carrier": "Memory_Test_V2/ensig_007_Aurora_Ledger_slides.pptx",
+          "format": "pptx",
+          "genre": "slides"
+        }
+      }
+    },
+    {
+      "code": "ENG-23",
+      "project": "Cedar Retention",
+      "category": "Growth",
+      "owner": "Summer Chen",
+      "department": "Growth Operations",
+      "decoy_code": "ENG-92",
+      "anti_common": "Do not answer with the generic definition of a newly registered user.",
+      "lang": "en",
+      "facts": {
+        "anchor": {
+          "hint": "core fact",
+          "clue": "visited within the last 14 days but never created a project",
+          "carrier": "Memory_Test_V2/ensig_008_Cedar_Retention_policy.md",
+          "format": "md",
+          "genre": "policy"
+        },
+        "table": {
+          "hint": "D14 second-creation pause line",
+          "clue": "29.4%",
+          "carrier": "Memory_Test_V2/ensig_013_Cedar_Retention_params.xlsx",
+          "format": "xlsx",
+          "genre": "params"
+        },
+        "workflow": {
+          "hint": "procedure",
+          "clue": "reviews the cohort before approving any creative budget",
+          "carrier": "Memory_Test_V2/ensig_011_Cedar_Retention_minutes.docx",
+          "format": "docx",
+          "genre": "minutes"
+        },
+        "exception": {
+          "hint": "exception",
+          "clue": "relax the pause line to 26.5%",
+          "carrier": "Memory_Test_V2/ensig_009_Cedar_Retention_email.txt",
+          "format": "txt",
+          "genre": "email"
+        },
+        "chat": {
+          "hint": "the minimum cohort size before reading results",
+          "clue": "1,200 users",
+          "carrier": "Memory_Test_V2/ensig_010_Cedar_Retention_chat.txt",
+          "format": "txt",
+          "genre": "chat"
+        },
+        "temporal": {
+          "hint": "the core D14 second-creation threshold",
+          "old": "34%",
+          "clue": "32.5%",
+          "carrier": "Memory_Test_V2/ensig_012_Cedar_Retention_postmortem.pdf",
+          "format": "pdf",
+          "genre": "postmortem"
+        },
+        "slide": {
+          "hint": "key number",
+          "clue": "D14 second-creation rate of 32.5%",
+          "carrier": "Memory_Test_V2/ensig_014_Cedar_Retention_slides.pptx",
+          "format": "pptx",
+          "genre": "slides"
+        }
+      }
+    },
+    {
+      "code": "ENS-37",
+      "project": "Onyx Keyring",
+      "category": "Security",
+      "owner": "Priya Rao",
+      "department": "Security Office",
+      "decoy_code": "ENS-73",
+      "anti_common": "Do not answer with the common 90-day rotation default.",
+      "lang": "en",
+      "facts": {
+        "anchor": {
+          "hint": "core fact",
+          "clue": "second Wednesday of every month from 22:10 to 22:35",
+          "carrier": "Memory_Test_V2/ensig_015_Onyx_Keyring_policy.md",
+          "format": "md",
+          "genre": "policy"
+        },
+        "table": {
+          "hint": "Server-side credential maximum lifetime",
+          "clue": "47 days",
+          "carrier": "Memory_Test_V2/ensig_020_Onyx_Keyring_params.xlsx",
+          "format": "xlsx",
+          "genre": "params"
+        },
+        "workflow": {
+          "hint": "procedure",
+          "clue": "shadow verification must be completed",
+          "carrier": "Memory_Test_V2/ensig_018_Onyx_Keyring_minutes.docx",
+          "format": "docx",
+          "genre": "minutes"
+        },
+        "exception": {
+          "hint": "exception",
+          "clue": "only payment-salt may be rotated",
+          "carrier": "Memory_Test_V2/ensig_016_Onyx_Keyring_email.txt",
+          "format": "txt",
+          "genre": "email"
+        },
+        "chat": {
+          "hint": "the rotation drill duration the team agreed on",
+          "clue": "90 minutes",
+          "carrier": "Memory_Test_V2/ensig_017_Onyx_Keyring_chat.txt",
+          "format": "txt",
+          "genre": "chat"
+        },
+        "temporal": {
+          "hint": "the mobile derived-key lifetime",
+          "old": "13 days",
+          "clue": "8 days",
+          "carrier": "Memory_Test_V2/ensig_019_Onyx_Keyring_postmortem.pdf",
+          "format": "pdf",
+          "genre": "postmortem"
+        },
+        "slide": {
+          "hint": "key number",
+          "clue": "maximum lifetime to 47 days",
+          "carrier": "Memory_Test_V2/ensig_021_Onyx_Keyring_slides.pptx",
+          "format": "pptx",
+          "genre": "slides"
+        }
+      }
+    },
+    {
+      "code": "ENC-08",
+      "project": "Harbor Tickets",
+      "category": "Customer Success",
+      "owner": "Marco Silva",
+      "department": "Customer Success",
+      "decoy_code": "ENC-80",
+      "anti_common": "Do not apply the generic 15/30/60-minute ticket SLA.",
+      "lang": "en",
+      "facts": {
+        "anchor": {
+          "hint": "core fact",
+          "clue": "P1 escalation SLA to 9 minutes",
+          "carrier": "Memory_Test_V2/ensig_022_Harbor_Tickets_policy.md",
+          "format": "md",
+          "genre": "policy"
+        },
+        "table": {
+          "hint": "First-response satisfaction target",
+          "clue": "93.6%",
+          "carrier": "Memory_Test_V2/ensig_027_Harbor_Tickets_params.xlsx",
+          "format": "xlsx",
+          "genre": "params"
+        },
+        "workflow": {
+          "hint": "procedure",
+          "clue": "fills in the tenant id before paging the on-call engineer",
+          "carrier": "Memory_Test_V2/ensig_025_Harbor_Tickets_minutes.docx",
+          "format": "docx",
+          "genre": "minutes"
+        },
+        "exception": {
+          "hint": "exception",
+          "clue": "still counted as 33 minutes",
+          "carrier": "Memory_Test_V2/ensig_023_Harbor_Tickets_email.txt",
+          "format": "txt",
+          "genre": "email"
+        },
+        "chat": {
+          "hint": "the war-room headcount the team agreed on",
+          "clue": "4 people",
+          "carrier": "Memory_Test_V2/ensig_024_Harbor_Tickets_chat.txt",
+          "format": "txt",
+          "genre": "chat"
+        },
+        "temporal": {
+          "hint": "the first-response acknowledgement target",
+          "old": "5 minutes",
+          "clue": "3 minutes",
+          "carrier": "Memory_Test_V2/ensig_026_Harbor_Tickets_postmortem.pdf",
+          "format": "pdf",
+          "genre": "postmortem"
+        },
+        "slide": {
+          "hint": "key number",
+          "clue": "P1 escalates in 9 minutes",
+          "carrier": "Memory_Test_V2/ensig_028_Harbor_Tickets_slides.pptx",
+          "format": "pptx",
+          "genre": "slides"
+        }
+      }
+    },
+    {
+      "code": "ENF-19",
+      "project": "Quartz Budget",
+      "category": "Finance Risk",
+      "owner": "Helena Ford",
+      "department": "Finance Risk",
+      "decoy_code": "ENF-91",
+      "anti_common": "Do not answer that a larger amount simply means higher-level approval.",
+      "lang": "en",
+      "facts": {
+        "anchor": {
+          "hint": "core fact",
+          "clue": "budget-pool remaining ratio falls below 16%",
+          "carrier": "Memory_Test_V2/ensig_029_Quartz_Budget_policy.md",
+          "format": "md",
+          "genre": "policy"
+        },
+        "table": {
+          "hint": "Pilot per-purchase ceiling",
+          "clue": "$82,000",
+          "carrier": "Memory_Test_V2/ensig_034_Quartz_Budget_params.xlsx",
+          "format": "xlsx",
+          "genre": "params"
+        },
+        "workflow": {
+          "hint": "procedure",
+          "clue": "tags the cost first and lets the system match a budget pool",
+          "carrier": "Memory_Test_V2/ensig_032_Quartz_Budget_minutes.docx",
+          "format": "docx",
+          "genre": "minutes"
+        },
+        "exception": {
+          "hint": "exception",
+          "clue": "draw on the RND-EMG pool first",
+          "carrier": "Memory_Test_V2/ensig_030_Quartz_Budget_email.txt",
+          "format": "txt",
+          "genre": "email"
+        },
+        "chat": {
+          "hint": "the quarterly discretionary cap the team locked in",
+          "clue": "$110,000",
+          "carrier": "Memory_Test_V2/ensig_031_Quartz_Budget_chat.txt",
+          "format": "txt",
+          "genre": "chat"
+        },
+        "temporal": {
+          "hint": "the auto-freeze remaining-ratio alarm",
+          "old": "12%",
+          "clue": "9%",
+          "carrier": "Memory_Test_V2/ensig_033_Quartz_Budget_postmortem.pdf",
+          "format": "pdf",
+          "genre": "postmortem"
+        },
+        "slide": {
+          "hint": "key number",
+          "clue": "budget pool drops below 16%",
+          "carrier": "Memory_Test_V2/ensig_035_Quartz_Budget_slides.pptx",
+          "format": "pptx",
+          "genre": "slides"
+        }
+      }
+    },
+    {
+      "code": "END-26",
+      "project": "Maple Pipeline",
+      "category": "Dev Productivity",
+      "owner": "Owen Reed",
+      "department": "Dev Productivity",
+      "decoy_code": "END-62",
+      "anti_common": "Do not just answer increase unit-test coverage.",
+      "lang": "en",
+      "facts": {
+        "anchor": {
+          "hint": "core fact",
+          "clue": "missing rollback segment in a migration script as the hard blocker",
+          "carrier": "Memory_Test_V2/ensig_036_Maple_Pipeline_policy.md",
+          "format": "md",
+          "genre": "policy"
+        },
+        "table": {
+          "hint": "Mainline green-build time limit",
+          "clue": "16 minutes",
+          "carrier": "Memory_Test_V2/ensig_041_Maple_Pipeline_params.xlsx",
+          "format": "xlsx",
+          "genre": "params"
+        },
+        "workflow": {
+          "hint": "procedure",
+          "clue": "record a root-cause label in the mp_build_review table",
+          "carrier": "Memory_Test_V2/ensig_039_Maple_Pipeline_minutes.docx",
+          "format": "docx",
+          "genre": "minutes"
+        },
+        "exception": {
+          "hint": "exception",
+          "clue": "product repository may not",
+          "carrier": "Memory_Test_V2/ensig_037_Maple_Pipeline_email.txt",
+          "format": "txt",
+          "genre": "email"
+        },
+        "chat": {
+          "hint": "the nightly cache warm-up budget",
+          "clue": "12 minutes",
+          "carrier": "Memory_Test_V2/ensig_038_Maple_Pipeline_chat.txt",
+          "format": "txt",
+          "genre": "chat"
+        },
+        "temporal": {
+          "hint": "the red-build time threshold",
+          "old": "29 minutes",
+          "clue": "33 minutes",
+          "carrier": "Memory_Test_V2/ensig_040_Maple_Pipeline_postmortem.pdf",
+          "format": "pdf",
+          "genre": "postmortem"
+        },
+        "slide": {
+          "hint": "key number",
+          "clue": "green within 16 minutes",
+          "carrier": "Memory_Test_V2/ensig_042_Maple_Pipeline_slides.pptx",
+          "format": "pptx",
+          "genre": "slides"
+        }
+      }
     }
   ],
   "specials": [

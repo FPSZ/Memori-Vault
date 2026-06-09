@@ -47,6 +47,13 @@ COMPANY = "星衡智能"
 DISCLAIMER = "【虚构内部测试资料】本文件仅用于 Memori-Vault 本地检索评测，不含真实机密。"
 SEED = 20260605
 
+# 英文（海外子公司）语料：测英文单语检索 + 中英跨语言桥接。公司/项目/人名/数字均为虚构。
+EN_COMPANY = "Stellar Insight Inc."
+EN_DISCLAIMER = (
+    "[Fictional internal test material] For Memori-Vault local retrieval "
+    "evaluation only; contains no real secrets."
+)
+
 
 # ---------------------------------------------------------------------------
 # 信号项目（40 个）。每个项目的 6 条事实分散到 7 份不同体裁文档里，构成跨文档多跳。
@@ -574,6 +581,105 @@ DOSSIERS: list[Dossier] = [
 
 
 # ---------------------------------------------------------------------------
+# 英文信号项目（6 个）。复用 Dossier 结构，字段内容全英文，数值与中文语料错开，
+# 避免同一索引下 clue 串台。渲染走 *_en 英文渲染器。
+# ---------------------------------------------------------------------------
+
+EN_DOSSIERS: list[Dossier] = [
+    Dossier("Product Strategy", "Aurora Ledger", "ENX-11", "Nathan Lin", "Enterprise Product",
+            "Aurora Ledger limits its pilot to exactly four named tenants and forbids any other "
+            "account from enabling reconciliation.",
+            "exactly four named tenants",
+            "Phase-1 settled-statement target", "21,450 statements",
+            "After requirements freeze, any field rename must clear the field-contract review before "
+            "it enters the canary allowlist, and that order may not be reversed.",
+            "clear the field-contract review before it enters the canary allowlist",
+            "Only the customer_alias field is granted a one-time rename waiver; no other field qualifies.",
+            "customer_alias field is granted a one-time rename waiver",
+            "the gateway reconciliation tolerance", "0.61%", "0.52%",
+            "the canary ramp percentage", "3.4%",
+            "Aurora Ledger phase-1 north-star is 21,450 settled statements.", "21,450 settled statements",
+            "Do not answer with generic SaaS metrics such as DAU or conversion rate.", "ENX-71"),
+    Dossier("Growth", "Cedar Retention", "ENG-23", "Summer Chen", "Growth Operations",
+            "Internally a cold-start user means someone who visited within the last 14 days but never "
+            "created a project, not merely a newly registered account.",
+            "visited within the last 14 days but never created a project",
+            "D14 second-creation pause line", "29.4%",
+            "Every Tuesday at 10:30 the team reviews the cohort before approving any creative budget, "
+            "and click-through rate must never be reviewed first.",
+            "reviews the cohort before approving any creative budget",
+            "The education vertical may relax the pause line to 26.5%, but only with written sign-off "
+            "from Summer Chen.",
+            "relax the pause line to 26.5%",
+            "the core D14 second-creation threshold", "34%", "32.5%",
+            "the minimum cohort size before reading results", "1,200 users",
+            "Cedar Retention keys its investment pause on a D14 second-creation rate of 32.5%.",
+            "D14 second-creation rate of 32.5%",
+            "Do not answer with the generic definition of a newly registered user.", "ENG-92"),
+    Dossier("Security", "Onyx Keyring", "ENS-37", "Priya Rao", "Security Office",
+            "Onyx Keyring fixes its rotation window to the second Wednesday of every month from 22:10 "
+            "to 22:35, and rotation outside that window is forbidden.",
+            "second Wednesday of every month from 22:10 to 22:35",
+            "Server-side credential maximum lifetime", "47 days",
+            "Six hours before rotation a shadow verification must be completed and its record written "
+            "to the si_key_shadow_audit table.",
+            "shadow verification must be completed",
+            "During the holiday freeze only payment-salt may be rotated; tenant-root must never be rotated.",
+            "only payment-salt may be rotated",
+            "the mobile derived-key lifetime", "13 days", "8 days",
+            "the rotation drill duration the team agreed on", "90 minutes",
+            "Onyx Keyring sets the server-side credential maximum lifetime to 47 days.",
+            "maximum lifetime to 47 days",
+            "Do not answer with the common 90-day rotation default.", "ENS-73"),
+    Dossier("Customer Success", "Harbor Tickets", "ENC-08", "Marco Silva", "Customer Success",
+            "Harbor Tickets sets the P1 escalation SLA to 9 minutes and P2 to 33 minutes, unlike the "
+            "generic ticket limits.",
+            "P1 escalation SLA to 9 minutes",
+            "First-response satisfaction target", "93.6%",
+            "For P1 the agent calls first and then opens a war room; for P2 the agent fills in the "
+            "tenant id before paging the on-call engineer.",
+            "fills in the tenant id before paging the on-call engineer",
+            "Whale Bank tenants may notify Marco Silva of a P2 as if it were a P1, yet the SLA is still "
+            "counted as 33 minutes.",
+            "still counted as 33 minutes",
+            "the first-response acknowledgement target", "5 minutes", "3 minutes",
+            "the war-room headcount the team agreed on", "4 people",
+            "Harbor Tickets P1 escalates in 9 minutes, P2 in 33 minutes.", "P1 escalates in 9 minutes",
+            "Do not apply the generic 15/30/60-minute ticket SLA.", "ENC-80"),
+    Dossier("Finance Risk", "Quartz Budget", "ENF-19", "Helena Ford", "Finance Risk",
+            "Quartz Budget escalates to the CFO not by a fixed amount but when the budget-pool "
+            "remaining ratio falls below 16%.",
+            "budget-pool remaining ratio falls below 16%",
+            "Pilot per-purchase ceiling", "$82,000",
+            "The applicant tags the cost first and lets the system match a budget pool; verbal "
+            "pre-approval from finance is not allowed.",
+            "tags the cost first and lets the system match a budget pool",
+            "Engineering hotfixes may draw on the RND-EMG pool first, but the paperwork must be filed "
+            "within 24 hours.",
+            "draw on the RND-EMG pool first",
+            "the auto-freeze remaining-ratio alarm", "12%", "9%",
+            "the quarterly discretionary cap the team locked in", "$110,000",
+            "Quartz Budget escalates to the CFO when the budget pool drops below 16%.",
+            "budget pool drops below 16%",
+            "Do not answer that a larger amount simply means higher-level approval.", "ENF-91"),
+    Dossier("Dev Productivity", "Maple Pipeline", "END-26", "Owen Reed", "Dev Productivity",
+            "Maple Pipeline treats a missing rollback segment in a migration script as the hard "
+            "blocker, not unit-test coverage.",
+            "missing rollback segment in a migration script as the hard blocker",
+            "Mainline green-build time limit", "16 minutes",
+            "Every red build must record a root-cause label in the mp_build_review table before it "
+            "can be retried.",
+            "record a root-cause label in the mp_build_review table",
+            "The docs repository may merge on a yellow build, but the product repository may not.",
+            "product repository may not",
+            "the red-build time threshold", "29 minutes", "33 minutes",
+            "the nightly cache warm-up budget", "12 minutes",
+            "Maple Pipeline counts a mainline build green within 16 minutes.", "green within 16 minutes",
+            "Do not just answer increase unit-test coverage.", "END-62"),
+]
+
+
+# ---------------------------------------------------------------------------
 # 渲染器：把同一组事实写成 7 种体裁，答案"埋进"散文/单元格/幻灯片。
 # ---------------------------------------------------------------------------
 
@@ -708,6 +814,139 @@ def build_slides(d: Dossier) -> list[tuple[str, list[str]]]:
          [DISCLAIMER, f"负责人：{d.owner}", f"归属：{d.dept}"]),
         (f"{d.proj} 关键口径",
          [d.slide_metric, f"代号 {d.code} 的口径以内部资料为准", d.anti]),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 英文渲染器：同一组英文事实写成 7 种体裁，答案埋进散文/单元格/幻灯片。
+# ---------------------------------------------------------------------------
+
+EN_NOISE_SENTENCES = [
+    "The meeting also briefly touched on next quarter's offsite budget; no decision was reached.",
+    "A teammate noted intermittent jitter in the staging environment, now tracked separately by ops.",
+    "Side note: the weekly-report template will be replaced next week, so avoid the old link.",
+    "For what it's worth, the badge system upgrade routes visitors through the B-block entrance.",
+    "(This paragraph is background context and is unrelated to the conclusion.)",
+    "Someone asked about remote work; that follows existing policy and is out of scope here.",
+    "Unrelated aside: the water cooler vendor changed, so the taste may differ for a while.",
+]
+
+
+def render_policy_md_en(d: Dossier, rnd: random.Random) -> str:
+    """Policy (md): the core fact is buried in clause prose, no labelled bullet."""
+    noise = rnd.sample(EN_NOISE_SENTENCES, 2)
+    return f"""{EN_DISCLAIMER}
+
+# {EN_COMPANY} {d.cat} Internal Policy: {d.proj} ({d.code})
+
+Issued by: {d.dept}   Owner: {d.owner}
+
+Article 1 — Scope. This policy applies only to the {d.proj} project (code {d.code}); generic industry practice is not an execution basis for this project. {noise[0]}
+
+Article 2 — Core boundary. {d.anchor} When answering external inquiries, teams must follow this article and must not substitute industry common sense.
+
+Article 3 — Procedure. {d.workflow} Each step owner must keep a record. {noise[1]}
+
+Article 4 — Historical parameter. {d.temporal_subj} was initially set to {d.temporal_old} (note: this was later revised in the postmortem; the latest value governs).
+
+Article 5 — Interpretation. This policy is interpreted by {d.owner} ({d.dept}); where any older statement conflicts, the latest postmortem governs.
+
+Reminder — project-specific: {d.anti}
+"""
+
+
+def render_email_txt_en(d: Dossier, rnd: random.Random) -> str:
+    """Email thread (txt): the exception is buried inside one reply, with quoted history noise."""
+    return f"""{EN_DISCLAIMER}
+
+From: {d.owner} <{d.code.lower()}@stellarinsight.example>
+To: {d.dept} (all)
+Subject: Re: Re: A few execution questions on {d.proj} ({d.code})
+
+Hi all,
+
+Quick reply to the thread below. Let's not reopen the first question; follow the existing policy there.
+
+On the exception: to be explicit, {d.exception} This has been confirmed, so please apply it as stated and do not widen the scope on your own.
+
+> In the previous message someone wrote:
+>   Is there really an exception here? Can we relax it?
+>   Also, who is following up on that unrelated meeting-room booking?
+
+We'll sort the rest offline.
+
+{d.owner}
+{d.dept}
+"""
+
+
+def render_chat_txt_en(d: Dossier, rnd: random.Random) -> str:
+    """Group chat (txt): a conclusion value emerges across timestamped messages, with casual typos."""
+    return f"""{EN_DISCLAIMER}
+[{d.proj} {d.code} project chat - exported]
+
+09:02 {d.owner}: morning all, let's nail down {d.chat_topic} today ok
+09:03 Sky: i have a number but not 100% sure, scared i mixed it up
+09:05 {d.owner}: no worries, we go by the policy
+09:11 Amber: i checked the minutes, should be this range
+09:14 {d.owner}: right, final call is {d.chat_value}, pls don't change it again
+09:15 Sky: got it, i'll sync downstream
+09:16 {d.owner}: yep, {d.chat_topic} is set to {d.chat_value}, thanks everyone
+09:20 (someone posted an unrelated sticker, omitted)
+"""
+
+
+def render_minutes_docx_blocks_en(d: Dossier, rnd: random.Random) -> list[tuple[str, str]]:
+    """Minutes (docx): the procedure sits between an off-topic intro and action items."""
+    noise = rnd.sample(EN_NOISE_SENTENCES, 2)
+    return [
+        ("h0", f"{EN_COMPANY} {d.proj} ({d.code}) Meeting Minutes"),
+        ("p", EN_DISCLAIMER),
+        ("p", f"Chair: {d.owner}   Notes: {d.dept}"),
+        ("h2", "1. Opening and off-topic"),
+        ("p", noise[0]),
+        ("h2", "2. Execution rule (key)"),
+        ("p", f"Confirmed after discussion: {d.workflow} This procedure is mandatory for this project, and answers must follow it."),
+        ("p", noise[1]),
+        ("h2", "3. Action items"),
+        ("bullet", f"{d.owner}: sync the above procedure to the {d.dept} wiki"),
+        ("bullet", "Other: offsite budget deferred to next time"),
+    ]
+
+
+def render_postmortem_pdf_blocks_en(d: Dossier) -> list[tuple[str, str]]:
+    """Postmortem (pdf): revises the old value to the current value (temporal-conflict source)."""
+    return [
+        ("title", f"{EN_COMPANY} {d.proj} ({d.code}) Postmortem"),
+        ("h", "1. Background"),
+        ("p", f"This postmortem focuses on {d.temporal_subj}. Earlier documents recorded it as {d.temporal_old}, which proved unsuitable in practice."),
+        ("h", "2. Revised conclusion"),
+        ("p", f"After confirmation by {d.owner} and {d.dept}, {d.temporal_subj} is formally revised from {d.temporal_old} to {d.temporal_new}; the current value governs."),
+        ("p", f"Reminder: any {d.temporal_old} appearing in earlier material is void; the current value is {d.temporal_new}."),
+        ("h", "3. Counter-intuitive note"),
+        ("p", d.anti),
+    ]
+
+
+def build_param_rows_en(d: Dossier) -> list[list[str]]:
+    """Parameter sheet (xlsx): the key parameter lives in a specific cell; answer = that cell."""
+    return [
+        ["Parameter sheet", f"{d.proj} ({d.code})", "Owner", d.owner],
+        ["No.", "Parameter", "Value", "Note"],
+        ["1", "Project code", d.code, d.dept],
+        ["2", d.table_param, d.table_value, "project-specific rule"],
+        ["3", "Review order", "see meeting minutes", "mandatory"],
+        ["4", "Data level", "internal material", "local retrieval eval only"],
+    ]
+
+
+def build_slides_en(d: Dossier) -> list[tuple[str, list[str]]]:
+    """Slides (pptx): owner + key number split across title and body."""
+    return [
+        (f"{d.proj} ({d.code}) Overview",
+         [EN_DISCLAIMER, f"Owner: {d.owner}", f"Team: {d.dept}"]),
+        (f"{d.proj} Key Rule",
+         [d.slide_metric, f"The rule for code {d.code} follows internal material.", d.anti]),
     ]
 
 
@@ -1014,10 +1253,25 @@ SIGNAL_GENRES = [
 ]
 
 
+# 英文信号体裁映射：(文件名标签, 扩展名)，与中文 SIGNAL_GENRES 一一对应。
+EN_SIGNAL_GENRES = [
+    ("policy", "md"),
+    ("email", "txt"),
+    ("chat", "txt"),
+    ("minutes", "docx"),
+    ("postmortem", "pdf"),
+    ("params", "xlsx"),
+    ("slides", "pptx"),
+]
+
+
 def clean_old() -> None:
     if OUTPUT_DIR.exists():
         for p in OUTPUT_DIR.glob("*"):
-            if p.is_file() and (p.name.startswith(("sig_", "noise_", "special_")) or p.name == "corpus_manifest.json"):
+            if p.is_file() and (
+                p.name.startswith(("sig_", "ensig_", "noise_", "special_"))
+                or p.name == "corpus_manifest.json"
+            ):
                 p.unlink()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1088,6 +1342,63 @@ def main() -> int:
 
     signal_count = serial
 
+    # ---- 英文信号文档（6 项目 × 7 体裁 = 42 份）----
+    # 用独立 RNG，避免扰动其后干扰/特殊样本所依赖的共享 rnd 流（保证纯新增、零 diff 噪声）。
+    en_rnd = random.Random(SEED + 1)
+    en_manifest_dossiers = []
+    en_serial = 0
+    for d in EN_DOSSIERS:
+        carriers: dict[str, str] = {}
+        for label, ext in EN_SIGNAL_GENRES:
+            en_serial += 1
+            fmt_counter[ext] = fmt_counter.get(ext, 0) + 1
+            fname = f"ensig_{en_serial:03d}_{slug(d.proj)}_{label}.{ext}"
+            path = OUTPUT_DIR / fname
+            if label == "policy":
+                save_md(path, render_policy_md_en(d, en_rnd))
+            elif label == "email":
+                save_txt(path, render_email_txt_en(d, en_rnd))
+            elif label == "chat":
+                save_txt(path, render_chat_txt_en(d, en_rnd))
+            elif label == "minutes":
+                save_docx_blocks(path, render_minutes_docx_blocks_en(d, en_rnd))
+            elif label == "postmortem":
+                save_pdf_blocks(path, render_postmortem_pdf_blocks_en(d))
+            elif label == "params":
+                save_xlsx(path, build_param_rows_en(d))
+            elif label == "slides":
+                save_pptx(path, build_slides_en(d))
+            carriers[label] = rel(path)
+
+        en_manifest_dossiers.append({
+            "code": d.code,
+            "project": d.proj,
+            "category": d.cat,
+            "owner": d.owner,
+            "department": d.dept,
+            "decoy_code": d.decoy_code,
+            "anti_common": d.anti,
+            "lang": "en",
+            "facts": {
+                "anchor": {"hint": "core fact", "clue": d.anchor_clue,
+                           "carrier": carriers["policy"], "format": "md", "genre": "policy"},
+                "table": {"hint": d.table_param, "clue": d.table_value,
+                          "carrier": carriers["params"], "format": "xlsx", "genre": "params"},
+                "workflow": {"hint": "procedure", "clue": d.workflow_clue,
+                             "carrier": carriers["minutes"], "format": "docx", "genre": "minutes"},
+                "exception": {"hint": "exception", "clue": d.exception_clue,
+                              "carrier": carriers["email"], "format": "txt", "genre": "email"},
+                "chat": {"hint": d.chat_topic, "clue": d.chat_value,
+                         "carrier": carriers["chat"], "format": "txt", "genre": "chat"},
+                "temporal": {"hint": d.temporal_subj, "old": d.temporal_old, "clue": d.temporal_new,
+                             "carrier": carriers["postmortem"], "format": "pdf", "genre": "postmortem"},
+                "slide": {"hint": "key number", "clue": d.slide_clue,
+                          "carrier": carriers["slides"], "format": "pptx", "genre": "slides"},
+            },
+        })
+
+    en_signal_count = en_serial
+
     # ---- 干扰文档 ----
     decoys = [d.decoy_code for d in DOSSIERS]
     noise_plan = [
@@ -1124,24 +1435,29 @@ def main() -> int:
     for s in specials:
         fmt_counter[s["format"]] = fmt_counter.get(s["format"], 0) + 1
 
-    total = signal_count + noise_count + special_count
+    total = signal_count + en_signal_count + noise_count + special_count
 
     manifest = {
         "company": COMPANY,
+        "en_company": EN_COMPANY,
         "seed": SEED,
         "signal_count": signal_count,
+        "en_signal_count": en_signal_count,
         "noise_count": noise_count,
         "special_count": special_count,
         "total": total,
         "format_counts": fmt_counter,
         "signal_genres": SIGNAL_GENRES,
+        "en_signal_genres": EN_SIGNAL_GENRES,
         "dossiers": manifest_dossiers,
+        "en_dossiers": en_manifest_dossiers,
         "specials": specials,
     }
     (OUTPUT_DIR / "corpus_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"信号 {signal_count} + 干扰 {noise_count} + 特殊 {special_count} = {total} 份，输出到 {OUTPUT_DIR}")
+    print(f"中文信号 {signal_count} + 英文信号 {en_signal_count} + 干扰 {noise_count} "
+          f"+ 特殊 {special_count} = {total} 份，输出到 {OUTPUT_DIR}")
     print("格式分布：", fmt_counter)
     print("manifest：", OUTPUT_DIR / "corpus_manifest.json")
     return 0

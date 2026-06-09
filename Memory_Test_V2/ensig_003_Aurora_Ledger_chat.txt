@@ -1,0 +1,11 @@
+[Fictional internal test material] For Memori-Vault local retrieval evaluation only; contains no real secrets.
+[Aurora Ledger ENX-11 project chat - exported]
+
+09:02 Nathan Lin: morning all, let's nail down the canary ramp percentage today ok
+09:03 Sky: i have a number but not 100% sure, scared i mixed it up
+09:05 Nathan Lin: no worries, we go by the policy
+09:11 Amber: i checked the minutes, should be this range
+09:14 Nathan Lin: right, final call is 3.4%, pls don't change it again
+09:15 Sky: got it, i'll sync downstream
+09:16 Nathan Lin: yep, the canary ramp percentage is set to 3.4%, thanks everyone
+09:20 (someone posted an unrelated sticker, omitted)

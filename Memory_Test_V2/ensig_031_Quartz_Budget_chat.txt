@@ -1,0 +1,11 @@
+[Fictional internal test material] For Memori-Vault local retrieval evaluation only; contains no real secrets.
+[Quartz Budget ENF-19 project chat - exported]
+
+09:02 Helena Ford: morning all, let's nail down the quarterly discretionary cap the team locked in today ok
+09:03 Sky: i have a number but not 100% sure, scared i mixed it up
+09:05 Helena Ford: no worries, we go by the policy
+09:11 Amber: i checked the minutes, should be this range
+09:14 Helena Ford: right, final call is $110,000, pls don't change it again
+09:15 Sky: got it, i'll sync downstream
+09:16 Helena Ford: yep, the quarterly discretionary cap the team locked in is set to $110,000, thanks everyone
+09:20 (someone posted an unrelated sticker, omitted)

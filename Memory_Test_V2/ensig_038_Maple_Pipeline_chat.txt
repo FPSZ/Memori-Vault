@@ -1,0 +1,11 @@
+[Fictional internal test material] For Memori-Vault local retrieval evaluation only; contains no real secrets.
+[Maple Pipeline END-26 project chat - exported]
+
+09:02 Owen Reed: morning all, let's nail down the nightly cache warm-up budget today ok
+09:03 Sky: i have a number but not 100% sure, scared i mixed it up
+09:05 Owen Reed: no worries, we go by the policy
+09:11 Amber: i checked the minutes, should be this range
+09:14 Owen Reed: right, final call is 12 minutes, pls don't change it again
+09:15 Sky: got it, i'll sync downstream
+09:16 Owen Reed: yep, the nightly cache warm-up budget is set to 12 minutes, thanks everyone
+09:20 (someone posted an unrelated sticker, omitted)
