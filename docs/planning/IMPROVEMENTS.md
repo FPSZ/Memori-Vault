@@ -7,6 +7,8 @@
 优先级：**P0** 阻塞可信对外交付 ／ **P1** 近期高价值低风险 ／ **P2** 产品化·可运维 ／ **P3** 大演进。
 类别：`[安全]` `[工程]` `[检索]` `[文档]` `[体验]`
 
+> **全项目体检**见 `docs/planning/PROJECT_AUDIT_2026-06-10.md`（跨 9 个域、带 `file:line` 证据与严重度）。下方为该审计提炼出的可执行 backlog。
+
 ---
 
 ## ✅ 已解决（旧清单遗留，本轮核实关闭）
@@ -38,6 +40,18 @@
 `build_cors_layer` 的 `allow_methods(Any)` / `allow_headers(Any)` 仍宽。
 **做法**：收成实际用到的方法（GET/POST/OPTIONS）与头部白名单。
 **验收**：预检只放行声明的方法/头部。
+
+### E12 `[体验/工程]` React ErrorBoundary（审计 F1，建议优先）
+前端**无 ErrorBoundary**，任一渲染异常会白屏整个 App。
+**做法**：在 App 根包一个 ErrorBoundary，捕获后降级到可读错误页 + 重载入口。成本极低、收益明显。
+
+### E13 `[工程]` CI 跨平台矩阵 + 依赖漏洞扫描（审计 C1/C2）
+`rust-ci.yml` 仅 `ubuntu-latest`，主用户在 Windows 且有已知 GBK 问题；无 `cargo-deny/audit`、无 `npm audit`。
+**做法**：PR 检查加 windows/macos 矩阵；加依赖漏洞扫描 step；借机在 Windows 上复核旧 GBK 错误串乱码（审计 C3）。
+
+### E14 `[安全]` 密钥不落明文 + 审计不静默丢失（审计 S1/S5）
+远程 API Key 明文存 `settings.json`；审计写失败是 warn-and-drop。
+**做法**：密钥接 OS keychain（keyring）；审计 IO 失败升级为告警/重试，避免静默丢审计。
 
 ### E4 `[工程/检索]` 回归 CI 守门
 现 CI（`.github/workflows/rust-ci.yml`）只跑 `fmt` + `clippy -D warnings` + `cargo test --workspace`，**无检索质量阈值门**——指标静默退步无人拦。live 档需本地模型不便上 CI。
