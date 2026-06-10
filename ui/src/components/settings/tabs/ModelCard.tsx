@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, ChevronUp, Download, FolderOpen, LoaderCircle, Play, RefreshCw, Square, Zap } from "lucide-react";
 import type { LocalModelRuntimeStatusDto } from "../types";
-import { extractPort, replacePort, ROLE_META, type ModelRoleKey } from "./models-helpers";
+import { extractPort, replacePort, ROLE_META, type ModelRoleKey } from "./modelUtils";
 
 type ModelCardProps = {
   role: ModelRoleKey;

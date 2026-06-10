@@ -332,7 +332,7 @@ function validateLocalRoles(
     if (!target) continue;
     const previous = seenTargets.get(target);
     if (previous) {
-      const message = `${ROLE_META[previous].label}与${ROLE_META[role].label}使用了相同的端口（${target}）。三个角色必须使用不同的端口（默认 18001 / 18002 / 18003）。`;
+      const message = `${ROLE_META[previous].label}与${ROLE_META[role].label}使用了相同的端口（${target}）。每个角色必须使用不同的端口（默认 18001 / 18002 / 18003 / 18004）。`;
       roleErrors[previous] = roleErrors[previous] ?? message;
       roleErrors[role] = message;
     } else {
