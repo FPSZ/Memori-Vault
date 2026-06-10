@@ -1,188 +1,94 @@
-﻿# Memori-Vault 改进清单（按优先级）
+# Memori-Vault 改进清单（按优先级）
 
-## 2026-06-05 最新检索实测更新
+> **本轮重写：2026-06-10。** 取代 2026-06-02/05 的旧清单——彼时多条 P0/P1 已落地，旧口径（v1 小语料、`repo_mixed`、OIDC 提权）已不反映现实。本文件现为**当前真实改进 backlog**，下个阶段主攻 **工程硬化 / 产品化**。
+>
+> 检索质量口径已迁移到 v2 困难基准：`docs/qa/RETRIEVAL_BASELINE_V2.md`（548 文档 / 126 题）。本清单只记录"待改进"，不重复已做好的部分。
 
-本次更新来自 100 条 `Memory_Test/` live 回归 #N+5：
-
-- 运行模式：`live_embedding + full_live`
-- 报告：`target/retrieval-regression/live_embedding-full_live-1780648792/report.json`
-- 本地服务：`service_health=ready`，`rerank_health=ready`
-- 索引准备：`80,251 ms`
-- 索引规模：`100` documents / `801` chunks
-- 用例：`100`，其中 `88 answer / 12 refuse`
-- 总体通过：`91/100`
-- 回答题正确作答：`80/88`
-- 拒答题正确拒答：`11/12`
-- Top-1 document hit：`87.50%`
-- Top-3 document recall：`93.18%`
-- Top-1 chunk hit：`81.82%`
-- Top-5 chunk recall：`93.18%`
-- Chunk MRR：`0.8561`
-- Citation validity：`100.00%`
-- Reject correctness：`91.00%`
-- Rerank applied：`95.00%`
-
-阶段对比：
-
-| 指标 | 起点 | 中途 | #N+5 最终 |
-| --- | ---: | ---: | ---: |
-| 整体 reject_correct | 0.56 | 0.74 | 0.91 |
-| 回答题正确作答 | 45/88 | 63/88 | 80/88 |
-| 拒答题正确拒答 | 11/12 | 11/12 | 11/12 |
-| rerank 应用率 | 0.64 | 0.64 | 0.95 |
-| top1 文档命中 | 0.375 | 0.59 | 0.875 |
-| top3 文档召回 | 0.591 | 0.90 | 0.932 |
-| top5 chunk 召回 | 0.69 | 0.92 | 0.932 |
-| chunk_mrr | 0.55 | 0.83 | 0.856 |
-| gating 误拒(已召回) | 35 | 20 | 6 |
-
-新的 P0 结论：
-
-- `reject_correct=0.91` 已达到本轮验收目标，当前主要风险不再是“链路可用但质量差”。
-- `gating 误拒(已召回)` 从 `35` 降到 `6`，剩余问题适合逐例分析，而不是继续大幅放宽 gate。
-- `citation_validity=100%` 仍然成立，引用链可信。
-- 仍不能对外宣称 50,000 文档规模高精度验证；当前数据只覆盖 `Memory_Test/` 100 题 live 回归。
-- C094 类“实体存在但所问属性资料未覆盖”不应继续硬塞到检索 gate，后续应在 answer-layer 提示词里兜底拒绝臆测。
-
-> 生成日期：2026-06-02
-> 评审范围：当前 `main` 分支代码（Rust workspace ~28k 行 + UI ~10k 行）、文档、CI、QA baseline。
-> 说明：本清单只记录"需要改进的地方"，不重复已经做得好的部分（干净的错误处理、CI 已含 `clippy -D warnings`/`fmt`/`test`、53 条回归用例、诚实的 retrieval baseline 等）。
-
-优先级定义：
-
-- **P0** — 阻塞"可信 / 可对外声称 1.0"的硬伤，应最先处理。
-- **P1** — 影响核心价值与长期可维护性，近期内必须推进。
-- **P2** — 健壮性、安全细节、体验，价值高但不阻塞。
-- **P3** — 路线图、打磨、长期项。
-
-类别标签：`[安全]` `[检索]` `[工程]` `[文档]` `[体验]`
+优先级：**P0** 阻塞可信对外交付 ／ **P1** 近期高价值低风险 ／ **P2** 产品化·可运维 ／ **P3** 大演进。
+类别：`[安全]` `[工程]` `[检索]` `[文档]` `[体验]`
 
 ---
 
-## P0 — 必须最先修
+## ✅ 已解决（旧清单遗留，本轮核实关闭）
 
-### P0-1 `[安全]` OIDC 登录未验签，存在管理员提权漏洞
-
-**问题**
-`memori-server/src/routes/auth.rs:13-44` 的 `oidc_login_handler`：
-
-1. 直接从请求体取 `id_token` / `access_token`，调用 `decode_jwt_claims`（`memori-server/src/auth.rs:30-47`）。该函数**只做 base64 解码 payload，完全不验证签名、issuer、audience、exp**。
-2. 从这些**未验证**的 claims 中取 `sub` / `email` 作为身份，取 `roles_claim` 作为角色，并签发真实会话。
-3. 更直接：`payload.role`（请求体字段）可直接覆盖角色 —— 客户端只要 POST `{"subject":"x","role":"admin"}` 就能拿到 admin 会话。
-
-**影响**：任何能访问 `/auth/oidc` 的人都能伪造任意身份与角色，整个 RBAC / audit 体系形同虚设。这与 README 宣称的"企业私有化 preview：RBAC、audit、egress policy"直接冲突。
-
-**修复方向**
-- 用 `jsonwebtoken` crate 按 IdP 的 JWKS 验证签名 + `iss` + `aud` + `exp`/`nbf`。
-- 删除或严格限制请求体中可直接指定 `role` 的能力（至少在非 dev 模式下禁止）。
-- 在文档里明确：当前 preview 的信任模型是什么、未配置 IdP 时的默认拒绝行为。
-- 加一条测试：伪造 JWT / 直传 `role=admin` 必须被拒。
-
-**验收**：伪造未签名 token 或直传 `role` 无法获得高于 `Viewer` 的权限。
+| 旧编号 | 项 | 现状（已验证） |
+| --- | --- | --- |
+| P0-1 `[安全]` | OIDC 登录未验签 / body 直传 `role` 提权 | **已修**：`routes/auth.rs` 默认走 `verify_oidc_token_claims`（JWKS + iss/aud/exp）；免验签 `decode_jwt_claims` 仅在 `allow_insecure_oidc_dev_login()` dev 开关下可用；body 直接指定 `role` 的能力已删，role 来自已验证 claims。 |
+| P0-2 `[检索]` | `repo_mixed` Top-1 退步到 0.4773 | **口径作废**：v1 小语料已退役，改用 v2 困难基准。当前 top3 文档召回 **0.925**、片段 MRR **0.839**、reject **0.881**、citation **1.000**。 |
+| P1-7 `[工程]` | 上帝文件待拆 | **基本完成**：`memori-core/lib.rs` 2388→**776**、`retrieval.rs` 1750→**745**、`memori-storage/lib.rs` 1548→**595**、`ui/App.tsx` 1858→**801**、`mcp/tools.rs` 1155→**239**。 |
+| P2-8 `[安全]` | storage/schema 层 `unwrap/expect/panic` | **已清**：`memori-storage/src/lib.rs` + `schema.rs` 非测试代码 0 处。 |
+| 8.2 `[安全]` | CORS `allow_origin(Any)` | **已收敛**：`build_cors_layer` 的 `allow_origin = resolve_allowed_origins()`，默认仅 localhost/tauri 白名单，可经 `MEMORI_ALLOWED_ORIGINS` 覆盖（残留 methods/headers=Any，见 E3）。 |
+| — `[工程]` | 图谱构建过慢（2.5 万字 ≈33 分钟） | **已提速 4–5×**：精简 schema + 约束/封顶解码 + 并发 2→4，长文降到 ~7 分钟量级（见 baseline v2「图谱构建速度优化」）。 |
 
 ---
 
-### P0-2 `[检索]` 混合语料文档路由精度不达标（核心价值短板）
+## P1 — 工程硬化（近期高价值、低风险，下阶段主线）
 
-**问题**（来源：`docs/qa/RETRIEVAL_BASELINE.md`）
-- `repo_mixed`（11 篇文档）最新 `Top-1 = 0.4773`，即正确文档排第一的概率不到一半。
-- 且**相对上一快照退步**：`Top-1 0.5682 → 0.4773`、`Reject 0.98 → 0.94`。
-- 主导失败模式有据可查：
-  - 英文描述型查询路由到错误文档：`R02 R05 R13 R21 R28 R35 R36`
-  - 代码 / 实现型查询正确文件被压低：`R40 R42 R43 R44 R45 R46 R50 R51`
+### E1 `[工程]` 合并重复 model-helper 模块
+`ui/src/components/settings/tabs/` 下两份近重复：`modelUtils.ts`（13.5KB，LIVE，`ModelsTab` 引用）与 `models-helpers.ts`（8KB，仅 `ModelCard` 引少量）。两份 `ROLE_META`/校验逻辑漂移风险高。
+**做法**：统一到 `modelUtils.ts`，改 `ModelCard` 引用，删 `models-helpers.ts`，`tsc --noEmit` 校验。
+**验收**：单一事实源，UI 行为不变，编译干净。
 
-文档级合并权重逻辑集中在 `memori-core/src/retrieval.rs`（`merge_document_candidates`，已按 `QueryFamily` 动态调权），是调优主战场。
+### E2 `[安全]` 会话管理补全
+`memori-server` 只有 8h `DEFAULT_SESSION_TTL_SECS`，**无主动登出 / 失效端点**，无最长会话上限，无防重放。
+**做法**：补 `POST /auth/logout`（删 session）、显式失效、最长会话上限、最小防重放约束；补测试。
+**验收**：登出后旧 token 立即失效；超龄会话被拒。
 
-**这是产品的核心卖点**——"问你的文档，知道答案从哪里来"。检索排不准，可验证性再好也只是"能信任它什么时候答，但答得不一定对"。
+### E3 `[安全]` CORS 收尾
+`build_cors_layer` 的 `allow_methods(Any)` / `allow_headers(Any)` 仍宽。
+**做法**：收成实际用到的方法（GET/POST/OPTIONS）与头部白名单。
+**验收**：预检只放行声明的方法/头部。
 
-**修复方向**
-- 先定位 `Top-1` 退步的提交（用回归套件二分），止血回归再谈提升。
-- 针对两类失败分别调：描述型英文 query 的 `documents_fts` 路由权重 vs. 实现型 query 的代码文档权重。
-- 把"修一类不破坏另一类"做成回归约束（见 P1-4 CI 守门）。
-
-**验收**：`repo_mixed` 至少恢复到 `Top-1 ≥ 0.57`，并向 README 写的目标（`answered ≥ 45/50`、`correct ≥ 40/50`、`citation/source_group_hit ≥ 45/50`）推进。
-
----
-
-### P0-3 `[文档]` 版本号 / 对外声称 与实测质量不一致
-
-**问题**
-- 仓库已打 `v1.0.0`，但 `RETRIEVAL_BASELINE.md` 自己写明 `repo_mixed` 仍是 "beta/internal-only quality"、"not ready for strong accuracy claims"。
-- README "核心优势"读起来像分层记忆/图谱/heat score 等都已就绪，但"当前状态"里多数标注为"部分落地 / 仍在推进"。
-
-**影响**：愿景叙事盖过实测现实，外部读者会高估成熟度，反噬信任——而信任正是本项目的立身之本。
-
-**修复方向**
-- README 中把"已验证可用"与"设计中/部分落地"用硬性分区或状态徽标区分（例如 ✅ 已验证 / 🚧 进行中 / 📐 设计）。
-- 明确 1.0.0 的语义：是"工程骨架冻结"还是"质量达标"。建议表述为前者。
+### E4 `[工程/检索]` 回归 CI 守门
+现 CI（`.github/workflows/rust-ci.yml`）只跑 `fmt` + `clippy -D warnings` + `cargo test --workspace`，**无检索质量阈值门**——指标静默退步无人拦。live 档需本地模型不便上 CI。
+**做法**：加一档**可在 CI 跑的确定性/离线 embedding 回归**，对 `top3_doc / chunk_mrr / reject_correct` 设阈值，低于版本化基线即红灯；live 档继续本地手动并把 baseline 数字入库 diff。
+**验收**：任何使关键指标低于阈值的提交 CI 红灯。
 
 ---
 
-## P1 — 近期必须推进
+## P2 — 产品化 / 可运维
 
-### P1-4 `[检索/工程]` 回归指标缺 CI 守门，导致精度静默退步
-**问题**：`Top-1` 在两次快照间退步且无人拦截，说明回归套件目前是"手动跑、手动看"。
-**建议**：把 `retrieval_regression` example 接入 CI（或定时任务），对 `core_docs` / `repo_mixed` 设阈值，低于基线即 fail 或告警；基线值入库版本化。
-**验收**：任何使 `Top-1` 低于阈值的提交在 CI 红灯。
+### E5 `[工程]` memori-server OpenAPI spec
+当前 server **无 OpenAPI**（无 utoipa/swagger）。UI 与第三方靠读代码对接。
+**做法**：用 `utoipa` 为 HTTP API 标注生成 spec + Swagger UI，API 版本化。
+**验收**：`/api-docs/openapi.json` 可用，覆盖现有路由。
 
-### P1-5 `[检索]` 回归语料过小，指标统计意义弱
-**问题**：`core_docs=6` 篇、`repo_mixed=11` 篇文档。11 篇语料上 `Top-1` 的单条波动就能造成数个百分点抖动。
-**建议**：构建一个更大、更有代表性的混合语料（中文/繁体/英文/代码/成对重复 `.txt/.md`），向"50 条验收 + 真实规模"靠拢；同时保留小语料做快速回归。
+### E6 `[安全/工程]` 管理接口限流 + 链路 trace
+**无限流**（无 governor/tower::limit）；检索链路无 request-id。
+**做法**：给 `auth`/admin 接口加最小限流；贯穿 request-id 到 `query analysis → doc routing → chunk merge → answer`，落最小可观测 trace。
+**验收**：暴力登录被限；一条 request-id 可串起整链路耗时。
 
-### P1-6 `[检索]` Gating 误杀（可答问题被拒答）
-**问题**：`R19 R35 R42` 等可答问题在 `repo_mixed` 被 gating 拒答（`Reject` 从 0.98 退到 0.94 也印证）。
-**位置**：`memori-core/src/engine.rs`（`apply_gating_metrics` / `evaluate_gating_decision` / `answer_indicates_insufficient_evidence`）。
-**建议**：把 gating 误杀单列为一个失败类指标跟踪，调阈值时同时盯 false-negative 与 citation 准确率，避免按下葫芦浮起瓢。
+### E7 `[工程]` 50k 规模本地压测
+扩展性目标态是 50k 文档，但**从未做过规模压测**，SQLite 单 `Mutex<Connection>` 是否成瓶颈未知。
+**做法**：干扰库扩到 ~50k，记录 `doc_recall_ms/chunk_recall_ms/merge_ms/answer_ms` 的 P50/P95；形成"连接模型是否需升级（读写分离/连接池/ANN）"决策文档（含 benchmark 证据）。
+**验收**：有规模化延迟数据 + 明确扩展决策。
 
-### P1-7 `[工程]` 上帝文件待拆分
-**问题**：
-- `memori-core/src/lib.rs` 2388 行：把 ~30 个 `pub struct`/`enum`、`AppState`、策略解析、env 解析全堆在一个模块。
-- `ui/src/App.tsx` 1858 行（UI 已开始拆分到 `ui/src/app/{panels,hooks,layout}`，但主文件仍臃肿）。
-- `memori-core/src/retrieval.rs` 1750、`memori-storage/src/lib.rs` 1548、`memori-server/src/mcp/tools.rs` 1155。
-**建议**：延续已有重构方向。优先把 `lib.rs` 的类型定义拆成 `types.rs` / `policy.rs`；把 `App.tsx` 的 state 与 effect 继续抽进 hooks。这是 README "当前状态"里已自认的待办，落实即可。
-
----
-
-## P2 — 健壮性 / 安全细节 / 体验
-
-### P2-8 `[安全]` storage 层 `unwrap/expect/panic` 运行时风险
-**问题**：`src` 主路径整体很干净（业务代码 0 `unwrap`），但 `memori-storage/src/lib.rs`、`schema.rs` 与 `memori-core/src/lib.rs` 中仍有 `unwrap/expect/panic`（examples 里的可忽略）。schema/存储层一旦 panic 会拖垮整个服务。
-**建议**：审计这几处，DB 初始化 / 迁移失败应返回 `Result` 并优雅降级，而非 panic。
-
-### P2-9 `[体验/工程]` 错误信息编码错乱（Windows GBK→UTF-8 乱码）
-**问题**：`RETRIEVAL_BASELINE.md:136` 出现 `Embedding 璇锋眰澶辫触: ...` —— 这是 GBK 字节"请求失败"被当 UTF-8 解读的典型乱码。说明在中文 Windows 上捕获子进程/系统错误串时未按 GBK 正确解码。
-**建议**：捕获外部错误文本时显式按系统码页解码或统一转 UTF-8，避免日志/Trust Panel 里出现乱码。
-
-### P2-10 `[检索]` live embedding 基线已跑通，当前 100 题回归接近验收线
-**更新**：2026-06-05 已完成 `live_embedding + full_live` 100 条 #N+5 端到端回归，`service_health=ready`，`rerank_health=ready`，报告见 `target/retrieval-regression/live_embedding-full_live-1780648792/report.json`。
-**结果**：当前 100 题通过 `91/100`，回答题正确作答 `80/88`，拒答题正确拒答 `11/12`，`Top-1 document hit=87.50%`，`Top-3 document recall=93.18%`，`Top-5 chunk recall=93.18%`，`chunk_mrr=0.8561`，`reject correctness=91.00%`。
-**建议**：下一步不要再按“大面积质量不达标”处理；应聚焦剩余 `6` 道已召回但仍被 gate 拒的残余 case、C094 类“实体存在但属性缺失”的 answer-layer 兜底，以及 50,000 文档规模下的性能/质量验证。
-
-### P2-11 `[工程]` PDF/DOCX/HTML 摄入稳定化
-**问题**：README 自列为"仍在推进"。`memori-parser` 仅 738 行单文件，多格式稳健解析（编码、表格、扫描件、HTML 噪声）容易出问题。
-**建议**：为各格式补固定样本 + 解析回归用例，把摄入失败率纳入指标。
+### E8 `[文档]` README 成熟度对齐
+README 仍可能让外部读者高估成熟度（叙事盖过实测）。
+**做法**：用 ✅已验证 / 🚧进行中 / 📐设计 状态徽标区分能力；明确 preview 信任模型与版本语义（"工程骨架冻结"而非"质量达标"）。
+**验收**：每条"核心能力"都有清晰状态标注。
 
 ---
 
-## P3 — 路线图 / 打磨
+## P3 — 大演进（需求确认后再排期）
 
-### P3-12 `[文档]` Memory OS Lite 高级能力区分"已落地 vs 设计中"
-heat score、conflict resolver、lifecycle classifier、temporal graph explanation 等在 README/架构文档里描述完整，但多为设计或部分落地。建议在 `docs/architecture/MEMORY_OS_LITE.md` 用状态标注，避免读者误判。
-
-### P3-13 `[工程]` `memori-vault` crate 定位
-`memori-vault` 仅 423 行单文件，作为被 core 依赖的基础 crate，职责边界值得在 `docs/architecture/STRUCTURE.md` 里写清，避免与 `memori-core` 概念重叠。
-
-### P3-14 `[体验]` i18n 与 onboarding 完整度
-UI 有 `i18n.tsx` 与 `OnboardingOverlay`，README 强调中文友好。建议系统性核对中英文案覆盖率与首次启动引导是否覆盖"配本地模型 → 建索引 → 提问看 Trust Panel"主链路。
+- **E9 `[工程]` 多租户 / 多资料库隔离**：当前 OIDC 登录后**共享同一个库**，无 `workspace_id/tenant/user_id` 隔离。设计 DB / 索引 / 审计三层隔离边界。（本地优先产品是否真要多租户，需先确认需求。）
+- **E10 `[体验]` 增量索引进度推送（SSE/WebSocket）**：长任务索引当前无实时进度通道。
+- **E11 `[工程]` shell-service 共享层**：收敛 desktop/server 在 `settings/model-policy/auth/audit` 的重复流程，统一 DTO 与错误码映射，建能力矩阵（desktop-only / server-only / shared）。
 
 ---
 
-## 建议执行顺序（摘要）
+## 检索/作答质量 backlog（非本阶段主线，记录留档）
 
-1. **P0-1 安全提权** — 一两天即可堵住，风险/成本比最高，先做。
-2. **P0-2 + P1-4 检索精度止血 + CI 守门** — 先二分定位退步提交，配 CI 阈值防再退。
-3. **P0-3 文档对齐** — 低成本、立刻提升可信度。
-4. **P1-5/6/7** — 扩语料、调 gating、拆大文件，三者并行推进检索质量与可维护性。
-5. **P2/P3** — 随迭代消化。
+> 下阶段选定了工程硬化方向；以下质量杠杆来自 v2 失败分析，**待后续单独成轮**。详见 `RETRIEVAL_BASELINE_V2.md`「下一步杠杆」。
 
-> 一句话：**概念与工程骨架已是优等生，瓶颈在"核心检索精度"和"一个具体的安全硬伤"。把这两点解决，1.0 的成色才真正配得上叙事。**
+1. **A 类 gating 误拒**：证据已召回却被阈值 55 砍（`多格式抽取 1/6`、`长文 0/2`）——按 coverage / rerank 置信度调放行路径。最高 ROI。
+2. **长文深埋事实**（`V101/V102` 0/2）：Parent Document Expansion（高分 chunk 拉同文档上下文，上限 8000 字符）。
+3. **跨语言 V119**：中文问→英文邮件埋点例外漏召——双语 query 扩展 / 别名映射。
+4. **B 类诱饵代号拒答残留**（`V086/V087/V092`）：需语义级代号核验，有误伤 answer 风险，谨慎。
+5. **OCR**：图片/扫描件 0/4 不可检索——大功能，接 tesseract 或视觉模型。
+6. **作答层评测盲区**：harness 只用 top-k 当代理，不给 LLM 答案文本判分——接 LLM-judge 闭环事实正确性/忠实度。
+
+---
+
+> 一句话：**核心检索与安全硬伤已基本收口，骨架是优等生；下阶段把"可对外交付"的工程/产品化短板（会话/限流/OpenAPI/CI 守门/规模压测）补齐，让成熟度叙事真正配得上实测。**

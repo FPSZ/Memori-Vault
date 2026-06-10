@@ -1,8 +1,12 @@
 ﻿# Memori-Vault Retrieval Rebuild Plan
 
-Last Updated: 2026-06-05 UTC
-Current Phase: Phase 6 - Validation
-Overall Progress: 92%
+Last Updated: 2026-06-10 UTC
+Current Phase: Phase 9 - 工程硬化 / 产品化
+Overall Progress: 检索/评测主线已收口（v2 困难基准 548 文档/126 题）；转入工程硬化阶段
+
+> **2026-06-10 阶段切换说明**：Phase 0–6 的检索重建主线已完成（v1 小语料退役、v2 困难基准建立、英文/跨语言覆盖、图谱提速、解析扩到 9 格式、拒答安全硬化）。Phase 7（检索增强）与 Phase 8（架构硬化）中多项已落地，**当前真实改进 backlog 与已解决项核实，见 `docs/planning/IMPROVEMENTS.md`（2026-06-10 重写为权威清单）**。下个阶段主线 = Phase 9 工程硬化 / 产品化。检索质量口径见 `docs/qa/RETRIEVAL_BASELINE_V2.md`。
+>
+> 下方 Phase 0–8 正文保留为历史执行记录，不再逐条勾选维护；以 IMPROVEMENTS.md 为准。
 
 ## 2026-06-05 Live Regression Update
 
@@ -465,6 +469,35 @@ GPT 修复计划（泛化去噪 + 覆盖率门控，无实体硬编码）：
 - 安全：OIDC 签名校验与 CORS allowlist 在 server 默认开启
 - 稳定：关键链路有可追踪 request-id，核心 SLO 可观测
 - 扩展：给出 50k+ 检索存储决策（含 benchmark 证据），并形成可执行迁移路径
+
+## Phase 9: 工程硬化 / 产品化（当前阶段，2026-06-10）
+
+**Goal**
+检索与安全硬伤已基本收口（v2 基准达标、OIDC 验签、CORS 白名单、storage 零 unwrap、上帝文件拆分、图谱提速）。本阶段把"**可对外交付**"的工程/产品化短板补齐，让成熟度叙事配得上实测。**口径与已解决项以 `docs/planning/IMPROVEMENTS.md` 为准。**
+
+### 9.1 工程硬化（P1，低风险，先做）
+- [ ] **E1** 合并重复 `modelUtils.ts ← models-helpers.ts`，删冗余、`tsc` 校验（task #38）
+- [ ] **E2** 会话管理：`POST /auth/logout` + 显式失效 + 最长会话上限 + 最小防重放（task #39）
+- [ ] **E3** CORS 收尾：`allow_methods/allow_headers` 从 `Any` 收成白名单（task #40）
+- [ ] **E4** 回归 CI 守门：离线/确定性 embedding 档跑阈值，关键指标低于版本化基线即红灯（task #41）
+
+### 9.2 产品化 / 可运维（P2）
+- [ ] **E5** `memori-server` OpenAPI/utoipa spec + Swagger UI + API 版本化（task #42）
+- [ ] **E6** 管理接口最小限流 + request-id 贯穿检索链路 trace（task #43）
+- [ ] **E7** 50k 规模本地压测：`doc_recall_ms/chunk_recall_ms/merge_ms/answer_ms` P50/P95 + 连接模型扩展决策文档（task #44）
+- [ ] **E8** README 成熟度对齐：✅已验证 / 🚧进行中 / 📐设计 状态徽标（task #45）
+
+### 9.3 大演进（P3，需求确认后排期）
+- [ ] **E9** 多租户 / 多资料库隔离（DB/索引/审计三层）——当前 OIDC 登录共享同库
+- [ ] **E10** 增量索引进度推送（SSE/WebSocket）
+- [ ] **E11** shell-service 共享层：收敛 desktop/server 的 settings/model/auth/audit 重复流程
+
+**Exit Criteria**
+- 工程：单一 model-helper 事实源；会话可主动失效；CORS 全维度白名单；CI 有检索质量阈值门。
+- 产品化：OpenAPI 可用；管理接口限流；一条 request-id 串起整链路；有 50k 规模 P50/P95 数据与扩展决策。
+- 文档：README 能力状态可一眼分清"已验证 vs 设计中"。
+
+**不在本阶段**（记录留档，后续单独成轮）：A 类 gating 误拒放行、长文 Parent-Doc 扩展、跨语言 V119 双语扩展、OCR、作答层 LLM-judge 评测——详见 `RETRIEVAL_BASELINE_V2.md` 与 IMPROVEMENTS.md 末节。
 
 ## Change Log
 变更日志已迁移至 `docs/planning/PLAN_CHANGELOG.md`，便于保持计划正文聚焦执行项。
