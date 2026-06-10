@@ -10,32 +10,32 @@ pub(crate) async fn append_audit_event(state: &ServerState, event: AuditEventDto
     let path = match audit_log_file_path() {
         Ok(path) => path,
         Err(err) => {
-            warn!(error = %err, "failed to resolve audit log path");
+            error!(error = %err, "audit event dropped: failed to resolve audit log path");
             return;
         }
     };
     if let Some(parent) = path.parent()
         && let Err(err) = fs::create_dir_all(parent)
     {
-        warn!(error = %err, path = %parent.display(), "failed to create audit log directory");
+        error!(error = %err, path = %parent.display(), "audit event dropped: failed to create audit log directory");
         return;
     }
     let line = match serde_json::to_string(&event) {
         Ok(line) => line,
         Err(err) => {
-            warn!(error = %err, "failed to serialize audit event");
+            error!(error = %err, "audit event dropped: failed to serialize audit event");
             return;
         }
     };
     let mut file = match fs::OpenOptions::new().create(true).append(true).open(&path) {
         Ok(file) => file,
         Err(err) => {
-            warn!(error = %err, path = %path.display(), "failed to open audit log file");
+            error!(error = %err, path = %path.display(), "audit event dropped: failed to open audit log file");
             return;
         }
     };
     if let Err(err) = writeln!(file, "{line}") {
-        warn!(error = %err, path = %path.display(), "failed to append audit event");
+        error!(error = %err, path = %path.display(), "audit event dropped: failed to append to audit log");
     }
 }
 

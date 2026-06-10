@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::{AppSettings, SETTINGS_APP_DIR_NAME, SETTINGS_FILE_NAME};
+use crate::{
+    AppSettings, KEYCHAIN_SENTINEL, SETTINGS_APP_DIR_NAME, SETTINGS_FILE_NAME, load_api_key,
+};
 
 pub(crate) fn app_settings_file_path() -> Result<PathBuf, String> {
     let config_root = dirs::config_dir().ok_or_else(|| "无法获取用户配置目录".to_string())?;
@@ -19,8 +21,13 @@ pub(crate) fn load_app_settings() -> Result<AppSettings, String> {
     let content = fs::read_to_string(&settings_file)
         .map_err(|err| format!("读取配置失败({}): {err}", settings_file.display()))?;
     let content = content.trim_start_matches('\u{feff}');
-    serde_json::from_str(content)
-        .map_err(|err| format!("解析配置失败({}): {err}", settings_file.display()))
+    let mut settings: AppSettings = serde_json::from_str(content)
+        .map_err(|err| format!("解析配置失败({}): {err}", settings_file.display()))?;
+    // 透明替换 keychain 哨兵：JSON 里存的是 "__keychain__"，运行时替换为 OS keychain 实际密钥。
+    if settings.remote_api_key.as_deref() == Some(KEYCHAIN_SENTINEL) {
+        settings.remote_api_key = load_api_key();
+    }
+    Ok(settings)
 }
 
 pub(crate) fn save_app_settings(settings: &AppSettings) -> Result<(), String> {

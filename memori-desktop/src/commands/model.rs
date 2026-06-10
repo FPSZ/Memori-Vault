@@ -87,7 +87,21 @@ pub(crate) async fn set_model_settings(
     settings.remote_graph_endpoint = Some(normalized.remote_profile.graph_endpoint.clone());
     settings.remote_embed_endpoint = Some(normalized.remote_profile.embed_endpoint.clone());
     settings.remote_endpoint = Some(normalized.remote_profile.chat_endpoint.clone());
-    settings.remote_api_key = normalized.remote_profile.api_key.clone();
+    // API key 存 OS keychain；JSON 里只写哨兵。写 keychain 失败时降级为明文并警告。
+    settings.remote_api_key = match normalized.remote_profile.api_key.as_deref() {
+        Some(key) if !key.is_empty() => {
+            if let Err(err) = save_api_key(key) {
+                warn!(error = %err, "keychain 写入失败，降级为明文存储 API key");
+                Some(key.to_string())
+            } else {
+                Some(KEYCHAIN_SENTINEL.to_string())
+            }
+        }
+        _ => {
+            delete_api_key();
+            None
+        }
+    };
     settings.remote_chat_model = Some(normalized.remote_profile.chat_model.clone());
     settings.remote_graph_model = Some(normalized.remote_profile.graph_model.clone());
     settings.remote_embed_model = Some(normalized.remote_profile.embed_model.clone());

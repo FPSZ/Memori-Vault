@@ -15,6 +15,8 @@
 | S3 无会话失效 | 新增 `POST /api/auth/logout`(幂等+审计) + `enforce_session_cap` 活跃会话上限 2048(纯函数+单测) | `c32aa6d` |
 | C1 CI 仅 ubuntu | rust-ci.yml 拆 4 job；`clippy-test` 矩阵 ubuntu/windows/macos，Linux 条件装 apt deps | `c6aa666` |
 | C2 无依赖漏洞扫描 | 新增 `security` job：`EmbarkStudios/cargo-deny-action` check advisories+bans+sources + `pnpm audit --audit-level high`；新增 `deny.toml` | `c6aa666` |
+| S1 API key 明文存 JSON | `keychain.rs`：OS keychain 存储（Windows Credential Manager / macOS Keychain / Linux Secret Service）；JSON 只存哨兵 `__keychain__`；写 keychain 失败时降级明文+warn；读时透明替换 | 本次 |
+| S5 审计写失败静默丢弃 | `audit.rs` 所有 IO 失败从 `warn!` 升级为 `error!`（含 path 解析/目录创建/文件打开/写入），日志前缀 `audit event dropped:` | 本次 |
 
 > 全部经 `cargo fmt --check` + `cargo clippy --workspace -D warnings` + `tsc --noEmit` + 新单测，已 push 到 dev。下方原始清单保留作完整记录。
 
