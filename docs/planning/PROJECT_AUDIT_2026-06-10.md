@@ -5,6 +5,20 @@
 > 严重度：🔴 高（阻塞对外交付或有真实风险）｜🟡 中（应近期处理）｜🟢 低（defense-in-depth / 打磨）｜✅ 现状良好（不用动，列出以明确基线）。
 > backlog 编号 `E*` 见 `IMPROVEMENTS.md` / `plan.md` Phase 9；质量项见 `RETRIEVAL_BASELINE_V2.md`。
 
+## ✅ 本轮已修（2026-06-10，安全/工程速赢批）
+
+| 项 | 处置 | commit |
+|---|---|---|
+| D1 重复 model-helper | 删 `models-helpers.ts`，唯一引用方 ModelCard 改指 modelUtils；顺修漏 18004 的端口报错 | `c152872` |
+| F1 无 ErrorBoundary | 顶层 `ErrorBoundary` 包在 I18nProvider 外，渲染异常降级为错误页+重载，不再白屏 | `75ce914` |
+| S4 CORS methods/headers=Any | 收成 GET/POST/PUT/OPTIONS + Authorization/Content-Type | `f2e298a` |
+| S3 无会话失效 | 新增 `POST /api/auth/logout`(幂等+审计) + `enforce_session_cap` 活跃会话上限 2048(纯函数+单测) | `c32aa6d` |
+
+> 全部经 `cargo fmt --check` + `cargo clippy --workspace -D warnings` + `tsc --noEmit` + 新单测，已 push 到 dev。下方原始清单保留作完整记录。
+
+---
+
+
 ---
 
 ## A. 安全
