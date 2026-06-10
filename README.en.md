@@ -113,7 +113,7 @@ Real Chinese knowledge bases contain Simplified Chinese, Traditional Chinese, En
 - `snake_case`, `kebab-case`, `CamelCase`, paths, APIs, and function names.
 - Same-name files, duplicate document pairs, descriptive questions, and no-answer questions.
 
-The near-term quality target is a fixed 50-case test set: answer at least 45, answer at least 40 correctly, and hit citations/source groups at least 45 times.
+Validated against the **v2 hard benchmark** (548 documents / 126 cases, covering prose facts, multi-hop cross-document, table cell targeting, slideshow cross-page, temporal conflict, mixed-language, and refusal): top-3 document recall **0.925** · MRR **0.839** · refusal accuracy **0.881** · citation **1.000** (see `docs/qa/RETRIEVAL_BASELINE_V2.md`).
 
 ### 6. Official MCP for Agents
 
@@ -216,7 +216,7 @@ flowchart TD
 
 | Module | Responsibility |
 | --- | --- |
-| `memori-parser` | Parsing and semantic chunking for Markdown/TXT/PDF/DOCX and future formats |
+| `memori-parser` | Parsing and semantic chunking for Markdown/TXT/PDF/DOCX/PPTX/XLSX/.doc/.ppt/.xls |
 | `memori-storage` | SQLite schema, documents, chunks, FTS, graph, memory, lifecycle log |
 | `memori-core` | Query analysis, document routing, chunk retrieval, RRF/gating, Memory Router, Context Composer |
 | `memori-server` | Axum HTTP API, MCP endpoint, server runtime, private deployment entry |
@@ -252,25 +252,36 @@ Graph, conversation memory, and project memory are explanation/context layers by
 
 ## Current Status
 
-Implemented or partially implemented:
+### ✅ Verified and Working
 
-- Desktop QA, citations, evidence, settings, and model configuration.
-- Server HTTP API and MCP endpoint.
-- SQLite document indexing, FTS/dense hybrid retrieval, RRF/gating.
-- Memory Domain v1 with memory tables, lifecycle log, and memory MCP tools.
-- Trust Panel and structured source fields.
-- Source grouping and evidence compression.
-- Enterprise private deployment preview with RBAC, audit, egress policy, and backup/restore templates.
+- Desktop QA, citations, evidence, Trust Panel, settings, and model configuration (three-role split: chat / graph / embedding+rerank).
+- Server HTTP API (Axum), MCP endpoint (stdio + HTTP, off by default, requires Operator role).
+- Multi-format document ingestion: Markdown/TXT/PDF/DOCX/PPTX/XLSX/.xls/.doc/.ppt (ZIP / CFB / plain-text pipeline, with file-size and per-document chunk guards).
+- FTS + dense + rerank three-stage hybrid retrieval + RRF merge + strong-evidence gating.
+- **v2 hard benchmark** (548 documents / 126 cases covering prose facts, multi-hop, tables, slides, temporal conflict, mixed-language, and refusals): top-3 recall 0.925 · MRR 0.839 · refusal accuracy 0.881 · citation 1.000.
+- Memory Domain v1: memory tables, lifecycle log, Memory Router / Context Composer v1, memory MCP tools.
+- Evidence Firewall: `answer_source_mix` explicitly declares document_only / document_plus_memory / memory_only / insufficient.
+- Enterprise security: OIDC JWKS verification (default), per-handler RBAC (27/30 handlers self-guard), egress policy enforced at request time + audit, logout + session cap 2048, CORS allowlist, full audit log.
+- Top-level React ErrorBoundary (render failures degrade to an error page instead of a blank screen).
+- Cross-platform CI matrix (ubuntu / windows / macos) + dependency vulnerability scanning (cargo-deny + pnpm audit).
 
-Still in progress:
+### 🚧 Implemented but Still Improving
 
-- 50-case acceptance set: `answered >= 45/50`, `correct >= 40/50`, `citation/source_group_hit >= 45/50`.
-- PDF/DOCX/HTML ingestion hardening.
-- Lower gating false negatives, especially for `.txt`, Traditional Chinese, and duplicate document pairs.
-- Temporal graph explanation and graph visualization.
-- Markdown source-of-truth / export.
+- Gating false negatives (Type A): evidence is retrieved but cut by threshold; long-document deeply-buried facts and multi-format extraction hit rate still improving.
+- Graph extraction and entity-relationship API: working; graph visualization UI is limited.
+- Cross-language retrieval (Chinese query → English document): basic coverage; bilingual query expansion not complete.
+- Source preview and Markdown export.
+
+### 📐 Designed / Not Yet Implemented
+
+- LLM-judge evaluation loop for answer quality (current metrics cover retrieval only; no objective answer score).
+- Rate limiting for admin endpoints (brute-force protection), request-id/trace for retrieval pipeline.
+- OpenAPI / Swagger spec for memori-server.
+- API key storage via OS keychain (currently plain text in settings.json).
+- OCR (image and scanned-document files are not currently indexable).
 - Memory heat score, conflict resolver, lifecycle classifier.
-- Continued large-file split for maintainability.
+- 50k-scale load test (P50/P95 at scale not yet validated).
+- Multi-tenant isolation (currently all OIDC users share one vault).
 
 ---
 
