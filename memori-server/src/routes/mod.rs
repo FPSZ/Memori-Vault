@@ -1,4 +1,5 @@
-use axum::http::HeaderValue;
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
+use axum::http::{HeaderValue, Method};
 
 use crate::*;
 
@@ -82,9 +83,10 @@ pub(crate) fn build_router(app_state: ServerState) -> Router {
 }
 
 fn build_cors_layer() -> CorsLayer {
+    // 仅放行 API 实际用到的方法与头部（预检 OPTIONS 由 CorsLayer 自动处理）。
     CorsLayer::new()
-        .allow_methods(Any)
-        .allow_headers(Any)
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::OPTIONS])
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE])
         .allow_origin(resolve_allowed_origins())
 }
 

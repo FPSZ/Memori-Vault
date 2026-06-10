@@ -25,7 +25,7 @@ use memori_core::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
