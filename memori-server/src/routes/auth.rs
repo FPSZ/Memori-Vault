@@ -51,6 +51,8 @@ pub(crate) async fn oidc_login_handler(
     let session_token = Uuid::new_v4().to_string();
     {
         let mut sessions = state.sessions.lock().await;
+        // 清理过期会话 + 按上限淘汰最早签发的，避免会话表无限膨胀（内存 DoS）。
+        enforce_session_cap(&mut sessions, now, MAX_ACTIVE_SESSIONS);
         sessions.insert(
             session_token.clone(),
             SessionInfo {
@@ -97,4 +99,35 @@ pub(crate) async fn auth_me_handler(
         issued_at: session.issued_at,
         expires_at: session.expires_at,
     }))
+}
+
+/// 显式登出：使当前 bearer token 立即失效。幂等——重复登出或 token 不存在也返回 ok。
+pub(crate) async fn logout_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let Some(session_token) = extract_bearer_token(&headers) else {
+        return Err(ApiError::unauthorized(
+            "missing bearer token, nothing to log out",
+        ));
+    };
+    let removed = {
+        let mut sessions = state.sessions.lock().await;
+        sessions.remove(&session_token)
+    };
+    if let Some(session) = removed {
+        append_audit_event(
+            &state,
+            AuditEventDto {
+                actor: session.subject,
+                action: "auth.logout".to_string(),
+                resource: "session".to_string(),
+                timestamp: unix_now_secs(),
+                result: "ok".to_string(),
+                metadata: serde_json::json!({ "role": session.role }),
+            },
+        )
+        .await;
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
 }

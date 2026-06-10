@@ -36,6 +36,8 @@ const SETTINGS_APP_DIR_NAME: &str = "Memori-Vault";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const AUDIT_LOG_FILE_NAME: &str = "audit.log.jsonl";
 const DEFAULT_SESSION_TTL_SECS: i64 = 8 * 60 * 60;
+/// 活跃会话数上限：超过则淘汰最早签发的会话，防止会话表无限膨胀（内存 DoS）。
+const MAX_ACTIVE_SESSIONS: usize = 2048;
 
 mod audit;
 mod auth;

@@ -24,6 +24,7 @@ pub(crate) fn build_router(app_state: ServerState) -> Router {
         .route("/api/health", get(health))
         .route("/api/auth/oidc/login", post(oidc_login_handler))
         .route("/api/auth/me", get(auth_me_handler))
+        .route("/api/auth/logout", post(logout_handler))
         .route("/api/admin/health", get(admin_health_handler))
         .route("/api/admin/metrics", get(admin_metrics_handler))
         .route(

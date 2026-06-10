@@ -46,6 +46,26 @@ pub(crate) async fn require_session(
     Ok(session)
 }
 
+/// 先清掉已过期会话，再按上限淘汰最早签发的，使插入新会话后总数不超过 `cap`。
+/// 抽成纯函数便于单测；调用方持有 sessions 锁。
+pub(crate) fn enforce_session_cap(
+    sessions: &mut std::collections::HashMap<String, SessionInfo>,
+    now: i64,
+    cap: usize,
+) {
+    sessions.retain(|_, session| session.expires_at > now);
+    while sessions.len() >= cap {
+        let Some(oldest_token) = sessions
+            .iter()
+            .min_by_key(|(_, session)| session.issued_at)
+            .map(|(token, _)| token.clone())
+        else {
+            break;
+        };
+        sessions.remove(&oldest_token);
+    }
+}
+
 pub(crate) fn decode_jwt_claims(token: &str) -> Result<serde_json::Value, String> {
     let mut parts = token.split('.');
     let header = parts
@@ -361,5 +381,33 @@ mod tests {
             std::env::remove_var("MEMORI_INSECURE_OIDC_DEV_LOGIN");
         }
         assert!(!allow_insecure_oidc_dev_login());
+    }
+
+    fn session_at(issued_at: i64, expires_at: i64) -> SessionInfo {
+        SessionInfo {
+            subject: format!("s{issued_at}"),
+            role: Role::Viewer,
+            issued_at,
+            expires_at,
+        }
+    }
+
+    #[test]
+    fn enforce_session_cap_drops_expired_then_oldest() {
+        let now = 1_000;
+        let mut sessions = std::collections::HashMap::new();
+        sessions.insert("expired".to_string(), session_at(100, now - 1)); // 已过期
+        sessions.insert("old".to_string(), session_at(200, now + 10_000));
+        sessions.insert("mid".to_string(), session_at(300, now + 10_000));
+        sessions.insert("new".to_string(), session_at(400, now + 10_000));
+
+        // cap=3：先删过期(expired)→剩 3 个 == cap，再淘汰最早(old)→剩 2，给新插入留位。
+        enforce_session_cap(&mut sessions, now, 3);
+
+        assert!(!sessions.contains_key("expired"), "过期会话应被清掉");
+        assert!(!sessions.contains_key("old"), "达上限应淘汰最早签发的");
+        assert!(sessions.contains_key("mid"));
+        assert!(sessions.contains_key("new"));
+        assert!(sessions.len() < 3, "淘汰后应低于 cap，为新会话留位");
     }
 }
