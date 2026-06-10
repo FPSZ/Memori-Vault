@@ -1,0 +1,21 @@
+# cargo-deny 依赖审计配置
+# 仅检查安全漏洞 (advisories)、多版本/禁用包 (bans)、来源合法性 (sources)；
+# 暂不检查 licenses 以避免初期白名单噪声。
+
+[advisories]
+version = 2
+# yanked 的 crate 视为错误（已被上游撤回）
+yanked = "deny"
+
+[bans]
+# 同一 crate 多版本只警告，不阻断 CI
+multiple-versions = "warn"
+# 允许 Cargo.toml 中的 wildcard 版本约束（内部 workspace crate 常见）
+wildcards = "allow"
+deny = []
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

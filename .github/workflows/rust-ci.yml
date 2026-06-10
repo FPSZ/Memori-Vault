@@ -13,26 +13,14 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    name: fmt-clippy-test-ui-build
+  # ── 格式 + 版本一致性 + 文档链接（平台无关，单次运行）───────────────────
+  lint:
+    name: lint
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
 
       - name: Install Linux system dependencies (Tauri/WebKit/GTK)
         run: |
@@ -42,27 +30,18 @@ jobs:
           else
             WEBKIT_DEV_PKG=libwebkit2gtk-4.0-dev
           fi
-
           sudo apt-get install -y \
-            pkg-config \
-            patchelf \
-            libglib2.0-dev \
-            libgirepository1.0-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
+            pkg-config patchelf libglib2.0-dev libgirepository1.0-dev \
+            libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
             "$WEBKIT_DEV_PKG"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@v2
-
-      - name: Install UI dependencies
-        run: pnpm --dir ui install --frozen-lockfile
 
       - name: Check version consistency
         run: |
@@ -87,8 +66,8 @@ jobs:
           )
 
           echo "workspace version: $WORKSPACE_VERSION"
-          echo "ui version: $UI_VERSION"
-          echo "tauri version: $TAURI_VERSION"
+          echo "ui version:        $UI_VERSION"
+          echo "tauri version:     $TAURI_VERSION"
 
           if [ "$WORKSPACE_VERSION" != "$UI_VERSION" ] || [ "$WORKSPACE_VERSION" != "$TAURI_VERSION" ]; then
             echo "Version mismatch detected among Cargo workspace, ui/package.json, and memori-desktop/tauri.conf.json"
@@ -117,11 +96,104 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  # ── 编译 + Clippy + 单元测试（跨平台矩阵，捕获平台特定编译错误）──────────
+  clippy-test:
+    name: clippy-test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies (Tauri/WebKit/GTK)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          if apt-cache show libwebkit2gtk-4.1-dev >/dev/null 2>&1; then
+            WEBKIT_DEV_PKG=libwebkit2gtk-4.1-dev
+          else
+            WEBKIT_DEV_PKG=libwebkit2gtk-4.0-dev
+          fi
+          sudo apt-get install -y \
+            pkg-config patchelf libglib2.0-dev libgirepository1.0-dev \
+            libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            "$WEBKIT_DEV_PKG"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Lint (warnings as errors)
         run: cargo clippy --workspace -- -D warnings
 
       - name: Run tests
         run: cargo test --workspace
 
+  # ── UI 构建（平台无关，单次运行）───────────────────────────────────────
+  ui-build:
+    name: ui-build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install UI dependencies
+        run: pnpm --dir ui install --frozen-lockfile
+
       - name: Build UI
         run: pnpm --dir ui run build
+
+  # ── 依赖漏洞扫描（单次运行）────────────────────────────────────────────
+  security:
+    name: dependency-audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Audit Rust dependencies (advisories + bans + sources)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans sources
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install UI dependencies
+        run: pnpm --dir ui install --frozen-lockfile
+
+      - name: Audit npm dependencies (high severity and above)
+        run: pnpm --dir ui audit --audit-level high
