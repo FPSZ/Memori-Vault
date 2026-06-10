@@ -53,6 +53,9 @@ memori-core/examples/phase2_diagnose.rs
 .monkeycode/
 Logo/
 
+# 用户明确要求不入库的计划文档（保留本地，勿提交）
+docs/superpowers/plans/2026-06-05-email-memory-source.md
+
 # Test data
 Memory_Stress_Test
 Memory_Test_V2/target/
