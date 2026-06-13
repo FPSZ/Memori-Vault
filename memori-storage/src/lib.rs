@@ -471,6 +471,8 @@ struct CachedVector {
     doc_id: i64,
     file_path: PathBuf,
     embedding: Vec<f32>,
+    /// 预存 L2 模，dense 检索复用以省去内层重复开方（P4 精确加速）。
+    norm: f32,
 }
 
 const INDEX_STATUS_READY: &str = "ready";

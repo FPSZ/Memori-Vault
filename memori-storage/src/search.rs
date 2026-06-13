@@ -479,6 +479,7 @@ impl SqliteStore {
 
         let scope_matchers = build_scope_matchers(scope_paths);
 
+        let query_norm = l2_norm(&query_embedding);
         let mut top = {
             let cache_guard = self.cache.read().await;
             let mut scored = Vec::new();
@@ -486,7 +487,9 @@ impl SqliteStore {
                 .iter()
                 .filter(|item| matches_scopes(&item.file_path, &scope_matchers))
             {
-                let score = cosine_similarity(&query_embedding, &item.embedding)?;
+                // 预存模复用：与 cosine_similarity bit-identical，省内层重复开方。
+                let score =
+                    cosine_with_norms(&query_embedding, query_norm, &item.embedding, item.norm);
                 scored.push((item.chunk_id, score));
             }
 

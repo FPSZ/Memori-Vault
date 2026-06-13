@@ -199,6 +199,7 @@ impl SqliteStore {
                     chunk_id,
                     doc_id,
                     file_path: PathBuf::from(file_path),
+                    norm: l2_norm(&embedding),
                     embedding,
                 });
             }

@@ -173,6 +173,7 @@ impl SqliteStore {
                     chunk_id,
                     doc_id,
                     file_path: PathBuf::from(normalized_file_path.clone()),
+                    norm: l2_norm(&embedding),
                     embedding,
                 });
             }
