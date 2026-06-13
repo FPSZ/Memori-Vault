@@ -148,7 +148,7 @@ impl RateLimiter {
         Self::new(enabled, general_max, sensitive_max)
     }
 
-    fn new(enabled: bool, general_max: u32, sensitive_max: u32) -> Self {
+    pub(crate) fn new(enabled: bool, general_max: u32, sensitive_max: u32) -> Self {
         Self {
             enabled,
             sensitive: BucketConfig {

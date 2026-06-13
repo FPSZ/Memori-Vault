@@ -42,6 +42,8 @@ const MAX_ACTIVE_SESSIONS: usize = 2048;
 mod audit;
 mod auth;
 mod dto;
+#[cfg(test)]
+mod http_tests;
 mod mcp;
 mod middleware;
 mod model_fetch;
