@@ -43,6 +43,7 @@ mod audit;
 mod auth;
 mod dto;
 mod mcp;
+mod middleware;
 mod model_fetch;
 mod model_runtime;
 mod routes;
@@ -52,6 +53,7 @@ mod state;
 pub(crate) use audit::*;
 pub(crate) use auth::*;
 pub(crate) use dto::*;
+pub(crate) use middleware::*;
 // mcp types are accessed via crate::mcp:: path, no need for glob re-export
 pub(crate) use model_fetch::*;
 pub(crate) use model_runtime::*;
@@ -129,6 +131,7 @@ async fn main() {
         sessions: Arc::new(Mutex::new(HashMap::new())),
         metrics: Arc::new(ServerMetrics::default()),
         audit_file_lock: Arc::new(Mutex::new(())),
+        rate_limiter: Arc::new(RateLimiter::from_env()),
     };
     if std::env::args().any(|arg| arg == "--mcp-stdio") {
         if let Err(err) = mcp::transport_stdio::run_stdio_server(app_state).await {
@@ -149,7 +152,13 @@ async fn main() {
     };
 
     info!(addr = %bind_addr, "memori-server listening");
-    if let Err(err) = axum::serve(listener, app).await {
+    // 携带 ConnectInfo 以便限流中间件取到客户端 IP。
+    if let Err(err) = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    {
         error!(error = %err, "memori-server exited with error");
     }
 }

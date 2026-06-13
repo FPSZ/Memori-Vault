@@ -5,7 +5,7 @@ use std::sync::atomic::AtomicU64;
 use memori_core::MemoriEngine;
 use tokio::sync::Mutex;
 
-use crate::Role;
+use crate::{RateLimiter, Role};
 
 #[derive(Clone)]
 pub(crate) struct ServerState {
@@ -14,6 +14,7 @@ pub(crate) struct ServerState {
     pub(crate) sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pub(crate) metrics: Arc<ServerMetrics>,
     pub(crate) audit_file_lock: Arc<Mutex<()>>,
+    pub(crate) rate_limiter: Arc<RateLimiter>,
 }
 
 #[derive(Debug, Clone)]

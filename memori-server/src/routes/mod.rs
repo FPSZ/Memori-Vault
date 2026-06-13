@@ -9,6 +9,7 @@ mod auth;
 mod health;
 mod indexing;
 mod models;
+mod openapi;
 mod settings;
 
 pub(crate) use admin::*;
@@ -17,7 +18,13 @@ pub(crate) use auth::*;
 pub(crate) use health::*;
 pub(crate) use indexing::*;
 pub(crate) use models::*;
+pub(crate) use openapi::*;
 pub(crate) use settings::*;
+
+/// build_router 注册的、被 OpenAPI 路由表（openapi.rs `ROUTES`）覆盖的 REST 方法数。
+/// 不含 `/api/openapi.json` 自身。改路由须同步此常量与 `ROUTES`，否则单测失败。
+#[cfg(test)]
+pub(crate) const REST_ROUTE_METHOD_COUNT: usize = 33;
 
 pub(crate) fn build_router(app_state: ServerState) -> Router {
     Router::new()
@@ -79,7 +86,15 @@ pub(crate) fn build_router(app_state: ServerState) -> Router {
         .route("/api/model-settings/pull", post(pull_model_handler))
         .route("/api/settings/watch-root", post(set_watch_root_handler))
         .route("/api/settings/rank", post(rank_settings_query_handler))
+        .route("/api/openapi.json", get(openapi_spec_handler))
+        // 限流在路由内层（先于 handler，但在 CORS/request-id 之后），需 state 取限流器。
+        .layer(axum::middleware::from_fn_with_state(
+            app_state.clone(),
+            rate_limit_middleware,
+        ))
         .with_state(app_state)
+        // request-id/trace 在最外层：先建立 span，再经 CORS、限流、handler，响应回写头部。
+        .layer(axum::middleware::from_fn(request_id_trace_middleware))
         .layer(build_cors_layer())
 }
 
