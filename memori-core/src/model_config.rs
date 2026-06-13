@@ -236,106 +236,6 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn build_openai_url_adds_v1_for_plain_host() {
-        assert_eq!(
-            build_openai_url("https://api.example.com", "chat/completions"),
-            "https://api.example.com/v1/chat/completions"
-        );
-        assert_eq!(
-            build_openai_url("https://api.example.com", "responses"),
-            "https://api.example.com/v1/responses"
-        );
-        assert_eq!(
-            build_openai_url("https://api.example.com", "embeddings"),
-            "https://api.example.com/v1/embeddings"
-        );
-        assert_eq!(
-            build_openai_url("https://api.example.com", "models"),
-            "https://api.example.com/v1/models"
-        );
-    }
-
-    #[test]
-    fn build_openai_url_keeps_slash_versioned_host() {
-        assert_eq!(
-            build_openai_url("https://api.example.com/v1/", "chat/completions"),
-            "https://api.example.com/v1/chat/completions"
-        );
-        assert_eq!(
-            build_openai_url("https://api.example.com/custom/", "models"),
-            "https://api.example.com/custom/models"
-        );
-    }
-
-    #[test]
-    fn build_openai_url_hash_forces_exact_url() {
-        assert_eq!(
-            build_openai_url("https://api.example.com/custom#", "chat/completions"),
-            "https://api.example.com/custom"
-        );
-        assert_eq!(
-            build_openai_url("https://api.example.com/custom#", "responses"),
-            "https://api.example.com/custom"
-        );
-    }
-
-    fn sample_remote_runtime(rerank_enabled: bool, rerank_model: &str) -> RuntimeModelConfig {
-        RuntimeModelConfig {
-            provider: ModelProvider::OpenAiCompatible,
-            protocol: RemoteModelProtocol::OpenAiChatCompletions,
-            api_format: ChatApiFormat::Chat,
-            chat_endpoint: "https://models.company.local/v1".to_string(),
-            chat_model: "approved-chat".to_string(),
-            graph_endpoint: "https://models.company.local/v1".to_string(),
-            graph_model: "approved-chat".to_string(),
-            embed_endpoint: "https://models.company.local/v1".to_string(),
-            embed_model: "approved-embed".to_string(),
-            rerank_endpoint: "https://models.company.local/v1".to_string(),
-            rerank_model: rerank_model.to_string(),
-            rerank_enabled,
-            api_key: Some("secret".to_string()),
-            chat_context_length: None,
-            graph_context_length: None,
-            embed_context_length: None,
-            chat_concurrency: None,
-            graph_concurrency: None,
-            embed_concurrency: None,
-        }
-    }
-
-    #[test]
-    fn disabled_rerank_does_not_block_remote_runtime_allowlist() {
-        let policy = EnterpriseModelPolicy {
-            egress_mode: EgressMode::Allowlist,
-            allowed_model_endpoints: vec!["https://models.company.local/v1".to_string()],
-            allowed_models: vec!["approved-chat".to_string(), "approved-embed".to_string()],
-        };
-
-        let runtime = sample_remote_runtime(false, "gte-multilingual-reranker-base");
-        assert!(validate_runtime_model_settings(&policy, &runtime).is_ok());
-    }
-
-    #[test]
-    fn enabled_rerank_still_requires_allowlisted_model() {
-        let policy = EnterpriseModelPolicy {
-            egress_mode: EgressMode::Allowlist,
-            allowed_model_endpoints: vec!["https://models.company.local/v1".to_string()],
-            allowed_models: vec!["approved-chat".to_string(), "approved-embed".to_string()],
-        };
-
-        let runtime = sample_remote_runtime(true, "gte-multilingual-reranker-base");
-        let violation = validate_runtime_model_settings(&policy, &runtime)
-            .expect_err("enabled rerank should still be validated");
-        assert_eq!(violation.code, "model_not_allowlisted");
-        assert!(violation.message.contains("gte-multilingual-reranker-base"));
-    }
-}
-
 pub fn normalize_policy_endpoint(endpoint: &str) -> String {
     let trimmed = endpoint.trim();
     if trimmed.is_empty() {
@@ -470,4 +370,104 @@ pub fn validate_runtime_model_settings(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_openai_url_adds_v1_for_plain_host() {
+        assert_eq!(
+            build_openai_url("https://api.example.com", "chat/completions"),
+            "https://api.example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_openai_url("https://api.example.com", "responses"),
+            "https://api.example.com/v1/responses"
+        );
+        assert_eq!(
+            build_openai_url("https://api.example.com", "embeddings"),
+            "https://api.example.com/v1/embeddings"
+        );
+        assert_eq!(
+            build_openai_url("https://api.example.com", "models"),
+            "https://api.example.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn build_openai_url_keeps_slash_versioned_host() {
+        assert_eq!(
+            build_openai_url("https://api.example.com/v1/", "chat/completions"),
+            "https://api.example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_openai_url("https://api.example.com/custom/", "models"),
+            "https://api.example.com/custom/models"
+        );
+    }
+
+    #[test]
+    fn build_openai_url_hash_forces_exact_url() {
+        assert_eq!(
+            build_openai_url("https://api.example.com/custom#", "chat/completions"),
+            "https://api.example.com/custom"
+        );
+        assert_eq!(
+            build_openai_url("https://api.example.com/custom#", "responses"),
+            "https://api.example.com/custom"
+        );
+    }
+
+    fn sample_remote_runtime(rerank_enabled: bool, rerank_model: &str) -> RuntimeModelConfig {
+        RuntimeModelConfig {
+            provider: ModelProvider::OpenAiCompatible,
+            protocol: RemoteModelProtocol::OpenAiChatCompletions,
+            api_format: ChatApiFormat::Chat,
+            chat_endpoint: "https://models.company.local/v1".to_string(),
+            chat_model: "approved-chat".to_string(),
+            graph_endpoint: "https://models.company.local/v1".to_string(),
+            graph_model: "approved-chat".to_string(),
+            embed_endpoint: "https://models.company.local/v1".to_string(),
+            embed_model: "approved-embed".to_string(),
+            rerank_endpoint: "https://models.company.local/v1".to_string(),
+            rerank_model: rerank_model.to_string(),
+            rerank_enabled,
+            api_key: Some("secret".to_string()),
+            chat_context_length: None,
+            graph_context_length: None,
+            embed_context_length: None,
+            chat_concurrency: None,
+            graph_concurrency: None,
+            embed_concurrency: None,
+        }
+    }
+
+    #[test]
+    fn disabled_rerank_does_not_block_remote_runtime_allowlist() {
+        let policy = EnterpriseModelPolicy {
+            egress_mode: EgressMode::Allowlist,
+            allowed_model_endpoints: vec!["https://models.company.local/v1".to_string()],
+            allowed_models: vec!["approved-chat".to_string(), "approved-embed".to_string()],
+        };
+
+        let runtime = sample_remote_runtime(false, "gte-multilingual-reranker-base");
+        assert!(validate_runtime_model_settings(&policy, &runtime).is_ok());
+    }
+
+    #[test]
+    fn enabled_rerank_still_requires_allowlisted_model() {
+        let policy = EnterpriseModelPolicy {
+            egress_mode: EgressMode::Allowlist,
+            allowed_model_endpoints: vec!["https://models.company.local/v1".to_string()],
+            allowed_models: vec!["approved-chat".to_string(), "approved-embed".to_string()],
+        };
+
+        let runtime = sample_remote_runtime(true, "gte-multilingual-reranker-base");
+        let violation = validate_runtime_model_settings(&policy, &runtime)
+            .expect_err("enabled rerank should still be validated");
+        assert_eq!(violation.code, "model_not_allowlisted");
+        assert!(violation.message.contains("gte-multilingual-reranker-base"));
+    }
 }

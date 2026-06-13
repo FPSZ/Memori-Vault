@@ -546,137 +546,6 @@ fn normalize_inline_text(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{ChunkBlockKind, OVERLAP_SIZE, parse_and_chunk};
-
-    #[test]
-    fn headings_become_chunk_boundaries_with_metadata() {
-        let markdown = "# Alpha\n\nFirst paragraph.\n\n## Beta\n\nSecond paragraph.";
-        let chunks = parse_and_chunk("notes/test.md", markdown).expect("parse markdown");
-
-        assert!(chunks.len() >= 4);
-        assert_eq!(chunks[0].block_kind, ChunkBlockKind::Heading);
-        assert_eq!(chunks[0].heading_path, vec!["Alpha"]);
-        assert_eq!(chunks[1].heading_path, vec!["Alpha"]);
-        assert_eq!(chunks[2].heading_path, vec!["Alpha", "Beta"]);
-        assert_eq!(chunks[3].heading_path, vec!["Alpha", "Beta"]);
-    }
-
-    #[test]
-    fn code_block_and_list_stay_whole() {
-        let markdown = "# Section\n\n- item one\n- item two\n\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```";
-        let chunks = parse_and_chunk("notes/test.md", markdown).expect("parse markdown");
-
-        assert!(chunks.iter().any(|chunk| {
-            chunk.block_kind == ChunkBlockKind::List
-                && chunk.content.contains("- item one")
-                && chunk.content.contains("- item two")
-        }));
-        assert!(chunks.iter().any(|chunk| {
-            chunk.block_kind == ChunkBlockKind::CodeBlock
-                && chunk.content.contains("fn main()")
-                && chunk.content.contains("println!")
-        }));
-    }
-
-    #[test]
-    fn long_paragraph_splits_and_preserves_heading_path() {
-        let paragraph = "这是一个非常长的段落。".repeat(160);
-        let markdown = format!("# Weekly Report\n\n{paragraph}");
-        let chunks = parse_and_chunk("notes/test.md", &markdown).expect("parse markdown");
-
-        let long_chunks: Vec<_> = chunks
-            .iter()
-            .filter(|chunk| chunk.block_kind != ChunkBlockKind::Heading)
-            .collect();
-        assert!(long_chunks.len() >= 2);
-        assert!(
-            long_chunks
-                .iter()
-                .all(|chunk| chunk.heading_path == vec!["Weekly Report"])
-        );
-        assert!(long_chunks[1].content.chars().count() >= OVERLAP_SIZE / 2);
-    }
-
-    fn build_zip(path: &std::path::Path, parts: &[(&str, &str)]) {
-        let file = std::fs::File::create(path).expect("create zip");
-        let mut writer = zip::write::ZipWriter::new(file);
-        let options = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored);
-        for (name, content) in parts {
-            writer.start_file(*name, options).expect("start file");
-            std::io::Write::write_all(&mut writer, content.as_bytes()).expect("write entry");
-        }
-        writer.finish().expect("finish zip");
-    }
-
-    fn unique_temp(name: &str) -> std::path::PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        std::env::temp_dir().join(format!("memori_parser_{nanos}_{name}"))
-    }
-
-    #[test]
-    fn extract_pptx_reads_slide_text_in_order() {
-        let slide1 = r#"<?xml version="1.0"?><p:sld xmlns:a="a" xmlns:p="p"><p:cSld><p:spTree>
-<p:sp><p:txBody><a:p><a:r><a:t>银杏-18 冻结窗口</a:t></a:r></a:p>
-<a:p><a:r><a:t>每周三 19:40 至 21:10</a:t></a:r></a:p></p:txBody></p:sp>
-</p:spTree></p:cSld></p:sld>"#;
-        let slide2 = r#"<?xml version="1.0"?><p:sld xmlns:a="a" xmlns:p="p"><p:cSld><p:spTree>
-<p:sp><p:txBody><a:p><a:r><a:t>第二页 负责人苏澈</a:t></a:r></a:p></p:txBody></p:sp>
-</p:spTree></p:cSld></p:sld>"#;
-        let path = unique_temp("deck.pptx");
-        build_zip(
-            &path,
-            &[
-                ("ppt/slides/slide1.xml", slide1),
-                ("ppt/slides/slide2.xml", slide2),
-            ],
-        );
-
-        let text = super::extract_document_text(&path).expect("extract pptx");
-        let _ = std::fs::remove_file(&path);
-
-        assert!(text.contains("银杏-18 冻结窗口"), "got: {text}");
-        assert!(text.contains("每周三 19:40 至 21:10"), "got: {text}");
-        assert!(text.contains("第二页 负责人苏澈"), "got: {text}");
-        let p1 = text.find("银杏-18").unwrap();
-        let p2 = text.find("第二页").unwrap();
-        assert!(p1 < p2, "slide order not preserved: {text}");
-    }
-
-    #[test]
-    fn extract_xlsx_resolves_shared_and_inline_cells() {
-        let shared =
-            r#"<?xml version="1.0"?><sst><si><t>参数项</t></si><si><t>轮换窗口</t></si></sst>"#;
-        let sheet = r#"<?xml version="1.0"?><worksheet><sheetData>
-<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
-<row r="2"><c r="A2"><v>43</v></c><c r="B2" t="inlineStr"><is><t>每月第二个周四22:10</t></is></c></row>
-</sheetData></worksheet>"#;
-        let path = unique_temp("params.xlsx");
-        build_zip(
-            &path,
-            &[
-                ("xl/sharedStrings.xml", shared),
-                ("xl/worksheets/sheet1.xml", sheet),
-            ],
-        );
-
-        let text = super::extract_document_text(&path).expect("extract xlsx");
-        let _ = std::fs::remove_file(&path);
-
-        assert!(text.contains("轮换窗口"), "shared string missing: {text}");
-        assert!(text.contains("43"), "literal cell missing: {text}");
-        assert!(
-            text.contains("每月第二个周四22:10"),
-            "inline string missing: {text}"
-        );
-    }
-}
-
 // ============================================================================
 // Binary Document Text Extraction (docx / pdf)
 // ============================================================================
@@ -1339,4 +1208,135 @@ fn clean_extracted_document_text(text: &str) -> String {
         }
     }
     lines.join("\n").trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ChunkBlockKind, OVERLAP_SIZE, parse_and_chunk};
+
+    #[test]
+    fn headings_become_chunk_boundaries_with_metadata() {
+        let markdown = "# Alpha\n\nFirst paragraph.\n\n## Beta\n\nSecond paragraph.";
+        let chunks = parse_and_chunk("notes/test.md", markdown).expect("parse markdown");
+
+        assert!(chunks.len() >= 4);
+        assert_eq!(chunks[0].block_kind, ChunkBlockKind::Heading);
+        assert_eq!(chunks[0].heading_path, vec!["Alpha"]);
+        assert_eq!(chunks[1].heading_path, vec!["Alpha"]);
+        assert_eq!(chunks[2].heading_path, vec!["Alpha", "Beta"]);
+        assert_eq!(chunks[3].heading_path, vec!["Alpha", "Beta"]);
+    }
+
+    #[test]
+    fn code_block_and_list_stay_whole() {
+        let markdown = "# Section\n\n- item one\n- item two\n\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```";
+        let chunks = parse_and_chunk("notes/test.md", markdown).expect("parse markdown");
+
+        assert!(chunks.iter().any(|chunk| {
+            chunk.block_kind == ChunkBlockKind::List
+                && chunk.content.contains("- item one")
+                && chunk.content.contains("- item two")
+        }));
+        assert!(chunks.iter().any(|chunk| {
+            chunk.block_kind == ChunkBlockKind::CodeBlock
+                && chunk.content.contains("fn main()")
+                && chunk.content.contains("println!")
+        }));
+    }
+
+    #[test]
+    fn long_paragraph_splits_and_preserves_heading_path() {
+        let paragraph = "这是一个非常长的段落。".repeat(160);
+        let markdown = format!("# Weekly Report\n\n{paragraph}");
+        let chunks = parse_and_chunk("notes/test.md", &markdown).expect("parse markdown");
+
+        let long_chunks: Vec<_> = chunks
+            .iter()
+            .filter(|chunk| chunk.block_kind != ChunkBlockKind::Heading)
+            .collect();
+        assert!(long_chunks.len() >= 2);
+        assert!(
+            long_chunks
+                .iter()
+                .all(|chunk| chunk.heading_path == vec!["Weekly Report"])
+        );
+        assert!(long_chunks[1].content.chars().count() >= OVERLAP_SIZE / 2);
+    }
+
+    fn build_zip(path: &std::path::Path, parts: &[(&str, &str)]) {
+        let file = std::fs::File::create(path).expect("create zip");
+        let mut writer = zip::write::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, content) in parts {
+            writer.start_file(*name, options).expect("start file");
+            std::io::Write::write_all(&mut writer, content.as_bytes()).expect("write entry");
+        }
+        writer.finish().expect("finish zip");
+    }
+
+    fn unique_temp(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("memori_parser_{nanos}_{name}"))
+    }
+
+    #[test]
+    fn extract_pptx_reads_slide_text_in_order() {
+        let slide1 = r#"<?xml version="1.0"?><p:sld xmlns:a="a" xmlns:p="p"><p:cSld><p:spTree>
+<p:sp><p:txBody><a:p><a:r><a:t>银杏-18 冻结窗口</a:t></a:r></a:p>
+<a:p><a:r><a:t>每周三 19:40 至 21:10</a:t></a:r></a:p></p:txBody></p:sp>
+</p:spTree></p:cSld></p:sld>"#;
+        let slide2 = r#"<?xml version="1.0"?><p:sld xmlns:a="a" xmlns:p="p"><p:cSld><p:spTree>
+<p:sp><p:txBody><a:p><a:r><a:t>第二页 负责人苏澈</a:t></a:r></a:p></p:txBody></p:sp>
+</p:spTree></p:cSld></p:sld>"#;
+        let path = unique_temp("deck.pptx");
+        build_zip(
+            &path,
+            &[
+                ("ppt/slides/slide1.xml", slide1),
+                ("ppt/slides/slide2.xml", slide2),
+            ],
+        );
+
+        let text = super::extract_document_text(&path).expect("extract pptx");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(text.contains("银杏-18 冻结窗口"), "got: {text}");
+        assert!(text.contains("每周三 19:40 至 21:10"), "got: {text}");
+        assert!(text.contains("第二页 负责人苏澈"), "got: {text}");
+        let p1 = text.find("银杏-18").unwrap();
+        let p2 = text.find("第二页").unwrap();
+        assert!(p1 < p2, "slide order not preserved: {text}");
+    }
+
+    #[test]
+    fn extract_xlsx_resolves_shared_and_inline_cells() {
+        let shared =
+            r#"<?xml version="1.0"?><sst><si><t>参数项</t></si><si><t>轮换窗口</t></si></sst>"#;
+        let sheet = r#"<?xml version="1.0"?><worksheet><sheetData>
+<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+<row r="2"><c r="A2"><v>43</v></c><c r="B2" t="inlineStr"><is><t>每月第二个周四22:10</t></is></c></row>
+</sheetData></worksheet>"#;
+        let path = unique_temp("params.xlsx");
+        build_zip(
+            &path,
+            &[
+                ("xl/sharedStrings.xml", shared),
+                ("xl/worksheets/sheet1.xml", sheet),
+            ],
+        );
+
+        let text = super::extract_document_text(&path).expect("extract xlsx");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(text.contains("轮换窗口"), "shared string missing: {text}");
+        assert!(text.contains("43"), "literal cell missing: {text}");
+        assert!(
+            text.contains("每月第二个周四22:10"),
+            "inline string missing: {text}"
+        );
+    }
 }

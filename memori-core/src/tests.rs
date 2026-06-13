@@ -1728,7 +1728,7 @@ fn rerank_test_evidence(
 
 #[test]
 fn rerank_score_overrides_document_rank_when_present() {
-    let mut evidence = vec![
+    let mut evidence = [
         rerank_test_evidence("a.md", 1, 9.0, Some(0.10)),
         rerank_test_evidence("b.md", 2, 8.0, Some(0.30)),
         rerank_test_evidence("c.md", 3, 1.0, Some(0.90)),
@@ -1741,7 +1741,7 @@ fn rerank_score_overrides_document_rank_when_present() {
 
 #[test]
 fn rerank_absent_falls_back_to_document_rank_order() {
-    let mut evidence = vec![
+    let mut evidence = [
         rerank_test_evidence("a.md", 3, 1.0, None),
         rerank_test_evidence("b.md", 1, 1.0, None),
         rerank_test_evidence("c.md", 2, 1.0, None),
@@ -1754,7 +1754,7 @@ fn rerank_absent_falls_back_to_document_rank_order() {
 
 #[test]
 fn reranked_evidence_sorts_ahead_of_unreranked() {
-    let mut evidence = vec![
+    let mut evidence = [
         rerank_test_evidence("a.md", 1, 9.0, None),
         rerank_test_evidence("b.md", 5, 1.0, Some(0.01)),
     ];
