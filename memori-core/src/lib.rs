@@ -1,3 +1,4 @@
+mod answer_judge;
 mod embedding_client;
 mod engine;
 mod engine_retrieve;
@@ -759,6 +760,7 @@ impl Clone for MemoriEngine {
     }
 }
 
+pub use answer_judge::{AnswerJudgement, AnswerVerdict, judge_answer_correctness};
 pub(crate) use engine::{build_memory_context_for_prompt, should_allow_memory_only_answer};
 pub(crate) use indexing::*;
 pub(crate) use indexing_graph::*;

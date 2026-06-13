@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use memori_core::{
     AskStatus, GatingBreakdown, MEMORI_DB_PATH_ENV, MemoriEngine, RetrievalInspection,
-    RuntimeRetrievalBaseline, build_query_terms_for_offline_embedding,
+    RuntimeRetrievalBaseline, build_query_terms_for_offline_embedding, judge_answer_correctness,
 };
 use memori_parser::{extract_document_text, parse_and_chunk};
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,9 @@ struct CliArgs {
     /// When set, after running, compare summary metrics against the minimum
     /// thresholds in this JSON file and exit non-zero on any regression (CI gate).
     assert_thresholds: Option<PathBuf>,
+    /// When set (live mode only), generate the actual answer for answer-mode cases
+    /// and score it with the LLM judge (审计 Q3). Adds answer_correct_rate to summary.
+    judge: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -182,6 +185,15 @@ struct RegressionCaseResult {
     /// Note: the harness does not invoke the answer LLM, so this is
     /// retrieval/gating latency, not end-to-end answer-generation time.
     case_total_ms: u64,
+    /// 审计 Q3：--judge 下应答类案例的实际答案 + LLM judge 判定（其余为 None）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    answer_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    answer_verdict: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    answer_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    answer_judge_reason: Option<String>,
     notes: Option<String>,
 }
 
@@ -198,6 +210,10 @@ struct RegressionSummary {
     citation_validity_rate: f64,
     reject_correctness_rate: f64,
     rerank_applied_rate: f64,
+    /// 审计 Q3：--judge 下被判分的应答类案例数与平均答案正确分（correct=1/partial=0.5/
+    /// incorrect=0）。未开 --judge 时 judged=0、rate=0。
+    answer_judged_count: usize,
+    answer_correct_rate: f64,
     /// Retrieval+gating latency stats across non-timed-out cases (ms).
     avg_case_ms: f64,
     min_case_ms: u64,
@@ -382,6 +398,7 @@ fn assert_summary_thresholds(
             "chunk_mrr" => summary.chunk_mrr,
             "citation_validity_rate" => summary.citation_validity_rate,
             "reject_correctness_rate" => summary.reject_correctness_rate,
+            "answer_correct_rate" => summary.answer_correct_rate,
             other => return Err(format!("unknown threshold metric: {other}").into()),
         };
         if actual + 1e-9 < *min_value {
@@ -404,6 +421,7 @@ fn parse_args() -> Result<CliArgs, AnyError> {
     let mut max_case_secs = DEFAULT_MAX_CASE_SECS;
     let mut index_all = false;
     let mut assert_thresholds = None;
+    let mut judge = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -436,6 +454,7 @@ fn parse_args() -> Result<CliArgs, AnyError> {
                 let value = args.next().ok_or("--assert-thresholds requires a path")?;
                 assert_thresholds = Some(absolutize(&cwd, value));
             }
+            "--judge" => judge = true,
             "--mode" => {
                 let value = args.next().ok_or("--mode requires a value")?;
                 mode = EvaluationMode::parse(&value)?;
@@ -477,6 +496,7 @@ fn parse_args() -> Result<CliArgs, AnyError> {
         max_case_secs,
         index_all,
         assert_thresholds,
+        judge,
     })
 }
 
@@ -995,6 +1015,17 @@ async fn run_suite_cases(
             }
         }?;
         outcome.case_total_ms = case_started.elapsed().as_millis() as u64;
+
+        // 审计 Q3：--judge 下对应答类案例生成实际答案并由 LLM judge 判分。
+        // 仅 live 模式有意义（offline 无 chat 模型）；拒答类不判分。
+        if args.judge
+            && matches!(args.mode, EvaluationMode::LiveEmbedding)
+            && case.mode == RegressionMode::Answer
+            && !outcome.timed_out
+        {
+            judge_answer_case(engine, &args.watch_root, case, &mut outcome).await;
+        }
+
         if progress_case_passed(&outcome) {
             passed += 1;
         } else {
@@ -1015,6 +1046,53 @@ async fn run_suite_cases(
     }
 
     Ok((results, timeouts))
+}
+
+/// 审计 Q3：用真实问答管线（含 LLM 作答）生成答案，再用 LLM judge 对照
+/// target_clues 判分，把结果写回 outcome。任何失败仅记录、不中断回归。
+async fn judge_answer_case(
+    engine: &MemoriEngine,
+    watch_root: &Path,
+    case: &RegressionCase,
+    outcome: &mut RegressionCaseResult,
+) {
+    let scope_paths = case
+        .scope_paths
+        .iter()
+        .filter(|item| !item.trim().is_empty() && item.trim() != ".")
+        .map(|item| watch_root.join(item))
+        .collect::<Vec<_>>();
+    let scope_refs = if scope_paths.is_empty() {
+        None
+    } else {
+        Some(scope_paths.as_slice())
+    };
+
+    let response = match engine
+        .ask_structured(&case.query, None, scope_refs, None)
+        .await
+    {
+        Ok(response) => response,
+        Err(err) => {
+            outcome.answer_verdict = Some("error".to_string());
+            outcome.answer_judge_reason = Some(format!("作答失败: {err}"));
+            outcome.answer_score = Some(0.0);
+            return;
+        }
+    };
+    outcome.answer_text = Some(response.answer.clone());
+
+    match judge_answer_correctness(&case.query, &case.target_clues, &response.answer).await {
+        Ok(judgement) => {
+            outcome.answer_verdict = Some(format!("{:?}", judgement.verdict).to_ascii_lowercase());
+            outcome.answer_score = Some(judgement.score);
+            outcome.answer_judge_reason = Some(judgement.reason);
+        }
+        Err(err) => {
+            outcome.answer_verdict = Some("error".to_string());
+            outcome.answer_judge_reason = Some(format!("judge 失败: {err}"));
+        }
+    }
 }
 
 async fn run_case(
@@ -1132,6 +1210,10 @@ fn build_case_result(
         merge_ms: inspection.metrics.merge_ms,
         rerank_ms: inspection.metrics.rerank_ms,
         case_total_ms: 0,
+        answer_text: None,
+        answer_verdict: None,
+        answer_score: None,
+        answer_judge_reason: None,
         notes: case.notes.clone(),
     }
 }
@@ -1171,6 +1253,10 @@ fn timeout_case_result(case: &RegressionCase) -> RegressionCaseResult {
         merge_ms: 0,
         rerank_ms: 0,
         case_total_ms: 0,
+        answer_text: None,
+        answer_verdict: None,
+        answer_score: None,
+        answer_judge_reason: None,
         notes: case.notes.clone(),
     }
 }
@@ -1467,6 +1553,21 @@ fn summarize(results: &[RegressionCaseResult]) -> RegressionSummary {
             results.iter().filter(|case| case.rerank_applied).count(),
             results.len(),
         ),
+        answer_judged_count: results
+            .iter()
+            .filter(|case| case.answer_score.is_some())
+            .count(),
+        answer_correct_rate: {
+            let scores: Vec<f32> = results
+                .iter()
+                .filter_map(|case| case.answer_score)
+                .collect();
+            if scores.is_empty() {
+                0.0
+            } else {
+                scores.iter().map(|s| *s as f64).sum::<f64>() / scores.len() as f64
+            }
+        },
         avg_case_ms: {
             let timed: Vec<u64> = results
                 .iter()
@@ -1911,6 +2012,7 @@ mod tests {
                 target_clues: vec!["desktop-first".to_string()],
                 document_hit_rank: Some(1),
                 chunk_hit_rank: Some(1),
+                top_documents: Vec::new(),
                 top1_document_hit: true,
                 top1_chunk_hit: true,
                 top3_document_recall: true,
@@ -1931,6 +2033,10 @@ mod tests {
                 merge_ms: 1,
                 rerank_ms: 6,
                 case_total_ms: 12,
+                answer_text: None,
+                answer_verdict: None,
+                answer_score: None,
+                answer_judge_reason: None,
                 notes: None,
             },
             RegressionCaseResult {
@@ -1946,6 +2052,7 @@ mod tests {
                 target_clues: vec!["low".to_string()],
                 document_hit_rank: Some(2),
                 chunk_hit_rank: Some(4),
+                top_documents: Vec::new(),
                 top1_document_hit: false,
                 top1_chunk_hit: false,
                 top3_document_recall: true,
@@ -1966,6 +2073,10 @@ mod tests {
                 merge_ms: 1,
                 rerank_ms: 0,
                 case_total_ms: 5,
+                answer_text: None,
+                answer_verdict: None,
+                answer_score: None,
+                answer_judge_reason: None,
                 notes: None,
             },
             RegressionCaseResult {
@@ -1981,6 +2092,7 @@ mod tests {
                 target_clues: Vec::new(),
                 document_hit_rank: None,
                 chunk_hit_rank: None,
+                top_documents: Vec::new(),
                 top1_document_hit: false,
                 top1_chunk_hit: false,
                 top3_document_recall: false,
@@ -2001,6 +2113,10 @@ mod tests {
                 merge_ms: 0,
                 rerank_ms: 0,
                 case_total_ms: 5,
+                answer_text: None,
+                answer_verdict: None,
+                answer_score: None,
+                answer_judge_reason: None,
                 notes: None,
             },
         ];
@@ -2059,6 +2175,8 @@ mod tests {
                 citation_validity_rate: 1.0,
                 reject_correctness_rate: 1.0,
                 rerank_applied_rate: 1.0,
+                answer_judged_count: 0,
+                answer_correct_rate: 0.0,
                 avg_case_ms: 12.0,
                 min_case_ms: 12,
                 max_case_ms: 12,
@@ -2078,6 +2196,7 @@ mod tests {
                 target_clues: vec!["desktop-first".to_string()],
                 document_hit_rank: Some(1),
                 chunk_hit_rank: Some(1),
+                top_documents: Vec::new(),
                 top1_document_hit: true,
                 top1_chunk_hit: true,
                 top3_document_recall: true,
@@ -2098,6 +2217,10 @@ mod tests {
                 merge_ms: 1,
                 rerank_ms: 6,
                 case_total_ms: 12,
+                answer_text: None,
+                answer_verdict: None,
+                answer_score: None,
+                answer_judge_reason: None,
                 notes: None,
             }],
         };
