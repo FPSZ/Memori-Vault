@@ -5,7 +5,7 @@ import { CitationPanel } from "../panels/CitationPanel";
 import { EvidencePanel } from "../panels/EvidencePanel";
 import { MetricsPanel } from "../panels/MetricsPanel";
 import { TrustPanel } from "../panels/TrustPanel";
-import type { AskResponseStructured, MetricRow, VisibleCitation, VisibleEvidenceGroup } from "../types";
+import type { AskResponseStructured, MarkdownPlugins, MetricRow, VisibleCitation, VisibleEvidenceGroup } from "../types";
 import { useI18n } from "../../i18n";
 
 type TranslateFn = ReturnType<typeof useI18n>["t"];
@@ -29,8 +29,8 @@ type ResultStageProps = {
   expandedSourceKeys: Set<string>;
   onToggleSourceExpanded: (key: string) => void;
   onOpenSourceLocation: (path: string) => void;
-  markdownRemarkPlugins: unknown[];
-  markdownRehypePlugins: unknown[];
+  markdownRemarkPlugins: MarkdownPlugins;
+  markdownRehypePlugins: MarkdownPlugins;
   metricRows: MetricRow[];
   measuredMetricsTotalMs: number;
   t: TranslateFn;

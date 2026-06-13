@@ -2,15 +2,15 @@ import { ChevronDown, FolderOpen } from "lucide-react";
 import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import { buildCollapsedMarkdownPreview } from "../formatters";
-import type { Translate, VisibleCitation } from "../types";
+import type { MarkdownPlugins, Translate, VisibleCitation } from "../types";
 
 type CitationPanelProps = {
   visibleCitations: VisibleCitation[];
   expandedCitationKeys: Set<string>;
   onToggleCitationExpanded: (key: string) => void;
   onOpenSourceLocation: (path: string) => void;
-  markdownRemarkPlugins: any[];
-  markdownRehypePlugins: any[];
+  markdownRemarkPlugins: MarkdownPlugins;
+  markdownRehypePlugins: MarkdownPlugins;
   t: Translate;
 };
 

@@ -1,6 +1,11 @@
+import type { ComponentProps } from "react";
+import type ReactMarkdown from "react-markdown";
 import { useI18n } from "../i18n";
 
 export type Translate = ReturnType<typeof useI18n>["t"];
+
+/** react-markdown 的插件列表类型（PluggableList），从组件 props 派生，避免直接依赖 unified。 */
+export type MarkdownPlugins = NonNullable<ComponentProps<typeof ReactMarkdown>["remarkPlugins"]>;
 
 export type VaultStats = {
   documents: number;

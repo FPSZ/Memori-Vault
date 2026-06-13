@@ -1,13 +1,13 @@
 import { Atom, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { formatElapsed, statusToneClasses } from "../formatters";
-import type { AskResponseStructured, Translate } from "../types";
+import type { AskResponseStructured, MarkdownPlugins, Translate } from "../types";
 
 type AnswerPanelProps = {
   answerResponse: AskResponseStructured;
   lastSearchDurationMs: number | null;
-  markdownRemarkPlugins: any[];
-  markdownRehypePlugins: any[];
+  markdownRemarkPlugins: MarkdownPlugins;
+  markdownRehypePlugins: MarkdownPlugins;
   t: Translate;
 };
 

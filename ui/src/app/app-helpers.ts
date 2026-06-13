@@ -11,7 +11,7 @@ import type {
   ThemeMode
 } from "../components/settings/types";
 import type { Language } from "../i18n";
-import type { AppSettingsDto, VaultStats, VaultStatsRaw } from "./types";
+import type { AppSettingsDto, MarkdownPlugins, VaultStats, VaultStatsRaw } from "./types";
 
 import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
@@ -31,8 +31,8 @@ export const LOCAL_MODEL_ACTION_TIMEOUT_MS = 45000;
 export const INDEXING_ACTION_TIMEOUT_MS = 15000;
 export const DEFAULT_FONT_SCALE: FontScale = "m";
 export const MODEL_NOT_CONFIGURED_CODE = "model_not_configured";
-export const MARKDOWN_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
-export const MARKDOWN_REHYPE_PLUGINS = [rehypeRaw, rehypeSanitize, rehypeHighlight];
+export const MARKDOWN_REMARK_PLUGINS: MarkdownPlugins = [remarkGfm, remarkBreaks];
+export const MARKDOWN_REHYPE_PLUGINS: MarkdownPlugins = [rehypeRaw, rehypeSanitize, rehypeHighlight];
 
 export const SIDEBAR_WIDTH_STORAGE_KEY = "memori-sidebar-width";
 export const DEFAULT_SIDEBAR_WIDTH = 220;

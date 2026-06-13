@@ -6,15 +6,15 @@ import {
   formatEvidenceReason,
   isMarkdownFile
 } from "../formatters";
-import type { Translate, VisibleEvidenceGroup } from "../types";
+import type { MarkdownPlugins, Translate, VisibleEvidenceGroup } from "../types";
 
 type EvidencePanelProps = {
   visibleEvidenceGroups: VisibleEvidenceGroup[];
   expandedSourceKeys: Set<string>;
   onToggleSourceExpanded: (key: string) => void;
   onOpenSourceLocation: (path: string) => void;
-  markdownRemarkPlugins: any[];
-  markdownRehypePlugins: any[];
+  markdownRemarkPlugins: MarkdownPlugins;
+  markdownRehypePlugins: MarkdownPlugins;
   t: Translate;
 };
 
