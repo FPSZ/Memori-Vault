@@ -1,6 +1,37 @@
 use super::*;
+use rusqlite::OpenFlags;
+
+/// 统一连接 PRAGMA：WAL（读写不互斥）+ busy_timeout（避免瞬时锁冲突直接报错）+
+/// synchronous=NORMAL（WAL 下安全且更快）。写连接额外开 foreign_keys。
+fn configure_connection(conn: &Connection, read_only: bool) -> Result<(), StorageError> {
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(map_sqlite_error)?;
+    // 只读连接对 WAL 库设置 journal_mode 是无害 no-op；写连接真正切到 WAL。
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(map_sqlite_error)?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
+        .map_err(map_sqlite_error)?;
+    if !read_only {
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(map_sqlite_error)?;
+    }
+    Ok(())
+}
+
+/// 解析只读连接池大小：env `MEMORI_DB_READ_POOL_SIZE` 优先，缺省 4，上限 32。
+fn resolve_read_pool_size() -> usize {
+    std::env::var("MEMORI_DB_READ_POOL_SIZE")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(SqliteStore::DEFAULT_READ_POOL_SIZE)
+        .min(32)
+}
 
 impl SqliteStore {
+    /// 默认只读连接池大小（审计 P1：缓解单连接串行化）。可经
+    /// `MEMORI_DB_READ_POOL_SIZE` 覆盖；设 0 关闭池、检索回退写连接。
+    const DEFAULT_READ_POOL_SIZE: usize = 4;
+
     /// 打开数据库并初始化表结构。
     pub fn new(db_path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let db_path = db_path.as_ref();
@@ -8,13 +39,28 @@ impl SqliteStore {
             std::fs::create_dir_all(parent).map_err(StorageError::Io)?;
         }
 
-        let conn = Connection::open(db_path).map_err(map_sqlite_error)?;
-        conn.pragma_update(None, "foreign_keys", "ON")
+        // 写连接：建库 + WAL，使读写不互斥（WAL 下读者不阻塞单写者，反之亦然）。
+        let write_conn = Connection::open(db_path).map_err(map_sqlite_error)?;
+        configure_connection(&write_conn, false)?;
+        initialize_schema(&write_conn)?;
+
+        // 只读连接池：schema 建好后再开，WAL 下并发读检索热路径。
+        let pool_size = resolve_read_pool_size();
+        let mut read_pool = Vec::with_capacity(pool_size);
+        for _ in 0..pool_size {
+            let read_conn = Connection::open_with_flags(
+                db_path,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
             .map_err(map_sqlite_error)?;
-        initialize_schema(&conn)?;
+            configure_connection(&read_conn, true)?;
+            read_pool.push(Mutex::new(read_conn));
+        }
 
         Ok(Self {
-            conn: Mutex::new(conn),
+            write_conn: Mutex::new(write_conn),
+            read_pool,
+            read_cursor: std::sync::atomic::AtomicUsize::new(0),
             cache: RwLock::new(Vec::new()),
         })
     }
@@ -166,10 +212,37 @@ impl SqliteStore {
         Ok(cache_guard.len())
     }
 
+    /// 写连接锁：所有写、以及非检索读走这里（串行）。
     pub(crate) fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, StorageError> {
-        self.conn
+        self.write_conn
             .lock()
             .map_err(|_| StorageError::LockPoisoned("sqlite connection"))
+    }
+
+    /// 只读连接锁：检索热路径专用。轮询池内连接，try_lock 命中空闲即返回；
+    /// 全忙则阻塞等待游标指向的那个。池为空时回退写连接（保持改造前行为）。
+    /// WAL 下读者读到的是最后一次已提交事务——索引提交后检索可见，满足一致性。
+    pub(crate) fn lock_read_conn(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Connection>, StorageError> {
+        if self.read_pool.is_empty() {
+            return self.lock_conn();
+        }
+        let len = self.read_pool.len();
+        let start = self
+            .read_cursor
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            % len;
+        for offset in 0..len {
+            let idx = (start + offset) % len;
+            if let Ok(guard) = self.read_pool[idx].try_lock() {
+                return Ok(guard);
+            }
+        }
+        // 全忙：阻塞在轮询起点那个，避免忙等。
+        self.read_pool[start]
+            .lock()
+            .map_err(|_| StorageError::LockPoisoned("sqlite read connection"))
     }
 
     /// 统计 documents 表总行数。

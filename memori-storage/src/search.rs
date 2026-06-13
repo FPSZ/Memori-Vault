@@ -58,7 +58,7 @@ impl SqliteStore {
 
         let scope_matchers = build_scope_matchers(scope_paths);
         let fetch_limit = i64::try_from(top_k.saturating_mul(4).max(top_k)).unwrap_or(i64::MAX);
-        let conn_guard = self.lock_conn()?;
+        let conn_guard = self.lock_read_conn()?;
         let mut stmt = conn_guard
             .prepare(
                 "SELECT c.id,
@@ -128,7 +128,7 @@ impl SqliteStore {
 
         let scope_matchers = build_scope_matchers(scope_paths);
         let fetch_limit = i64::try_from(top_k.saturating_mul(6).max(top_k)).unwrap_or(i64::MAX);
-        let conn_guard = self.lock_conn()?;
+        let conn_guard = self.lock_read_conn()?;
         let mut stmt = conn_guard
             .prepare(
                 "SELECT c.id,
@@ -198,7 +198,7 @@ impl SqliteStore {
 
         let scope_matchers = build_scope_matchers(scope_paths);
         let fetch_limit = i64::try_from(top_k.saturating_mul(4).max(top_k)).unwrap_or(i64::MAX);
-        let conn_guard = self.lock_conn()?;
+        let conn_guard = self.lock_read_conn()?;
         let mut stmt = conn_guard
             .prepare(
                 "SELECT d.id,
@@ -260,7 +260,7 @@ impl SqliteStore {
 
         let scope_matchers = build_scope_matchers(scope_paths);
         let fetch_limit = i64::try_from(top_k.saturating_mul(6).max(top_k)).unwrap_or(i64::MAX);
-        let conn_guard = self.lock_conn()?;
+        let conn_guard = self.lock_read_conn()?;
         let mut stmt = conn_guard
             .prepare(
                 "SELECT d.id,
@@ -323,7 +323,7 @@ impl SqliteStore {
         }
 
         let scope_matchers = build_scope_matchers(scope_paths);
-        let conn_guard = self.lock_conn()?;
+        let conn_guard = self.lock_read_conn()?;
         let mut stmt = conn_guard
             .prepare(
                 "SELECT d.file_path,
@@ -403,7 +403,7 @@ impl SqliteStore {
         }
 
         let scope_matchers = build_scope_matchers(scope_paths);
-        let conn_guard = self.lock_conn()?;
+        let conn_guard = self.lock_read_conn()?;
         let mut stmt = conn_guard
             .prepare(
                 "SELECT d.file_path,
@@ -502,7 +502,7 @@ impl SqliteStore {
             return Ok(Vec::new());
         }
 
-        let conn_guard = self.lock_conn()?;
+        let conn_guard = self.lock_read_conn()?;
         let mut stmt = conn_guard
             .prepare(
                 "SELECT c.chunk_index, c.content, d.file_path, c.heading_path_json, c.block_kind

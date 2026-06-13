@@ -1,0 +1,72 @@
+{
+  "app_version": "1.5.2",
+  "docs": 1000,
+  "sections_per_doc": 50,
+  "indexed_chunks": 101000,
+  "queries": 300,
+  "concurrency": 8,
+  "index_ms": 50355,
+  "sequential_total": {
+    "samples": 300,
+    "p50_ms": 167.125,
+    "p95_ms": 179.478,
+    "p99_ms": 193.279,
+    "max_ms": 222.259,
+    "avg_ms": 168.90970333333334
+  },
+  "sequential_stages": {
+    "doc_recall": {
+      "samples": 300,
+      "p50_ms": 119.0,
+      "p95_ms": 129.0,
+      "p99_ms": 140.0,
+      "max_ms": 157.0,
+      "avg_ms": 120.50666666666667
+    },
+    "doc_dense": {
+      "samples": 300,
+      "p50_ms": 23.0,
+      "p95_ms": 24.0,
+      "p99_ms": 25.0,
+      "max_ms": 27.0,
+      "avg_ms": 23.1
+    },
+    "chunk_lexical": {
+      "samples": 300,
+      "p50_ms": 43.0,
+      "p95_ms": 47.0,
+      "p99_ms": 49.0,
+      "max_ms": 59.0,
+      "avg_ms": 43.763333333333335
+    },
+    "chunk_dense": {
+      "samples": 300,
+      "p50_ms": 43.0,
+      "p95_ms": 47.0,
+      "p99_ms": 49.0,
+      "max_ms": 59.0,
+      "avg_ms": 43.763333333333335
+    },
+    "merge": {
+      "samples": 300,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 1.0,
+      "max_ms": 1.0,
+      "avg_ms": 0.02333333333333333
+    }
+  },
+  "concurrent_total": {
+    "samples": 300,
+    "p50_ms": 286.627,
+    "p95_ms": 434.808,
+    "p99_ms": 520.978,
+    "max_ms": 566.918,
+    "avg_ms": 297.91575
+  },
+  "concurrent_wall_ms": 11248,
+  "sequential_throughput_qps": 5.920312592504884,
+  "concurrent_throughput_qps": 26.671408250355622,
+  "contention_factor": 1.7150456245325356,
+  "verdict": "并发 P50 ≈ 1.7× 顺序，吞吐 4.51×——当前规模下争用不显著，P1 可暂缓。"
+}

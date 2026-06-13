@@ -524,7 +524,14 @@ pub(crate) use text_score::*;
 
 #[derive(Debug)]
 pub struct SqliteStore {
-    conn: Mutex<Connection>,
+    /// 单写连接：所有写 + 非检索读走这里，串行化保证写一致性（SQLite 单写者模型）。
+    write_conn: Mutex<Connection>,
+    /// 只读连接池：检索热路径（search.rs 的 SELECT）从这里取连接，WAL 下并发读
+    /// 互不阻塞、也不被写连接阻塞，缓解审计 P1 的单连接串行化（实测争用系数 6.26×）。
+    /// 池为空时检索回退到 `write_conn`（行为与改造前一致）。
+    read_pool: Vec<Mutex<Connection>>,
+    /// 取只读连接的轮询游标。
+    read_cursor: std::sync::atomic::AtomicUsize,
     cache: RwLock<Vec<CachedVector>>,
 }
 
