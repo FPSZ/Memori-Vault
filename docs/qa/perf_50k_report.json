@@ -1,0 +1,72 @@
+{
+  "app_version": "1.5.2",
+  "docs": 1000,
+  "sections_per_doc": 50,
+  "indexed_chunks": 101000,
+  "queries": 300,
+  "concurrency": 8,
+  "index_ms": 96944,
+  "sequential_total": {
+    "samples": 300,
+    "p50_ms": 251.36,
+    "p95_ms": 330.036,
+    "p99_ms": 365.122,
+    "max_ms": 570.489,
+    "avg_ms": 260.14308
+  },
+  "sequential_stages": {
+    "doc_recall": {
+      "samples": 300,
+      "p50_ms": 185.0,
+      "p95_ms": 253.0,
+      "p99_ms": 285.0,
+      "max_ms": 441.0,
+      "avg_ms": 192.94
+    },
+    "doc_dense": {
+      "samples": 300,
+      "p50_ms": 30.0,
+      "p95_ms": 37.0,
+      "p99_ms": 43.0,
+      "max_ms": 56.0,
+      "avg_ms": 30.706666666666667
+    },
+    "chunk_lexical": {
+      "samples": 300,
+      "p50_ms": 59.0,
+      "p95_ms": 75.0,
+      "p99_ms": 84.0,
+      "max_ms": 120.0,
+      "avg_ms": 60.79666666666667
+    },
+    "chunk_dense": {
+      "samples": 300,
+      "p50_ms": 59.0,
+      "p95_ms": 75.0,
+      "p99_ms": 84.0,
+      "max_ms": 120.0,
+      "avg_ms": 60.79666666666667
+    },
+    "merge": {
+      "samples": 300,
+      "p50_ms": 1.0,
+      "p95_ms": 1.0,
+      "p99_ms": 1.0,
+      "max_ms": 2.0,
+      "avg_ms": 0.66
+    }
+  },
+  "concurrent_total": {
+    "samples": 300,
+    "p50_ms": 1573.742,
+    "p95_ms": 2193.538,
+    "p99_ms": 2488.049,
+    "max_ms": 2891.76,
+    "avg_ms": 1627.1278066666666
+  },
+  "concurrent_wall_ms": 61133,
+  "sequential_throughput_qps": 3.8440346988198812,
+  "concurrent_throughput_qps": 4.90733319156593,
+  "contention_factor": 6.2609086569064285,
+  "verdict": "并发 P50 ≈ 6.3× 顺序（并发度 8），吞吐仅 1.28× ——读被单 Mutex<Connection> 严重串行化，P1 改造（WAL 只读连接池）收益明确。"
+}
