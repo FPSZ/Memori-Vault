@@ -62,6 +62,8 @@ llama-server -m /path/to/bge-reranker-v2-m3-Q4_K_M.gguf --reranking --pooling ra
 ```
 The rerank server (port 18004) must be launched with `--reranking --pooling rank`. Note: the older `gte-multilingual-reranker-base` (`new` architecture) no longer loads on current llama.cpp builds, which is why the default rerank model is now `bge-reranker-v2-m3`.
 
+**Single-GPU VRAM note:** the chat model (e.g. Qwen3-14B ≈ 8.5 GB) plus embedding (≈ 2.4 GB) and rerank (≈ 0.4 GB) can exceed one GPU's VRAM. When VRAM is oversubscribed, llama.cpp may spill a model to CPU, which can slow embedding/indexing by ~10×. On a single GPU, prefer not running heavy chat indexing concurrently, cap layers with `-ngl`, or stagger the roles. The embedding throughput directly gates index-rebuild time.
+
 ## 4. Search Workflow
 
 1. Ask a question in the search box.
