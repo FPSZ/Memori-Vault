@@ -31,6 +31,15 @@
 
 | ID | 严重度 | 问题 | 证据 | 处置 |
 |---|---|---|---|---|
+| S2(E6) 限流 + G2 request-id/trace | `middleware.rs`：按 IP 固定窗口限流（登录/admin 严格桶 20/min、其余 600/min，可 env 调），超限 429+Retry-After；request-id 中间件透传/生成 `x-request-id` 并建 tracing span（检索链路日志可按请求聚合），响应回写头部 | 本次 |
+| G1(E5) OpenAPI | `routes/openapi.rs`：表驱动生成 OpenAPI 3.1，`GET /api/openapi.json` 暴露；路由表覆盖全 33 个 REST 方法，附漂移自检单测 | 本次 |
+| P2/P1(E7) 50k 压测 | `examples/perf_scale.rs`：101k chunks 顺序 P50/P95=251/330ms，并发 8 P50=1574ms，**争用系数 6.26×**→证实单 Mutex 串行化读，P1 改造收益明确（见 `docs/qa/PERF_SCALE_50K.md`） | 本次 |
+| D2(E4) 检索 CI 质量门 | `retrieval_regression --assert-thresholds` + 自带纯文本 fixture 套件（`docs/qa/ci_fixtures/` 12 文档 + `retrieval_regression_ci.json` 14 case）；新增 CI job `retrieval-gate`（offline 确定性，阈值见 `retrieval_regression_ci_thresholds.json`），排序/gating 退步即拦 | 本次 |
+
+> 下表为审计原始清单（保留）。
+
+| ID | 严重度 | 问题 | 证据 | 处置 |
+|---|---|---|---|---|
 | S1 | 🟡 中 | 远程 API Key 以明文存 `settings.json`，无 OS keychain | `memori-desktop/src/model_settings.rs` `api_key`/`remote_api_key` | 新增（建议接 keyring） |
 | S2 | 🟡 中 | **无任何接口限流**，登录/admin 可被暴力 | server 无 governor/tower::limit | E6 |
 | S3 | 🟡 中 | 无登出/会话主动失效，仅 8h TTL | `main.rs:38 DEFAULT_SESSION_TTL_SECS`，无 logout 路由 | E2 |
