@@ -1,12 +1,64 @@
 ﻿# Memori-Vault Retrieval Rebuild Plan
 
-Last Updated: 2026-06-10 UTC
-Current Phase: Phase 9 - 工程硬化 / 产品化
-Overall Progress: 检索/评测主线已收口（v2 困难基准 548 文档/126 题）；转入工程硬化阶段
+Last Updated: 2026-06-13 UTC
+Current Phase: Phase 9 收尾 → 待开「质量轮」
+Overall Progress: 工程硬化批 (E1–E8 + 审计安全/CI/前端速赢) 全部落地并 push；剩余 = 质量轮 (Q1/Q2/Q4/Q5/Q6) + 大演进 (E9/E10/E11) + 规模档 (真 HNSW)
 
 > **2026-06-10 阶段切换说明**：Phase 0–6 的检索重建主线已完成（v1 小语料退役、v2 困难基准建立、英文/跨语言覆盖、图谱提速、解析扩到 9 格式、拒答安全硬化）。Phase 7（检索增强）与 Phase 8（架构硬化）中多项已落地，**当前真实改进 backlog 与已解决项核实，见 `docs/planning/IMPROVEMENTS.md`（2026-06-10 重写为权威清单）**。下个阶段主线 = Phase 9 工程硬化 / 产品化。检索质量口径见 `docs/qa/RETRIEVAL_BASELINE_V2.md`。
 >
 > 下方 Phase 0–8 正文保留为历史执行记录，不再逐条勾选维护；以 IMPROVEMENTS.md 为准。
+
+## 现状重新评判（2026-06-13，按提交核实）
+
+> 一次跨审计 + git log 的真实状态盘点。每条以已合并 commit 为证；未做项标明卡点（非"没空"，而是各自需要独立投入或外部决策）。审计原始清单见 `PROJECT_AUDIT_2026-06-10.md`。
+
+### ✅ 已做（已 push 到 dev，全绿）
+
+| 类别 | 项 | commit |
+| --- | --- | --- |
+| 安全 | S1 API key 接 OS keychain（JSON 仅存哨兵，写失败降级+warn） | `c7a7d73` |
+| 安全 | S5 审计写失败 warn→error（IO 全链路升级告警） | `c7a7d73` |
+| 安全 | S3 登出端点 + 活跃会话上限 2048 | `c32aa6d` |
+| 安全 | S4 CORS methods/headers 收成白名单 | `f2e298a` |
+| 安全 | S6 桌面 open/preview 加 watch_root 越权校验 | `29ec8be` |
+| 安全 | S2/G2(E6) 接口限流（IP 固定窗口，登录/admin 严格桶）+ request-id/trace | `254d749` |
+| 产品化 | G1(E5) OpenAPI 3.1 表驱动 + `/api/openapi.json` + 漂移自检 | `254d749` |
+| 扩展性 | P1 单连接锁改造：WAL + 只读连接池（争用 6.26×→1.72×，并发吞吐 5.4×） | `c8becd6` |
+| 扩展性 | P2(E7) 50k 压测 harness（顺序/并发 P50/P95/P99，CI 可复跑） | `7b2ea84` |
+| 扩展性 | P4-lite dense 检索预存向量模（精确无损，doc_dense 23→19ms） | `7b978f5` |
+| 评测 | Q3 作答层 LLM-judge 闭环（correct/partial/incorrect + harness `--judge`） | `b937fab` |
+| CI | D2(E4) 检索指标离线确定性质量门（`--assert-thresholds` + fixture + job） | `74b2a85` |
+| CI | C1/C2 跨平台矩阵(ubuntu/windows/macos) + cargo-deny + pnpm audit | `c6aa666` |
+| CI | 工程硬化：clippy/test 升级 `--all-targets` + HTTP 端到端集成测试 | `83ec3ff`/`53cae1c` |
+| 前端 | F1(E12) 顶层 React ErrorBoundary 防整页白屏 | `75ce914` |
+| 前端 | F2 markdown 插件去 any/unknown[] → `MarkdownPlugins` | `c5259a3` |
+| 工程 | D1(E1) 合并重复 model-helper，删 `models-helpers.ts` | `c152872` |
+| 文档 | H1(E8) README 成熟度徽标 ✅/🚧/📐 | `17e5987` |
+| 卫生 | I1 email-memory-source 计划文档加 `.gitignore`（决定不入库） | `46ae244` |
+| 检索主线 | 解析扩到 9 格式 + v2 困难基准（548 文档/126 题）+ 英文/跨语言 + 拒答硬化 | `25654ec`/`22064fc`/`154372f`/`9c5f77f` |
+
+→ **审计里所有"低风险、可量化、可一轮闭环"的项已全部清完。**
+
+### ❌ 未做（按卡点分类，非工作量问题）
+
+| 项 | 严重度 | 卡点 / 为什么没做 | 性质 |
+| --- | --- | --- | --- |
+| **Q1** gating 误拒放行（多格式抽取 1/6、长文 0/2 被阈值 55 砍） | 🔴 | 诱饵/拒答文档也在 rank1，盲放阈值会放过 PII/注入。须用 Q3 judge 做"答案↑且拒答不↓"多轮 live 迭代，每轮 ~40min + 本机显存冲突。红线=reject 不退 | 质量轮（Q3 已铺路） |
+| **Q2** 长文深埋事实 0/2（doc rank1 但 chunk rank2-4 被拒） | 🔴 | Parent-Document Expansion（同文档 chunk 合并），与 Q1 同属 gating/证据构建轮，需一起验 | 质量轮 |
+| **Q4** 跨语言漏召（中文问→英文埋点例外） | 🟡 | 需双语 query 扩展 + 不污染单语盘面，须 live 验证 | 质量轮 |
+| **Q5** 诱饵代号拒答泄露（V086/V087/V092） | 🟡 | 需语义级核验，有误伤正常代号风险，须谨慎迭代 | 质量轮（谨慎） |
+| **Q6** OCR：图片/扫描件 0/4 不可检索 | 🟡 | 需集成 OCR 引擎 + 图像预处理 + 端到端索引，多日大功能 | 大功能（多轮） |
+| **E9/G3** 多租户 / 多资料库隔离（DB/索引/审计三层） | 🟢 | 需先定租户模型（产品决策），不是纯工程 | 待需求确认 |
+| **E10/G4** 增量索引进度推送（SSE/WebSocket） | 🟢 | 独立功能，需前后端协同设计 | 独立功能 |
+| **E11** shell-service 共享层（收敛 desktop/server 重复流程） | 🟢 | 大重构，收益是可维护性而非功能，低优先 | 重构（低优先） |
+| **P4** 真 HNSW/ANN 近似检索 | 🟢 | 会改检索结果 + 新依赖 + recall 调参；当前规模(dense 39ms)不紧急。已做无损常量级加速过渡 | 下一规模档(>500k chunks) |
+| **C3** Windows GBK→UTF-8 乱码复核 | 🟢 | 需在 Windows 上实跑复核是否仍现（C1 矩阵已含 windows job，可借其输出核） | 待复核 |
+
+### 推荐推进顺序
+
+1. **质量轮（Q1+Q2 优先，Q4/Q5 同轮）** — 价值最高，Q3 judge 基础设施已就绪；红线"reject 不退"，每改一次 gating 跑 `--judge` 全量验"答案对↑ 且 拒答对不↓"。
+2. **Q6 OCR** — 覆盖面，独立大功能可单独成轮。
+3. **E9/E10/E11、P4 HNSW** — 需产品决策或规模到了再做。
 
 ## 2026-06-05 Live Regression Update
 
@@ -475,22 +527,24 @@ GPT 修复计划（泛化去噪 + 覆盖率门控，无实体硬编码）：
 **Goal**
 检索与安全硬伤已基本收口（v2 基准达标、OIDC 验签、CORS 白名单、storage 零 unwrap、上帝文件拆分、图谱提速）。本阶段把"**可对外交付**"的工程/产品化短板补齐，让成熟度叙事配得上实测。**口径与已解决项以 `docs/planning/IMPROVEMENTS.md` 为准。**
 
-### 9.1 工程硬化（P1，低风险，先做）
-- [ ] **E1** 合并重复 `modelUtils.ts ← models-helpers.ts`，删冗余、`tsc` 校验（task #38）
-- [ ] **E2** 会话管理：`POST /auth/logout` + 显式失效 + 最长会话上限 + 最小防重放（task #39）
-- [ ] **E3** CORS 收尾：`allow_methods/allow_headers` 从 `Any` 收成白名单（task #40）
-- [ ] **E4** 回归 CI 守门：离线/确定性 embedding 档跑阈值，关键指标低于版本化基线即红灯（task #41）
+### 9.1 工程硬化（P1，低风险，先做）— ✅ 全部完成
+- [x] **E1** 合并重复 `modelUtils.ts ← models-helpers.ts`，删冗余、`tsc` 校验（`c152872`）
+- [x] **E2** 会话管理：`POST /auth/logout` + 显式失效 + 活跃会话上限 2048（`c32aa6d`）
+- [x] **E3** CORS 收尾：`allow_methods/allow_headers` 从 `Any` 收成白名单（`f2e298a`）
+- [x] **E4** 回归 CI 守门：离线确定性 embedding 跑 `--assert-thresholds`，退步红灯（`74b2a85`）
 
-### 9.2 产品化 / 可运维（P2）
-- [ ] **E5** `memori-server` OpenAPI/utoipa spec + Swagger UI + API 版本化（task #42）
-- [ ] **E6** 管理接口最小限流 + request-id 贯穿检索链路 trace（task #43）
-- [ ] **E7** 50k 规模本地压测：`doc_recall_ms/chunk_recall_ms/merge_ms/answer_ms` P50/P95 + 连接模型扩展决策文档（task #44）
-- [ ] **E8** README 成熟度对齐：✅已验证 / 🚧进行中 / 📐设计 状态徽标（task #45）
+### 9.2 产品化 / 可运维（P2）— ✅ 全部完成
+- [x] **E5** `memori-server` OpenAPI 3.1 表驱动 spec + `/api/openapi.json` + 漂移自检（`254d749`）
+- [x] **E6** 接口限流（IP 固定窗口）+ request-id 贯穿检索链路 trace（`254d749`）
+- [x] **E7** 50k 压测 harness P50/P95/P99 + P1 连接模型改造（WAL+读池）决策落地（`7b2ea84`/`c8becd6`）
+- [x] **E8** README 成熟度对齐：✅已验证 / 🚧进行中 / 📐设计 状态徽标（`17e5987`）
 
-### 9.3 大演进（P3，需求确认后排期）
-- [ ] **E9** 多租户 / 多资料库隔离（DB/索引/审计三层）——当前 OIDC 登录共享同库
-- [ ] **E10** 增量索引进度推送（SSE/WebSocket）
-- [ ] **E11** shell-service 共享层：收敛 desktop/server 的 settings/model/auth/audit 重复流程
+> **审计速赢补充批（不在原 E1–11 编号，一并落地）**：E12 F1 ErrorBoundary(`75ce914`)、E13 C1/C2 CI 矩阵+依赖扫描(`c6aa666`)、E14 S1/S5 keychain+审计升级(`c7a7d73`)、S6 桌面路径校验(`29ec8be`)、Q3 作答层 judge(`b937fab`)、F2 UI 去 any(`c5259a3`)、P4-lite dense 无损加速(`7b978f5`)。
+
+### 9.3 大演进（P3，需求确认后排期）— ⏳ 未做
+- [ ] **E9** 多租户 / 多资料库隔离（DB/索引/审计三层）——当前 OIDC 登录共享同库（**卡点：需先定租户模型，产品决策**）
+- [ ] **E10** 增量索引进度推送（SSE/WebSocket）（**卡点：独立功能，需前后端协同设计**）
+- [ ] **E11** shell-service 共享层：收敛 desktop/server 的 settings/model/auth/audit 重复流程（**卡点：大重构，低优先**）
 
 **Exit Criteria**
 - 工程：单一 model-helper 事实源；会话可主动失效；CORS 全维度白名单；CI 有检索质量阈值门。
@@ -502,22 +556,6 @@ GPT 修复计划（泛化去噪 + 覆盖率门控，无实体硬编码）：
 ## Change Log
 变更日志已迁移至 `docs/planning/PLAN_CHANGELOG.md`，便于保持计划正文聚焦执行项。
 
-发现大量硬编码：
-lib.rs:
-let analysis = analyze_query("北极星生物计算PolarisBioCompute成立于");
-    fn cjk_term_extractors_strip_question_tail_and_fillers() {
-        let fts_terms = extract_fts_terms("新增的岗位是什么");
-        assert!(fts_terms.iter().any(|term| term == "新增"));
-        assert!(fts_terms.iter().any(|term| term == "岗位"));
-        assert!(!fts_terms.iter().any(|term| term == "是什么"));
-        let signal_terms = extract_signal_terms("这个系统是做什么的");
-        assert!(signal_terms.iter().any(|term| term == "系统"));
-        assert!(signal_terms.iter().any(|term| term == "这个系统"));
-    }        assert!(signal_terms.iter().any(|term| term == "这个系统"));
-
-        let phrase_terms = extract_phrase_signal_terms("新增的岗位是什么");
-        assert!(phrase_terms.iter().any(|term| term == "新增岗位"));
-        assert!(!phrase_terms.iter().any(|term| term == "新增的岗位是什么"));
 ## Architecture Overlay: Memory OS Lite
 
 Retrieval remains the P0 reliability gate, but the product architecture has been expanded to **Local-first Verifiable Memory OS Lite**. Canonical design: [MEMORY_OS_LITE.md](../architecture/MEMORY_OS_LITE.md).
