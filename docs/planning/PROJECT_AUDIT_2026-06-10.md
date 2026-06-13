@@ -17,8 +17,16 @@
 | C2 无依赖漏洞扫描 | 新增 `security` job：`EmbarkStudios/cargo-deny-action` check advisories+bans+sources + `pnpm audit --audit-level high`；新增 `deny.toml` | `c6aa666` |
 | S1 API key 明文存 JSON | `keychain.rs`：OS keychain 存储（Windows Credential Manager / macOS Keychain / Linux Secret Service）；JSON 只存哨兵 `__keychain__`；写 keychain 失败时降级明文+warn；读时透明替换 | 本次 |
 | S5 审计写失败静默丢弃 | `audit.rs` 所有 IO 失败从 `warn!` 升级为 `error!`（含 path 解析/目录创建/文件打开/写入），日志前缀 `audit event dropped:` | 本次 |
+| S2(E6) 限流 + G2 request-id/trace | `middleware.rs`：按 IP 固定窗口限流（登录/admin 严格桶 20/min、其余 600/min，可 env 调），超限 429+Retry-After；request-id 中间件透传/生成 `x-request-id` 并建 tracing span，响应回写头部 | `254d749` |
+| G1(E5) OpenAPI | `routes/openapi.rs`：表驱动生成 OpenAPI 3.1，`GET /api/openapi.json` 暴露；覆盖全 33 个 REST 方法，附漂移自检单测 | `254d749` |
+| P2(E7) 50k 压测 harness | `examples/perf_scale.rs`：内存合成 + 离线确定性 embedding，顺序/并发 P50/P95/P99，CI 可复跑 | `7b2ea84` |
+| D2(E4) 检索 CI 质量门 | `--assert-thresholds` + 自带纯文本 fixture（12 文档/14 case）+ CI job `retrieval-gate`（offline 确定性），排序/gating 退步即拦 | `74b2a85` |
+| P1 单连接锁改造 | `store.rs` 写连接 WAL+busy_timeout+synchronous=NORMAL；只读连接池（默认 4，`MEMORI_DB_READ_POOL_SIZE`），检索 7 个 SELECT 走 `lock_read_conn` 并发读。50k 复跑争用系数 6.26×→1.72×、并发吞吐 5.4×、并发 P50 −82% | `c8becd6` |
+| S6 桌面路径越权 | `open_source_location`/`read_file_preview` 加 `ensure_within_watch_root`：目标须在 watch_root 子树内（纯函数+单测），否则拒绝 | `29ec8be` |
+| Q3 作答层评测盲区 | `answer_judge.rs` `judge_answer_correctness`（LLM-judge correct/partial/incorrect）；harness `--judge` 对应答题生成真实答案并判分，summary 加 `answer_correct_rate` | `b937fab` |
+| 工程硬化 | CI clippy/test 升级 `--all-targets`（防测试代码 lint/example 单测 bit-rot）+ HTTP 层端到端集成测试（限流/request-id/openapi） | `83ec3ff`/`53cae1c` |
 
-> 全部经 `cargo fmt --check` + `cargo clippy --workspace -D warnings` + `tsc --noEmit` + 新单测，已 push 到 dev。下方原始清单保留作完整记录。
+> 全部经 `cargo fmt --check` + `cargo clippy --workspace --all-targets -D warnings` + `cargo test --workspace`（全绿）+ live v2 回归逐项对齐基线（算法零回归）+ 50k 压测复跑验证，已 push 到 dev。下方原始清单保留作完整记录。
 
 ---
 
@@ -29,14 +37,7 @@
 
 ✅ **基线很稳**（核实）：OIDC 默认 JWKS 验签（`routes/auth.rs`，免验签仅 dev 开关）；HTTP handler **逐个自守 RBAC**（27/30 调 `require_session` 带角色）；`/mcp` 既需 `mcp_enabled` 又需 `require_session(Operator)` 且默认关（`mcp/transport_http.rs:15-33`）；egress allowlist **请求时真强制并审计**（`routes/ask.rs:38`、`models.rs:22/104`、`mcp/tools_impl.rs:190`）；CORS origin 白名单；生产代码 0 unwrap。
 
-| ID | 严重度 | 问题 | 证据 | 处置 |
-|---|---|---|---|---|
-| S2(E6) 限流 + G2 request-id/trace | `middleware.rs`：按 IP 固定窗口限流（登录/admin 严格桶 20/min、其余 600/min，可 env 调），超限 429+Retry-After；request-id 中间件透传/生成 `x-request-id` 并建 tracing span（检索链路日志可按请求聚合），响应回写头部 | 本次 |
-| G1(E5) OpenAPI | `routes/openapi.rs`：表驱动生成 OpenAPI 3.1，`GET /api/openapi.json` 暴露；路由表覆盖全 33 个 REST 方法，附漂移自检单测 | 本次 |
-| P2/P1(E7) 50k 压测 | `examples/perf_scale.rs`：101k chunks 顺序 P50/P95=251/330ms，并发 8 P50=1574ms，**争用系数 6.26×**→证实单 Mutex 串行化读，P1 改造收益明确（见 `docs/qa/PERF_SCALE_50K.md`） | 本次 |
-| D2(E4) 检索 CI 质量门 | `retrieval_regression --assert-thresholds` + 自带纯文本 fixture 套件（`docs/qa/ci_fixtures/` 12 文档 + `retrieval_regression_ci.json` 14 case）；新增 CI job `retrieval-gate`（offline 确定性，阈值见 `retrieval_regression_ci_thresholds.json`），排序/gating 退步即拦 | 本次 |
-
-> 下表为审计原始清单（保留）。
+> 本节 S1/S2/S4/S5/S6 已修，见文首「本轮已修」表。下表为审计原始清单（保留）。
 
 | ID | 严重度 | 问题 | 证据 | 处置 |
 |---|---|---|---|---|
