@@ -1,0 +1,9 @@
+{
+  "top1_document_hit_rate": 0.90,
+  "top1_chunk_hit_rate": 0.90,
+  "top3_document_recall_rate": 0.90,
+  "top5_chunk_recall_rate": 0.90,
+  "chunk_mrr": 0.90,
+  "citation_validity_rate": 1.0,
+  "reject_correctness_rate": 0.75
+}

@@ -197,3 +197,27 @@ jobs:
 
       - name: Audit npm dependencies (high severity and above)
         run: pnpm --dir ui audit --audit-level high
+
+  # ── 检索质量门（离线确定性回归 + 阈值，防排序/gating 代码静默退步）──────────
+  retrieval-gate:
+    name: retrieval-gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Retrieval regression gate (offline deterministic, fixture corpus)
+        run: |
+          cargo run --release -p memori-core --example retrieval_regression -- \
+            --mode offline_deterministic \
+            --suite docs/qa/retrieval_regression_ci.json \
+            --watch-root . \
+            --db-path target/retrieval_ci_gate.db \
+            --assert-thresholds docs/qa/retrieval_regression_ci_thresholds.json

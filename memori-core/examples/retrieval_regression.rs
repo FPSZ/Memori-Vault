@@ -35,6 +35,9 @@ struct CliArgs {
     /// When set, the live seeder indexes every supported file under watch_root
     /// (haystack / distractor corpus), not just suite target documents.
     index_all: bool,
+    /// When set, after running, compare summary metrics against the minimum
+    /// thresholds in this JSON file and exit non-zero on any regression (CI gate).
+    assert_thresholds: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -330,7 +333,62 @@ async fn main() -> Result<(), AnyError> {
     }
 
     println!("{}", serde_json::to_string_pretty(&report)?);
+
+    if let Some(thresholds_path) = &args.assert_thresholds {
+        let failures = assert_summary_thresholds(&report.summary, thresholds_path)?;
+        if !failures.is_empty() {
+            eprintln!(
+                "\n[regression-gate] FAILED — {} metric(s) below threshold:",
+                failures.len()
+            );
+            for failure in &failures {
+                eprintln!("  - {failure}");
+            }
+            std::process::exit(1);
+        }
+        eprintln!("[regression-gate] PASSED — all gated metrics meet thresholds.");
+    }
     Ok(())
+}
+
+/// 读取阈值 JSON（指标名 → 最小可接受值），逐项比对 summary；返回未达标项的描述。
+/// 未知指标名视为配置错误并报错；只比对显式列出的指标。
+fn assert_summary_thresholds(
+    summary: &RegressionSummary,
+    thresholds_path: &Path,
+) -> Result<Vec<String>, AnyError> {
+    let raw = fs::read_to_string(thresholds_path).map_err(|err| {
+        format!(
+            "failed to read thresholds {}: {err}",
+            thresholds_path.display()
+        )
+    })?;
+    let raw = raw.trim_start_matches('\u{feff}');
+    let thresholds: std::collections::BTreeMap<String, f64> =
+        serde_json::from_str(raw).map_err(|err| {
+            format!(
+                "failed to parse thresholds {}: {err}",
+                thresholds_path.display()
+            )
+        })?;
+
+    let mut failures = Vec::new();
+    for (metric, min_value) in &thresholds {
+        let actual = match metric.as_str() {
+            "top1_document_hit_rate" => summary.top1_document_hit_rate,
+            "top1_chunk_hit_rate" => summary.top1_chunk_hit_rate,
+            "top3_document_recall_rate" => summary.top3_document_recall_rate,
+            "top5_chunk_recall_rate" => summary.top5_chunk_recall_rate,
+            "chunk_mrr" => summary.chunk_mrr,
+            "citation_validity_rate" => summary.citation_validity_rate,
+            "reject_correctness_rate" => summary.reject_correctness_rate,
+            other => return Err(format!("unknown threshold metric: {other}").into()),
+        };
+        if actual + 1e-9 < *min_value {
+            failures.push(format!("{metric}: actual {actual:.4} < min {min_value:.4}"));
+        }
+    }
+    Ok(failures)
 }
 
 fn parse_args() -> Result<CliArgs, AnyError> {
@@ -345,6 +403,7 @@ fn parse_args() -> Result<CliArgs, AnyError> {
     let mut max_index_prep_secs = DEFAULT_MAX_INDEX_PREP_SECS;
     let mut max_case_secs = DEFAULT_MAX_CASE_SECS;
     let mut index_all = false;
+    let mut assert_thresholds = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -373,6 +432,10 @@ fn parse_args() -> Result<CliArgs, AnyError> {
             }
             "--write-baseline-doc" => write_baseline_doc = true,
             "--index-all" => index_all = true,
+            "--assert-thresholds" => {
+                let value = args.next().ok_or("--assert-thresholds requires a path")?;
+                assert_thresholds = Some(absolutize(&cwd, value));
+            }
             "--mode" => {
                 let value = args.next().ok_or("--mode requires a value")?;
                 mode = EvaluationMode::parse(&value)?;
@@ -413,6 +476,7 @@ fn parse_args() -> Result<CliArgs, AnyError> {
         max_index_prep_secs,
         max_case_secs,
         index_all,
+        assert_thresholds,
     })
 }
 
