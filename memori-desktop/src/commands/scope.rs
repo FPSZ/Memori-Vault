@@ -1,5 +1,28 @@
 use super::*;
 
+/// 纯函数：判断 canonical target 是否落在 canonical root 子树内（含 root 自身）。
+/// 抽出便于单测；调用方负责先 canonicalize 两端。
+fn path_is_within(root: &std::path::Path, target: &std::path::Path) -> bool {
+    target == root || target.starts_with(root)
+}
+
+/// 越权校验（审计 S6 defense-in-depth）：目标路径必须在当前 watch_root 子树内，
+/// 否则拒绝。防止前端传入任意路径 reveal/读取监听范围外的文件。返回 canonical 路径。
+fn ensure_within_watch_root(target: &std::path::Path) -> Result<PathBuf, String> {
+    let settings = load_app_settings()?;
+    let watch_root = resolve_watch_root_from_settings(&settings)?;
+    let root_canonical = watch_root
+        .canonicalize()
+        .map_err(|err| format!("规范化监听目录失败: {err}"))?;
+    let target_canonical = target
+        .canonicalize()
+        .map_err(|err| format!("规范化路径失败: {err}"))?;
+    if !path_is_within(&root_canonical, &target_canonical) {
+        return Err("路径不在监听目录范围内，已拒绝访问。".to_string());
+    }
+    Ok(target_canonical)
+}
+
 #[tauri::command]
 pub(crate) async fn set_watch_root(
     path: String,
@@ -63,6 +86,8 @@ pub(crate) async fn open_source_location(path: String) -> Result<(), String> {
     if !target.exists() {
         return Err(format!("文件不存在: {}", target.display()));
     }
+    // 越权校验：仅允许打开监听目录范围内的文件。
+    ensure_within_watch_root(&target)?;
 
     #[cfg(target_os = "windows")]
     {
@@ -147,6 +172,8 @@ pub(crate) async fn read_file_preview(path: String) -> Result<FilePreviewDto, St
     if !target.is_file() {
         return Err(format!("路径不是文件: {}", target.display()));
     }
+    // 越权校验：仅允许预览监听目录范围内的文件（read_file_content 也经此函数）。
+    ensure_within_watch_root(&target)?;
 
     // Only allow previewing supported document/text files for safety.
     let ext = target
@@ -186,4 +213,35 @@ pub(crate) async fn read_file_preview(path: String) -> Result<FilePreviewDto, St
         format: format.to_string(),
         extension: ext,
     })
+}
+
+#[cfg(test)]
+mod scope_path_tests {
+    use super::path_is_within;
+    use std::path::Path;
+
+    #[test]
+    fn path_within_root_is_accepted() {
+        assert!(path_is_within(
+            Path::new("/data/vault"),
+            Path::new("/data/vault")
+        ));
+        assert!(path_is_within(
+            Path::new("/data/vault"),
+            Path::new("/data/vault/sub/doc.md")
+        ));
+    }
+
+    #[test]
+    fn path_outside_root_is_rejected() {
+        // 兄弟目录前缀相同但不在子树内，不应误判通过。
+        assert!(!path_is_within(
+            Path::new("/data/vault"),
+            Path::new("/data/vault-secret/doc.md")
+        ));
+        assert!(!path_is_within(
+            Path::new("/data/vault"),
+            Path::new("/etc/passwd")
+        ));
+    }
 }
