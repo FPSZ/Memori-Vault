@@ -4,12 +4,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use axum::Router;
 use axum::body::{Body, to_bytes};
+use axum::extract::Extension;
 use axum::http::{Request, StatusCode};
+use axum::routing::get;
 use tokio::sync::Mutex;
 use tower::ServiceExt;
 
-use crate::{RateLimiter, ServerMetrics, ServerState, build_router};
+use crate::{
+    RateLimiter, RequestId, ServerMetrics, ServerState, build_router, request_id_trace_middleware,
+};
 
 /// 构造不含真实引擎的最小 ServerState（健康/openapi/限流路径不需要引擎）。
 fn test_state(rate_limiter: RateLimiter) -> ServerState {
@@ -47,6 +52,31 @@ async fn health_returns_ok_with_generated_request_id() {
         !request_id.is_empty(),
         "generated request id should be non-empty"
     );
+}
+
+#[tokio::test]
+async fn request_id_is_injected_into_extensions() {
+    // 独立小路由验证中间件把 request-id 注入 extensions（handler 读到的值 = 请求头值），
+    // 这是 ask 审计写入 request_id 的机制基础。
+    let app = Router::new()
+        .route(
+            "/echo-request-id",
+            get(|Extension(request_id): Extension<RequestId>| async move { request_id.0 }),
+        )
+        .layer(axum::middleware::from_fn(request_id_trace_middleware));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/echo-request-id")
+                .header("x-request-id", "client-trace-xyz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(&body[..], b"client-trace-xyz");
 }
 
 #[tokio::test]

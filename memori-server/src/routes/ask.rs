@@ -2,6 +2,7 @@ use crate::*;
 
 pub(crate) async fn ask_handler(
     State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
     headers: HeaderMap,
     Json(payload): Json<AskRequest>,
 ) -> Result<Json<AskResponseStructured>, ApiError> {
@@ -83,6 +84,12 @@ pub(crate) async fn ask_handler(
                 .failed_requests
                 .fetch_add(1, Ordering::Relaxed);
             state.metrics.ask_failed.fetch_add(1, Ordering::Relaxed);
+            warn!(
+                request_id = %request_id.0,
+                error = %err,
+                elapsed_ms = ask_started_at.elapsed().as_millis() as u64,
+                "ask failed"
+            );
             map_engine_api_error(err)
         })?;
 
@@ -91,6 +98,22 @@ pub(crate) async fn ask_handler(
         .metrics
         .ask_latency_total_ms
         .fetch_add(elapsed_ms, Ordering::Relaxed);
+    // 完成事件：handler 在 http_request span 内执行，JSON 日志自带 span 字段；
+    // 这里显式带上 request_id 让控制台输出同样可按请求关联。默认 info 级别可见，
+    // 各阶段耗时来自检索链打点，与响应 metrics 一致。
+    info!(
+        request_id = %request_id.0,
+        status = ?response.status,
+        doc_recall_ms = response.metrics.doc_recall_ms,
+        chunk_dense_ms = response.metrics.chunk_dense_ms,
+        chunk_lexical_ms = response.metrics.chunk_lexical_ms,
+        merge_ms = response.metrics.merge_ms,
+        rerank_ms = response.metrics.rerank_ms,
+        answer_ms = response.metrics.answer_ms,
+        evidence_count = response.metrics.final_evidence_count,
+        elapsed_ms,
+        "ask completed"
+    );
     append_audit_event(
         &state,
         AuditEventDto {
@@ -100,6 +123,7 @@ pub(crate) async fn ask_handler(
             timestamp: unix_now_secs(),
             result: "ok".to_string(),
             metadata: serde_json::json!({
+                "request_id": request_id.0,
                 "top_k": top_k,
                 "scope_count": scope_paths.len(),
                 "status": response.status,
@@ -121,10 +145,11 @@ pub(crate) struct AskLegacyResponse {
 
 pub(crate) async fn ask_legacy_handler(
     State(state): State<ServerState>,
+    Extension(request_id): Extension<RequestId>,
     headers: HeaderMap,
     Json(payload): Json<AskRequest>,
 ) -> Result<Json<AskLegacyResponse>, ApiError> {
-    let response = ask_handler(State(state), headers, Json(payload)).await?;
+    let response = ask_handler(State(state), Extension(request_id), headers, Json(payload)).await?;
     Ok(Json(AskLegacyResponse {
         answer: format_legacy_answer(&response.0),
     }))
