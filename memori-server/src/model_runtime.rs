@@ -55,6 +55,13 @@ pub(crate) async fn replace_engine(
         new_engine
             .set_indexing_config(resolve_indexing_config(&settings))
             .await;
+        // 加载索引筛选配置：与桌面端行为一致，服务器模式同样应用 exclude/include 规则，
+        // 避免大目录（如仓库根）把 node_modules/target 等开发目录误索引进库。
+        if let Some(ref filter) = settings.index_filter {
+            new_engine
+                .set_index_filter_config(filter.enabled.then(|| filter.clone()))
+                .await;
+        }
         new_engine.start_daemon().map_err(|err| err.to_string())?;
 
         {
