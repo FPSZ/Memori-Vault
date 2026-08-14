@@ -285,7 +285,7 @@ pub(crate) fn build_text_context_from_evidence_with_budget(
             chunk_index = item.chunk.chunk_index,
             block_kind = block_kind_label(item.chunk.block_kind),
             document_rank = item.document_rank,
-            document_reason = &item.document_reason,
+            document_reason = item.document_reason,
             score = item.final_score,
             reason = evidence_reason(item),
             heading = heading,

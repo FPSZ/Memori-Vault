@@ -1114,10 +1114,8 @@ fn extract_xlsx_sheet(xml: &[u8], shared: &[String], out: &mut String) {
             Ok(quick_xml::events::Event::End(e)) => match e.name().as_ref() {
                 b"v" => in_value = false,
                 b"t" => in_inline_text = false,
-                b"row" => {
-                    if row_has_cell {
-                        push_newline_if_needed(out, 1);
-                    }
+                b"row" if row_has_cell => {
+                    push_newline_if_needed(out, 1);
                 }
                 _ => {}
             },
