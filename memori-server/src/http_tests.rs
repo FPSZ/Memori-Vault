@@ -99,6 +99,61 @@ async fn request_id_is_propagated_from_client() {
 }
 
 #[tokio::test]
+async fn swagger_docs_page_serves_html_and_assets() {
+    let app = build_router(test_state(RateLimiter::new(true, 600, 20)));
+    // 文档页：200 + HTML 内容指向 openapi.json。
+    let page = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/docs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.status(), StatusCode::OK);
+    let page_body = to_bytes(page.into_body(), usize::MAX).await.unwrap();
+    let page_text = String::from_utf8_lossy(&page_body);
+    assert!(
+        page_text.contains("swagger-ui"),
+        "页面应包含 swagger-ui 挂载点"
+    );
+    assert!(
+        page_text.contains("/api/openapi.json"),
+        "页面数据源应指向 openapi.json"
+    );
+    // CSS 与 JS 静态资源：200 + 正确 content-type + 非空。
+    for (uri, expected_type) in [
+        ("/api/docs/swagger-ui.css", "text/css"),
+        ("/api/docs/swagger-ui-bundle.js", "application/javascript"),
+        (
+            "/api/docs/swagger-ui-standalone-preset.js",
+            "application/javascript",
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "uri {uri}");
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            content_type.starts_with(expected_type),
+            "uri {uri} type {content_type}"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(body.len() > 1000, "uri {uri} 资源应非空");
+    }
+}
+
+#[tokio::test]
 async fn openapi_endpoint_serves_valid_spec() {
     let app = build_router(test_state(RateLimiter::new(true, 600, 20)));
     let response = app
