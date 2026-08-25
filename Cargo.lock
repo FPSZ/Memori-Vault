@@ -2208,6 +2208,8 @@ version = "1.5.2"
 dependencies = [
  "calamine",
  "cfb 0.14.0",
+ "flate2",
+ "image",
  "lopdf",
  "pulldown-cmark",
  "quick-xml 0.37.5",

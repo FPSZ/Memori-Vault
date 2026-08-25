@@ -37,6 +37,9 @@ pub(crate) async fn replace_engine(
 
     let result: Result<(), String> = async {
         let settings = load_app_settings()?;
+        // OCR tesseract 路径持久化（审计 Q6）：settings 配置注入进程环境，
+        // 显式环境变量优先。
+        memori_core::apply_ocr_path_to_env(settings.ocr_tesseract_path.as_deref());
         let Some(active_runtime) = resolve_configured_active_runtime_settings(&settings) else {
             {
                 let mut init_guard = init_error.lock().await;

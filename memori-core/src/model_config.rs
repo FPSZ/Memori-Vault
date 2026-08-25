@@ -241,6 +241,20 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
     }
 }
 
+/// 把 settings 里的 OCR tesseract 路径注入进程环境（供 parser 的 OCR 调用读取）。
+/// 优先级：显式环境变量 > settings 配置；settings 未配置时不注入。
+pub fn apply_ocr_path_to_env(configured: Option<&str>) {
+    let Some(path) = configured.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    if std::env::var_os(memori_parser::OCR_TESSERACT_PATH_ENV).is_some() {
+        return;
+    }
+    unsafe {
+        std::env::set_var(memori_parser::OCR_TESSERACT_PATH_ENV, path);
+    }
+}
+
 pub fn normalize_policy_endpoint(endpoint: &str) -> String {
     let trimmed = endpoint.trim();
     if trimmed.is_empty() {
@@ -380,6 +394,33 @@ pub fn validate_runtime_model_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 注入优先级与边界（单函数内顺序执行：进程环境变量为全局状态，拆分测试会并行互扰）。
+    #[test]
+    fn apply_ocr_path_to_env_priority_and_bounds() {
+        // 1) settings 有值 → 注入成功。
+        unsafe {
+            std::env::remove_var(memori_parser::OCR_TESSERACT_PATH_ENV);
+        }
+        apply_ocr_path_to_env(Some("D:/tesseract/tesseract.exe"));
+        assert_eq!(
+            std::env::var(memori_parser::OCR_TESSERACT_PATH_ENV).unwrap(),
+            "D:/tesseract/tesseract.exe"
+        );
+        // 2) 显式环境变量优先，settings 不覆盖。
+        apply_ocr_path_to_env(Some("D:/settings/path.exe"));
+        assert_eq!(
+            std::env::var(memori_parser::OCR_TESSERACT_PATH_ENV).unwrap(),
+            "D:/tesseract/tesseract.exe"
+        );
+        unsafe {
+            std::env::remove_var(memori_parser::OCR_TESSERACT_PATH_ENV);
+        }
+        // 3) settings 为空/空白 → 不注入。
+        apply_ocr_path_to_env(None);
+        apply_ocr_path_to_env(Some("   "));
+        assert!(std::env::var_os(memori_parser::OCR_TESSERACT_PATH_ENV).is_none());
+    }
 
     #[test]
     fn build_openai_url_adds_v1_for_plain_host() {
