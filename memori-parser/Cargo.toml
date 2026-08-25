@@ -15,3 +15,7 @@ quick-xml = "0.37"
 calamine = "0.35"
 cfb = "0.14"
 tracing.workspace = true
+# OCR：FlateDecode 图片流的 raw 像素编码为 PNG（仅 png 编码，最小特性集）
+image = { version = "0.25", default-features = false, features = ["png"] }
+# OCR：PDF 链式过滤器 [ASCII85Decode FlateDecode] 的流解码（PDF Flate = zlib）
+flate2 = "1"

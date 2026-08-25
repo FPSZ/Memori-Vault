@@ -90,6 +90,9 @@ async fn main() {
             AppSettings::default()
         }
     };
+    // OCR tesseract 路径持久化（审计 Q6）：settings 配置注入进程环境，
+    // 显式环境变量优先（apply_ocr_path_to_env 内部不覆盖）。
+    memori_core::apply_ocr_path_to_env(settings.ocr_tesseract_path.as_deref());
     unsafe {
         std::env::set_var(
             memori_core::MEMORI_RETRIEVAL_GATING_PROFILE_ENV,

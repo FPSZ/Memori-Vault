@@ -1,8 +1,13 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use thiserror::Error;
 use tracing::{debug, info, warn};
+
+mod ocr;
+
+pub use ocr::{OCR_TESSERACT_PATH_ENV, extract_pdf_images, ocr_available, ocr_image_file};
 
 /// 单个文本块的数据结构。
 #[derive(Debug, Clone)]
@@ -564,6 +569,8 @@ pub fn extract_document_text(file_path: impl AsRef<Path>) -> Option<String> {
         "doc" => extract_doc_text(path),
         "ppt" => extract_ppt_text(path),
         "xls" => extract_xls_text(path),
+        // 独立图片文件（审计 Q6）：直接 OCR，无 tesseract 时静默降级返回 None。
+        "png" | "jpg" | "jpeg" => ocr::ocr_image_file(path),
         _ => None,
     };
     if result.is_none() {
@@ -632,10 +639,66 @@ fn extract_docx_text(path: &Path) -> Option<String> {
         buf.clear();
     }
 
+    // 内嵌图片（word/media/*）：OCR 追加（审计 Q6，无 tesseract 时静默跳过）。
+    if ocr::ocr_available()
+        && let Ok(mut file) = std::fs::File::open(path)
+        && let Ok(mut archive) = zip::ZipArchive::new(&mut file)
+    {
+        let media_names: Vec<String> = archive
+            .file_names()
+            .filter_map(|name| {
+                let lower = name.to_ascii_lowercase();
+                (lower.starts_with("word/media/")
+                    && (lower.ends_with(".png")
+                        || lower.ends_with(".jpg")
+                        || lower.ends_with(".jpeg")))
+                .then(|| name.to_string())
+            })
+            .collect();
+        let mut ocr_texts = Vec::new();
+        for name in media_names {
+            let Ok(mut entry) = archive.by_name(&name) else {
+                continue;
+            };
+            let mut bytes = Vec::new();
+            // 大小上限与 PDF 图片一致：防病态文档内嵌超大图片拖死索引。
+            if std::io::Read::take(&mut entry, ocr::MAX_OCR_IMAGE_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+                .is_ok()
+                && bytes.len() > ocr::MAX_OCR_IMAGE_BYTES
+            {
+                warn!(path = %path.display(), media = %name, "DOCX 内嵌图片过大，跳过 OCR");
+                continue;
+            }
+            let ext = name.rsplit('.').next().unwrap_or("png");
+            let tmp = std::env::temp_dir().join("memori-ocr").join(format!(
+                "docx_media_{}_{}.{}",
+                std::process::id(),
+                ocr::next_temp_seq(),
+                ext
+            ));
+            if std::fs::write(&tmp, bytes).is_err() {
+                continue;
+            }
+            if let Some(text) = ocr::ocr_image_file(&tmp) {
+                ocr_texts.push(text);
+            }
+            let _ = std::fs::remove_file(&tmp);
+        }
+        if !ocr_texts.is_empty() {
+            return Some(clean_extracted_document_text(&format!(
+                "{}\n{}",
+                clean_extracted_document_text(&out),
+                ocr_texts.join("\n")
+            )));
+        }
+    }
+
     Some(clean_extracted_document_text(&out))
 }
 
 /// Extract text from a PDF file using lopdf.
+/// 扫描件（无文本层）回退：提取页面 XObject 图片逐张 OCR（审计 Q6）。
 fn extract_pdf_text(path: &Path) -> Option<String> {
     debug!(path = %path.display(), "[解析器] 提取 PDF 文本");
     let doc = lopdf::Document::load(path).ok()?;
@@ -650,7 +713,25 @@ fn extract_pdf_text(path: &Path) -> Option<String> {
         }
     }
     let raw = texts.join("\n");
-    Some(clean_extracted_document_text(&raw))
+    let cleaned = clean_extracted_document_text(&raw);
+    if !cleaned.is_empty() {
+        return Some(cleaned);
+    }
+    // 无文本层：按扫描件处理，OCR 每页图片并追加识别文本。
+    if !ocr::ocr_available() {
+        return None;
+    }
+    let mut ocr_texts = Vec::new();
+    for image_path in ocr::extract_pdf_images(path) {
+        if let Some(text) = ocr::ocr_image_file(&image_path) {
+            ocr_texts.push(text);
+        }
+        let _ = std::fs::remove_file(&image_path);
+    }
+    if ocr_texts.is_empty() {
+        return None;
+    }
+    Some(clean_extracted_document_text(&ocr_texts.join("\n")))
 }
 
 // ============================================================================
