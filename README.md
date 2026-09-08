@@ -271,6 +271,7 @@ document routing -> chunk retrieval -> RRF/gating -> evidence/citation
 - 图谱抽取与实体关系 API：已实现，图谱可视化 UI 仍有限。
 - 跨语言检索（中文问→英文文档）：基础覆盖，query 双语扩展未完整。
 - Source preview 与 Markdown export。
+- 50k 规模压测：harness 与验证已完成（顺序/并发 P50/P95/P99，争用系数 1.91× 达标 <2×，数据与结论见 `docs/qa/PERF_SCALE_50K.md`）；但 50k 下**单查询绝对延迟仍高**（顺序 P50 ≈ 9.8s，`doc_recall` 占约 81%），文档级召回优化还在路上。
 
 ### 📐 设计中/待实现
 
@@ -280,7 +281,6 @@ document routing -> chunk retrieval -> RRF/gating -> evidence/citation
 - API key 接 OS keychain（当前明文存 settings.json）。
 - OCR（图片/扫描件目前不可检索）。
 - Memory heat score、conflict resolver、lifecycle classifier。
-- 50k 规模压测（P50/P95，大规模并发性能尚未验证）。
 - 多租户隔离（当前 OIDC 登录后共享同一库）。
 
 ---

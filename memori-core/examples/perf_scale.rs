@@ -14,6 +14,7 @@
 //! 用法：
 //!   cargo run --release -p memori-core --example perf_scale -- \
 //!     --docs 1000 --sections 50 --queries 300 --concurrency 8 --report target/perf_50k.json
+//!   （CI 断言：追加 --max-contention-factor 2.0，超标即非零退出；--start-doc N 可断点续跑。）
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -39,6 +40,10 @@ struct Args {
     concurrency: usize,
     db_path: PathBuf,
     report_path: Option<PathBuf>,
+    /// >0 时续跑：保留现有 DB 数据，从该 doc 序号继续写（跳过 purge）。
+    start_doc: usize,
+    /// 竞用系数门槛：>0 时若 并发P50/顺序P50 超标则进程以非零退出码结束（供 CI 断言）。
+    max_contention_factor: Option<f64>,
 }
 
 fn parse_args() -> Result<Args, AnyError> {
@@ -47,6 +52,8 @@ fn parse_args() -> Result<Args, AnyError> {
     let mut sections = 50usize;
     let mut queries = 300usize;
     let mut concurrency = 8usize;
+    let mut start_doc = 0usize;
+    let mut max_contention_factor = None;
     let mut db_path = cwd.join("target").join("perf_scale.db");
     let mut report_path = None;
 
@@ -58,6 +65,11 @@ fn parse_args() -> Result<Args, AnyError> {
             "--queries" => queries = it.next().ok_or("--queries requires a value")?.parse()?,
             "--concurrency" => {
                 concurrency = it.next().ok_or("--concurrency requires a value")?.parse()?
+            }
+            "--start-doc" => start_doc = it.next().ok_or("--start-doc requires a value")?.parse()?,
+            "--max-contention-factor" => {
+                max_contention_factor =
+                    Some(it.next().ok_or("--max-contention-factor requires a value")?.parse()?)
             }
             "--db-path" => {
                 db_path = absolutize(&cwd, it.next().ok_or("--db-path requires a value")?)
@@ -78,6 +90,8 @@ fn parse_args() -> Result<Args, AnyError> {
         concurrency: concurrency.max(1),
         db_path,
         report_path,
+        start_doc: start_doc.min(docs),
+        max_contention_factor,
     })
 }
 
@@ -172,8 +186,10 @@ async fn main() -> Result<(), AnyError> {
         std::env::set_var(MEMORI_DB_PATH_ENV, &args.db_path);
         std::env::set_var("MEMORI_RERANK_ENABLED", "0");
     }
-    // 干净起点：删除旧 DB。
-    let _ = std::fs::remove_file(&args.db_path);
+    // 干净起点：删除旧 DB（--start-doc>0 续跑时保留）。
+    if args.start_doc == 0 {
+        let _ = std::fs::remove_file(&args.db_path);
+    }
     if let Some(parent) = args.db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -188,7 +204,8 @@ async fn main() -> Result<(), AnyError> {
         args.docs, args.sections
     );
     let index_started = Instant::now();
-    let indexed_chunks = seed_corpus(&engine, &synthetic_root, args.docs, args.sections).await?;
+    let indexed_chunks =
+        seed_corpus(&engine, &synthetic_root, args.docs, args.sections, args.start_doc).await?;
     let index_ms = index_started.elapsed().as_millis() as u64;
     eprintln!(
         "[perf] indexed {indexed_chunks} chunks in {index_ms} ms ({:.0} chunks/s)",
@@ -280,6 +297,25 @@ async fn main() -> Result<(), AnyError> {
     }
     println!("{json}");
     print_human_summary(&report);
+
+    // CI 断言：--max-contention-factor 给出时，超标以非零退出码结束（报告已写盘）。
+    if let Some(limit) = args.max_contention_factor {
+        if limit > 0.0 {
+            if report.contention_factor > limit {
+                eprintln!(
+                    "[perf] FAIL: contention_factor {:.3} > limit {limit} —— 并发争用超标，CI 判定未达标。",
+                    report.contention_factor
+                );
+                std::process::exit(1);
+            }
+            eprintln!(
+                "[perf] contention_factor {:.3} <= limit {limit} —— PASS",
+                report.contention_factor
+            );
+        } else {
+            eprintln!("[perf] WARN: --max-contention-factor {limit} 无效（须 > 0），跳过断言。");
+        }
+    }
     Ok(())
 }
 
@@ -324,14 +360,28 @@ async fn seed_corpus(
     root: &Path,
     docs: usize,
     sections: usize,
+    start_doc: usize,
 ) -> Result<usize, AnyError> {
     let state = engine.state();
     let store = state.vector_store.clone();
-    store.begin_full_rebuild("perf_scale_seed").await?;
-    store.purge_all_index_data().await?;
+    if start_doc == 0 {
+        store.begin_full_rebuild("perf_scale_seed").await?;
+        store.purge_all_index_data().await?;
+    } else {
+        eprintln!(
+            "[perf] resume: keeping existing DB, continuing from doc {start_doc}/{docs}..."
+        );
+    }
 
-    let mut total_chunks = 0usize;
-    for d in 0..docs {
+    // 续跑时把 DB 里已有的 chunks 计入总量，保证报告里 indexed_chunks 是完整语料数。
+    let mut total_chunks = if start_doc > 0 {
+        let n = store.count_chunks().await? as usize;
+        eprintln!("[perf] existing chunks in db: {n}");
+        n
+    } else {
+        0
+    };
+    for d in start_doc..docs {
         let path = root.join(format!("doc_{d:06}.md"));
         let text = synth_document(d, sections);
         let chunks = parse_and_chunk(&path, &text)?;
