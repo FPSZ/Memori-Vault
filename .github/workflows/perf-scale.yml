@@ -64,6 +64,8 @@ jobs:
             --max-contention-factor "${{ github.event.inputs.max_contention_factor || '2.0' }}"
 
       - name: Upload report artifact
+        # 断言失败时才是最需要看报告的时候：必须 always()，否则恰好在 run FAIL 时丢掉 artifact。
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: perf-scale-report-${{ github.event.inputs.docs || '50000' }}
