@@ -6,7 +6,7 @@ use super::{
     apply_gating_metrics, build_citations, build_memory_context_for_prompt, detect_compound_query,
     document_signal_query, evidence_rank_cmp, has_strong_document_signal, is_implementation_lookup,
     is_plain_text_reference_file, merge_document_candidates, process_file_event,
-    should_allow_memory_only_answer, should_refuse_for_insufficient_evidence,
+    read_document_text, should_allow_memory_only_answer, should_refuse_for_insufficient_evidence,
     validate_runtime_model_settings,
 };
 use memori_parser::DocumentChunk;
@@ -54,6 +54,157 @@ async fn seed_document_chunks(state: &Arc<AppState>, file_path: &Path, chunks: V
         .replace_document_index(file_path, None, 123, "test_hash", chunks, embeddings)
         .await
         .expect("replace document index");
+}
+
+/// OCR 端到端（需要 tesseract + chi_sim 语言包；环境缺失时自动跳过）：
+/// 用仓库内**真实扫描件 PDF**（无文本层）验证 tesseract 确实识别出中文，
+/// 且文本能走**完整索引链路**落库成 chunk。
+///
+/// 这是唯一覆盖"OCR 真能用"的自动化证据 —— 路由/解码/限额等单测都碰不到 tesseract
+/// 本体，所以评审能发现"端到端不工作"却没有测试挡住。
+///
+/// 断言刻意只做结构性检查（中文字符数、chunk 数），不锁定具体措辞：实测该扫描件里
+/// 的实体名会被 OCR 误读（苍岭 → 苑岭/苔岭），逐字断言会变成 flaky。
+#[tokio::test]
+async fn scanned_pdf_is_indexed_through_ocr_when_available() {
+    if !memori_parser::ocr_available() {
+        eprintln!("跳过：本机没有可用的 tesseract（需要 chi_sim 语言包）");
+        return;
+    }
+    let pdf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("Memory_Test_V2")
+        .join("special_005_扫描件_苍岭_对账.pdf");
+    if !pdf.is_file() {
+        eprintln!("跳过：扫描件语料不存在 {}", pdf.display());
+        return;
+    }
+
+    // 1) OCR 必须真的产出中文文本（否则说明图片根本没被送进 tesseract）。
+    let text = memori_parser::extract_document_text(&pdf).expect("扫描件应能提取出文本");
+    assert!(
+        cjk_chars(&text) >= 5,
+        "OCR 应产出中文文本，实际只有 {} 个中文字符：{text}",
+        cjk_chars(&text)
+    );
+
+    // 2) **索引期入口** `read_document_text` 必须同样拿到文本。
+    //    这正是评审 #1 出事的位置：图片/扫描件曾在这里被当 UTF-8 文本读，OCR 永不执行。
+    let indexed_text = read_document_text(&pdf)
+        .await
+        .expect("索引期入口应能读出扫描件文本");
+    assert!(
+        cjk_chars(&indexed_text) >= 5,
+        "索引期入口拿到的文本不像 OCR 结果：{indexed_text}"
+    );
+
+    // 3) 图片路径（评审 #1 的原始位置）也必须能通过索引期入口。
+    //    注意：不能断言 chunk 落库数量 —— 写索引前要先算 embedding，
+    //    而测试环境没有本地 embedding 服务（现有测试都是用 seed 直接写 chunk 绕开的）。
+    let images = memori_parser::extract_pdf_images(&pdf);
+    let Some(image) = images.first() else {
+        panic!("扫描件应至少解码出一张图片");
+    };
+    let image_text = read_document_text(image)
+        .await
+        .expect("图片应能通过索引期入口做 OCR（而不是被当 UTF-8 读取）");
+    assert!(
+        cjk_chars(&image_text) >= 5,
+        "图片经索引期入口应得到 OCR 文本：{image_text}"
+    );
+    for path in &images {
+        let _ = fs::remove_file(path);
+    }
+}
+
+/// 统计字符串里的中日韩统一表意文字数量（用于判断 OCR 是否真的出了中文）。
+fn cjk_chars(text: &str) -> usize {
+    text.chars()
+        .filter(|ch| ('\u{4e00}'..='\u{9fff}').contains(ch))
+        .count()
+}
+
+/// OCR 输入链路回归：仓库内的真实扫描件 PDF（无文本层、ASCII85 + Flate 编码）
+/// 必须能被解码出**合法图片文件** —— 这是 OCR 真正能拿到输入前的最后一环。
+///
+/// 不需要安装 tesseract（只验证解码与写盘）；语料文件缺失时自动跳过。
+#[test]
+fn scanned_pdf_images_are_extracted_from_real_fixture() {
+    let pdf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("Memory_Test_V2")
+        .join("special_005_扫描件_苍岭_对账.pdf");
+    if !pdf.is_file() {
+        eprintln!("跳过：扫描件语料不存在 {}", pdf.display());
+        return;
+    }
+
+    let images = memori_parser::extract_pdf_images(&pdf);
+    assert!(
+        !images.is_empty(),
+        "真实扫描件 PDF 应至少解码出一张图片，否则 OCR 永远拿不到输入"
+    );
+    for path in &images {
+        let bytes = fs::read(path).expect("read extracted image");
+        let png = bytes.starts_with(&[0x89, b'P', b'N', b'G']);
+        let jpeg = bytes.starts_with(&[0xFF, 0xD8]);
+        assert!(png || jpeg, "解码产物应是合法 PNG/JPEG：{}", path.display());
+        let _ = fs::remove_file(path);
+    }
+}
+
+/// 回归（审计 Q6 / PR #1 阻断项 #1）：图片必须走二进制抽取链路（OCR 挂在 parser 上），
+/// 而不是被 `tokio::fs::read_to_string` 当 UTF-8 文本读。
+///
+/// 修复前 `read_document_text` 的二进制白名单缺 png/jpg/jpeg：图片会以
+/// "stream did not contain valid UTF-8" 失败，OCR 永远不会被调用，而且每张图片都会
+/// 往 `indexing_runtime.last_error` 写一次错误（UI 上持续报错）。
+///
+/// 这里刻意走真实索引链路 `process_file_event`，而不是只调 parser —— 之前只覆盖
+/// parser 层的测试正是漏掉这个问题的原因。
+#[tokio::test]
+async fn image_file_is_read_through_extraction_not_utf8() {
+    let db_path = temp_db_path("image_ocr_route");
+    let state = Arc::new(AppState::new(&db_path).expect("create app state"));
+
+    let dir = std::env::temp_dir().join(format!("memori_vault_image_route_{}", std::process::id()));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let image_path = dir.join("scan.png");
+    // 1x1 PNG：真实二进制字节，不可能是合法 UTF-8。
+    fs::write(
+        &image_path,
+        [
+            0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89,
+        ],
+    )
+    .expect("write png");
+
+    let event = WatchEvent {
+        kind: WatchEventKind::Created,
+        path: image_path.clone(),
+        old_path: None,
+        observed_at: SystemTime::now(),
+    };
+    process_file_event(&state, &event, None, Some(&dir), true).await;
+
+    let last_error = state
+        .indexing_runtime
+        .read()
+        .await
+        .last_error
+        .clone()
+        .unwrap_or_default();
+    assert!(
+        !last_error.contains("valid UTF-8"),
+        "图片被当成 UTF-8 文本读取了（说明 read_document_text 的二进制白名单漏了图片扩展名）：{last_error}"
+    );
+
+    drop(state);
+    let _ = fs::remove_file(&image_path);
+    let _ = fs::remove_dir(&dir);
+    let _ = fs::remove_file(&db_path);
 }
 
 #[tokio::test]

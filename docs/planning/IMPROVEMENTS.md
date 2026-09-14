@@ -100,7 +100,7 @@ README 仍可能让外部读者高估成熟度（叙事盖过实测）。
 2. **长文深埋事实**（`V101/V102` 0/2）：Parent Document Expansion（高分 chunk 拉同文档上下文，上限 8000 字符）。
 3. **跨语言 V119**：中文问→英文邮件埋点例外漏召——双语 query 扩展 / 别名映射。
 4. **B 类诱饵代号拒答残留**（`V086/V087/V092`）：需语义级代号核验，有误伤 answer 风险，谨慎。
-5. **OCR**：图片/扫描件 0/4 不可检索——大功能，接 tesseract 或视觉模型。
+5. ~~**OCR**：图片/扫描件不可检索~~ —— **已落地**（tesseract + chi_sim，**索引期** OCR：独立图片 / 无文本层扫描件 PDF / DOCX 内嵌图；桌面「设置 → 模型」与服务端 `POST /api/settings/ocr-path` 均可配置路径）。剩余边界（混合型 PDF、ppt/xlsx 内嵌图、CCITTFax/JPXDecode、OCR 实体名误读）见 `RETRIEVAL_BASELINE_V2.md`「OCR 接入与边界」；该文档里 `V103–V108` 的 0/4 结论是**无 OCR 时期**的实测，需在装有 tesseract 的环境重跑才会反映新能力。
 6. **作答层评测盲区**：harness 只用 top-k 当代理，不给 LLM 答案文本判分——接 LLM-judge 闭环事实正确性/忠实度。
 
 ---

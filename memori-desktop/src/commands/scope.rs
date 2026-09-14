@@ -198,7 +198,9 @@ pub(crate) async fn read_file_preview(path: String) -> Result<FilePreviewDto, St
     }
 
     let content = if extracted_text_exts.contains(&ext.as_str()) {
-        memori_parser::extract_document_text(&target)
+        // 本命令是 async 的：绝不能在这里跑 OCR（扫描件逐页 OCR 会同步阻塞
+        // 运行时数分钟，预览界面假死）。OCR 只在索引期做，结果落库后由检索使用。
+        memori_parser::extract_document_text_without_ocr(&target)
             .ok_or_else(|| format!("无法从 .{ext} 文件提取可预览文本"))?
     } else {
         std::fs::read_to_string(&target).map_err(|e| format!("读取文件失败: {e}"))?

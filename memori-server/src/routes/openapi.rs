@@ -311,6 +311,15 @@ const ROUTES: &[RouteDoc] = &[
     },
     RouteDoc {
         method: "post",
+        path: "/api/settings/ocr-path",
+        tag: "settings",
+        summary: "设置 OCR(tesseract) 可执行文件路径；空值表示回退 PATH 自动探测",
+        auth: Some("operator"),
+        request: Some("SetOcrTesseractPathRequest"),
+        response: "AppSettingsDto",
+    },
+    RouteDoc {
+        method: "post",
         path: "/api/settings/rank",
         tag: "settings",
         summary: "设置项语义排序（嵌入）",

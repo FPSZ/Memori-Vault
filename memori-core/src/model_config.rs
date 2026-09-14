@@ -236,17 +236,28 @@ pub fn resolve_runtime_model_config_from_env() -> RuntimeModelConfig {
     }
 }
 
+/// 首次调用前 `MEMORI_OCR_TESSERACT_PATH` 是否已被外部显式设置。
+///
+/// 用于区分两种来源：外部预设的环境变量（优先级最高，永不覆盖）与本函数自己写入的值
+/// （应随 settings 变化而更新）。若只判断"变量是否存在"，第二次调用会把自己上次写入的
+/// 值误认为是外部设置，导致在设置里改路径必须重启应用才生效。
+static OCR_ENV_PREEXISTING: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
 /// 把 settings 里的 OCR tesseract 路径注入进程环境（供 parser 的 OCR 调用读取）。
-/// 优先级：显式环境变量 > settings 配置；settings 未配置时不注入。
+/// 优先级：外部显式环境变量 > settings 配置；settings 为空/空白时清除注入值，
+/// 让 parser 回退到 PATH 查找。
 pub fn apply_ocr_path_to_env(configured: Option<&str>) {
-    let Some(path) = configured.map(str::trim).filter(|value| !value.is_empty()) else {
-        return;
-    };
-    if std::env::var_os(memori_parser::OCR_TESSERACT_PATH_ENV).is_some() {
+    let preexisting = *OCR_ENV_PREEXISTING
+        .get_or_init(|| std::env::var_os(memori_parser::OCR_TESSERACT_PATH_ENV).is_some());
+    if preexisting {
         return;
     }
+    let configured = configured.map(str::trim).filter(|value| !value.is_empty());
     unsafe {
-        std::env::set_var(memori_parser::OCR_TESSERACT_PATH_ENV, path);
+        match configured {
+            Some(path) => std::env::set_var(memori_parser::OCR_TESSERACT_PATH_ENV, path),
+            None => std::env::remove_var(memori_parser::OCR_TESSERACT_PATH_ENV),
+        }
     }
 }
 
@@ -402,17 +413,16 @@ mod tests {
             std::env::var(memori_parser::OCR_TESSERACT_PATH_ENV).unwrap(),
             "D:/tesseract/tesseract.exe"
         );
-        // 2) 显式环境变量优先，settings 不覆盖。
+        // 2) settings 改了路径 → 立即生效（改配置不需要重启应用）。
         apply_ocr_path_to_env(Some("D:/settings/path.exe"));
         assert_eq!(
             std::env::var(memori_parser::OCR_TESSERACT_PATH_ENV).unwrap(),
-            "D:/tesseract/tesseract.exe"
+            "D:/settings/path.exe"
         );
-        unsafe {
-            std::env::remove_var(memori_parser::OCR_TESSERACT_PATH_ENV);
-        }
-        // 3) settings 为空/空白 → 不注入。
+        // 3) settings 为空/空白 → 清除注入值，让 parser 回退 PATH 查找。
         apply_ocr_path_to_env(None);
+        assert!(std::env::var_os(memori_parser::OCR_TESSERACT_PATH_ENV).is_none());
+        apply_ocr_path_to_env(Some("D:/settings/path.exe"));
         apply_ocr_path_to_env(Some("   "));
         assert!(std::env::var_os(memori_parser::OCR_TESSERACT_PATH_ENV).is_none());
     }

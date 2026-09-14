@@ -7,6 +7,7 @@ import {
   setIndexFilter as saveIndexFilterRemote,
   setMcpSettings as saveMcpSettingsRemote,
   setMemorySettings as saveMemorySettingsRemote,
+  setOcrTesseractPath as saveOcrTesseractPathRemote,
   validateModelSetup
 } from "./api/desktop";
 import {
@@ -38,6 +39,8 @@ export interface UseAppSettingsDeps {
   memorySettings: MemorySettingsDto;
   filterConfig: IndexFilterConfigDto;
   uiLang: Language;
+  ocrTesseractPath: string;
+  setOcrTesseractPath: React.Dispatch<React.SetStateAction<string>>;
   setEnterpriseBusy: React.Dispatch<React.SetStateAction<boolean>>;
   setEnterprisePolicy: React.Dispatch<React.SetStateAction<EnterprisePolicyDto>>;
   setModelAvailability: React.Dispatch<React.SetStateAction<ModelAvailabilityDto | null>>;
@@ -64,6 +67,8 @@ export function useAppSettings(deps: UseAppSettingsDeps) {
     memorySettings,
     filterConfig,
     uiLang,
+    ocrTesseractPath,
+    setOcrTesseractPath,
     setEnterpriseBusy,
     setEnterprisePolicy,
     setModelAvailability,
@@ -168,6 +173,47 @@ export function useAppSettings(deps: UseAppSettingsDeps) {
     setProviderModels((prev) => ({ ...prev, from_folder: [], merged: prev.from_service }));
   };
 
+  /// 选择 tesseract 可执行文件（OCR 引擎）；保存后立即生效，无需重启应用。
+  const onPickOcrTesseractPath = async () => {
+    try {
+      if (!isTauriHostAvailable()) {
+        throw new Error(TAURI_HOST_MISSING_MESSAGE);
+      }
+      const selected = await open({
+        directory: false,
+        multiple: false,
+        defaultPath: ocrTesseractPath || undefined
+      });
+      if (!selected || Array.isArray(selected)) {
+        return;
+      }
+      const saved = await withTimeout(
+        saveOcrTesseractPathRemote(selected),
+        MODEL_ACTION_TIMEOUT_MS,
+        "Saving OCR engine path timed out."
+      );
+      setOcrTesseractPath(saved.ocr_tesseract_path ?? "");
+    } catch (err) {
+      // 失败要让用户看见（否则"点了没反应"）：走全局错误提示，再向上抛出。
+      setError(toUiErrorMessage(err));
+      throw err;
+    }
+  };
+
+  const onClearOcrTesseractPath = async () => {
+    try {
+      const saved = await withTimeout(
+        saveOcrTesseractPathRemote(null),
+        MODEL_ACTION_TIMEOUT_MS,
+        "Clearing OCR engine path timed out."
+      );
+      setOcrTesseractPath(saved.ocr_tesseract_path ?? "");
+    } catch (err) {
+      setError(toUiErrorMessage(err));
+      throw err;
+    }
+  };
+
   const onSaveMcpSettings = async () => {
     setMcpBusy(true);
     setMcpMessage(null);
@@ -250,6 +296,8 @@ export function useAppSettings(deps: UseAppSettingsDeps) {
     onSelectProvider,
     onPickLocalModelsRoot,
     onClearLocalModelsRoot,
+    onPickOcrTesseractPath,
+    onClearOcrTesseractPath,
     onSaveMcpSettings,
     onCopyMcpClientConfig,
     onSaveMemorySettings,

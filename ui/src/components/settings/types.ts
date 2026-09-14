@@ -211,6 +211,10 @@ export type SettingsModalProps = {
   onRestartLocalModel: (role: "chat" | "graph" | "embed" | "rerank") => Promise<void>;
   onPickLocalModelsRoot: () => Promise<void>;
   onClearLocalModelsRoot: () => void;
+  /** OCR(tesseract) 可执行文件路径；空串表示按 PATH 自动探测。 */
+  ocrTesseractPath: string;
+  onPickOcrTesseractPath: () => Promise<void>;
+  onClearOcrTesseractPath: () => Promise<void>;
   indexingMode: IndexingMode;
   resourceBudget: ResourceBudget;
   scheduleStart: string;

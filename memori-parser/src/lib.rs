@@ -557,20 +557,46 @@ fn normalize_inline_text(text: &str) -> String {
 
 /// Extract plain text from a file based on its extension.
 /// Returns `None` if the file is not a supported binary format or extraction fails.
+///
+/// 索引期入口：允许扫描件/图片走 OCR 兜底（结果落库，ask 期不再重复 OCR）。
 pub fn extract_document_text(file_path: impl AsRef<Path>) -> Option<String> {
-    let path = file_path.as_ref();
+    extract_document_text_inner(file_path.as_ref(), true)
+}
+
+/// ask 期构造引用摘要用的入口：**不触发 OCR**。
+///
+/// 引用摘要是在 `engine_search` 的同步链路里现算的，而 OCR 是典型的秒级阻塞操作
+/// （扫描件多页时可达数分钟且每次 ask 都重来）。问答链路上不应该做 OCR，扫描件
+/// 的文本应在索引期抽取并落库。
+pub fn extract_document_text_without_ocr(file_path: impl AsRef<Path>) -> Option<String> {
+    extract_document_text_inner(file_path.as_ref(), false)
+}
+
+fn extract_document_text_inner(path: &Path, allow_ocr: bool) -> Option<String> {
     let ext = path.extension().and_then(|s| s.to_str())?;
     info!(path = %path.display(), ext = %ext, "[解析器] 提取二进制文档文本");
     let result = match ext.to_ascii_lowercase().as_str() {
-        "docx" => extract_docx_text(path),
-        "pdf" => extract_pdf_text(path),
+        "docx" => extract_docx_text(path, allow_ocr),
+        "pdf" => extract_pdf_text(path, allow_ocr),
         "pptx" => extract_pptx_text(path),
         "xlsx" => extract_xlsx_text(path),
         "doc" => extract_doc_text(path),
         "ppt" => extract_ppt_text(path),
         "xls" => extract_xls_text(path),
-        // 独立图片文件（审计 Q6）：直接 OCR，无 tesseract 时静默降级返回 None。
-        "png" | "jpg" | "jpeg" => ocr::ocr_image_file(path),
+        // 独立图片文件（审计 Q6）：OCR 取文本；没有可索引文本时返回空串而不是 None。
+        //
+        // 返回 None 会被索引链路当作"文件读取失败"，于是**每张图片**都会往
+        // `indexing_runtime.last_error` 写一次错误、UI 持续报错；而"未配置 tesseract"
+        // 和"图片里没有文字"都属于正常情况。返回空串会走索引器的空文档分支
+        // （清理旧索引 + 保留 catalog + 不写 last_error）。ask 期（allow_ocr=false）
+        // 同样返回空串。
+        "png" | "jpg" | "jpeg" => {
+            if allow_ocr && ocr::ocr_available() {
+                Some(ocr::ocr_image_file(path).unwrap_or_default())
+            } else {
+                Some(String::new())
+            }
+        }
         _ => None,
     };
     if result.is_none() {
@@ -581,7 +607,7 @@ pub fn extract_document_text(file_path: impl AsRef<Path>) -> Option<String> {
 
 /// Extract text from a .docx file (Open XML Word document).
 /// Docx is a ZIP archive containing word/document.xml with <w:t> text runs.
-fn extract_docx_text(path: &Path) -> Option<String> {
+fn extract_docx_text(path: &Path, allow_ocr: bool) -> Option<String> {
     debug!(path = %path.display(), "[解析器] 提取 DOCX 文本");
     let file = std::fs::File::open(path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
@@ -640,7 +666,9 @@ fn extract_docx_text(path: &Path) -> Option<String> {
     }
 
     // 内嵌图片（word/media/*）：OCR 追加（审计 Q6，无 tesseract 时静默跳过）。
-    if ocr::ocr_available()
+    // ask 期（allow_ocr=false）不做 OCR，避免阻塞回答链路。
+    if allow_ocr
+        && ocr::ocr_available()
         && let Ok(mut file) = std::fs::File::open(path)
         && let Ok(mut archive) = zip::ZipArchive::new(&mut file)
     {
@@ -655,6 +683,17 @@ fn extract_docx_text(path: &Path) -> Option<String> {
                 .then(|| name.to_string())
             })
             .collect();
+        // 干净机器上临时目录可能不存在：必须先建出来，否则 DOCX 内嵌图 OCR 会全部静默失败
+        // （PDF 路径在 write_pdf_image_file 里已经建过，这里补齐）。
+        let tmp_dir = std::env::temp_dir().join("memori-ocr");
+        if let Err(err) = std::fs::create_dir_all(&tmp_dir) {
+            warn!(
+                path = %path.display(),
+                dir = %tmp_dir.display(),
+                error = %err,
+                "OCR 临时目录创建失败，DOCX 内嵌图 OCR 将跳过"
+            );
+        }
         let mut ocr_texts = Vec::new();
         for name in media_names {
             let Ok(mut entry) = archive.by_name(&name) else {
@@ -662,22 +701,32 @@ fn extract_docx_text(path: &Path) -> Option<String> {
             };
             let mut bytes = Vec::new();
             // 大小上限与 PDF 图片一致：防病态文档内嵌超大图片拖死索引。
-            if std::io::Read::take(&mut entry, ocr::MAX_OCR_IMAGE_BYTES as u64 + 1)
+            // 读取失败（截断的流）必须直接跳过，不能拿不完整的字节去做 OCR。
+            let read_result = std::io::Read::take(&mut entry, ocr::MAX_OCR_IMAGE_BYTES as u64 + 1)
                 .read_to_end(&mut bytes)
-                .is_ok()
-                && bytes.len() > ocr::MAX_OCR_IMAGE_BYTES
-            {
+                .is_ok();
+            if !read_result {
+                warn!(path = %path.display(), media = %name, "DOCX 内嵌图片读取失败，跳过 OCR");
+                continue;
+            }
+            if bytes.len() > ocr::MAX_OCR_IMAGE_BYTES {
                 warn!(path = %path.display(), media = %name, "DOCX 内嵌图片过大，跳过 OCR");
                 continue;
             }
             let ext = name.rsplit('.').next().unwrap_or("png");
-            let tmp = std::env::temp_dir().join("memori-ocr").join(format!(
+            let tmp = tmp_dir.join(format!(
                 "docx_media_{}_{}.{}",
                 std::process::id(),
                 ocr::next_temp_seq(),
                 ext
             ));
-            if std::fs::write(&tmp, bytes).is_err() {
+            if let Err(err) = std::fs::write(&tmp, bytes) {
+                warn!(
+                    path = %path.display(),
+                    media = %name,
+                    error = %err,
+                    "DOCX 内嵌图片写入临时文件失败，跳过 OCR"
+                );
                 continue;
             }
             if let Some(text) = ocr::ocr_image_file(&tmp) {
@@ -699,7 +748,7 @@ fn extract_docx_text(path: &Path) -> Option<String> {
 
 /// Extract text from a PDF file using lopdf.
 /// 扫描件（无文本层）回退：提取页面 XObject 图片逐张 OCR（审计 Q6）。
-fn extract_pdf_text(path: &Path) -> Option<String> {
+fn extract_pdf_text(path: &Path, allow_ocr: bool) -> Option<String> {
     debug!(path = %path.display(), "[解析器] 提取 PDF 文本");
     let doc = lopdf::Document::load(path).ok()?;
     let pages = doc.get_pages();
@@ -717,10 +766,15 @@ fn extract_pdf_text(path: &Path) -> Option<String> {
     if !cleaned.is_empty() {
         return Some(cleaned);
     }
-    // 无文本层：按扫描件处理，OCR 每页图片并追加识别文本。
-    if !ocr::ocr_available() {
-        return None;
+    // 无文本层（扫描件）：
+    // - ask 期（allow_ocr=false）不做 OCR；
+    // - 本机没有 tesseract 时也不做 OCR。
+    // 两种情况都保持"抽取成功、内容为空"的语义：若返回 None，调用方会报
+    // "文件读取失败（可能被占用）"，把用户引向完全错误的排查方向。
+    if !allow_ocr || !ocr::ocr_available() {
+        return Some(cleaned);
     }
+    // 索引期：OCR 每页图片并追加识别文本（结果落库，ask 期不再重复 OCR）。
     let mut ocr_texts = Vec::new();
     for image_path in ocr::extract_pdf_images(path) {
         if let Some(text) = ocr::ocr_image_file(&image_path) {
@@ -729,7 +783,7 @@ fn extract_pdf_text(path: &Path) -> Option<String> {
         let _ = std::fs::remove_file(&image_path);
     }
     if ocr_texts.is_empty() {
-        return None;
+        return Some(cleaned);
     }
     Some(clean_extracted_document_text(&ocr_texts.join("\n")))
 }

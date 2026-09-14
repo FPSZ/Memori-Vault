@@ -167,6 +167,8 @@ pub(crate) struct AppSettingsDto {
     pub(crate) retrieval_gating_profile: String,
     pub(crate) generation_refusal_mode: String,
     pub(crate) gating_retry_on_refusal: bool,
+    /// OCR(tesseract) 可执行文件路径；为空表示按 PATH 自动探测。
+    pub(crate) ocr_tesseract_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +218,7 @@ impl AppSettingsDto {
                 .generation_refusal_mode
                 .unwrap_or_else(|| "balanced".to_string()),
             gating_retry_on_refusal: settings.gating_retry_on_refusal.unwrap_or(true),
+            ocr_tesseract_path: settings.ocr_tesseract_path,
         }
     }
 }
@@ -413,6 +416,13 @@ pub(crate) struct AuditListResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct SetLocalModelsRootRequest {
     pub(crate) path: String,
+}
+
+/// 设置 OCR(tesseract) 可执行文件路径；`path` 为空/缺省表示清除（回退 PATH 自动探测）。
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SetOcrTesseractPathRequest {
+    #[serde(default)]
+    pub(crate) path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

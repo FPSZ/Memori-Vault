@@ -360,7 +360,10 @@ pub(crate) fn build_reference_excerpt(file_path: &Path, chunk_content: &str) -> 
     let raw = if is_plain_text_reference_file(file_path) {
         std::fs::read_to_string(file_path).ok()
     } else {
-        memori_parser::extract_document_text(file_path)
+        // 引用摘要是在 ask 的同步链路上现算的，这里绝不能触发 OCR：
+        // 扫描件的 OCR 应在索引期完成并落库，否则一个被引用的扫描件会把
+        // tokio worker 阻塞数分钟，且每次 ask 都重来一遍。
+        memori_parser::extract_document_text_without_ocr(file_path)
             .or_else(|| std::fs::read_to_string(file_path).ok())
     };
     let Some(raw) = raw else {

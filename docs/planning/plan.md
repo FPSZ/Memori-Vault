@@ -36,6 +36,7 @@ Overall Progress: 工程硬化批 (E1–E8 + 审计安全/CI/前端速赢) 全�
 | 文档 | H1(E8) README 成熟度徽标 ✅/🚧/📐 | `17e5987` |
 | 卫生 | I1 email-memory-source 计划文档加 `.gitignore`（决定不入库） | `46ae244` |
 | 检索主线 | 解析扩到 9 格式 + v2 困难基准（548 文档/126 题）+ 英文/跨语言 + 拒答硬化 | `25654ec`/`22064fc`/`154372f`/`9c5f77f` |
+| 检索主线 | **Q6 OCR 接入**：独立图片 / 无文本层扫描件 PDF / DOCX 内嵌图（tesseract + chi_sim，**索引期**抽取；ask 与文件预览不跑 OCR） | 本 PR（collab） |
 
 → **审计里所有"低风险、可量化、可一轮闭环"的项已全部清完。**
 
@@ -47,7 +48,6 @@ Overall Progress: 工程硬化批 (E1–E8 + 审计安全/CI/前端速赢) 全�
 | **Q2** 长文深埋事实 0/2（doc rank1 但 chunk rank2-4 被拒） | 🔴 | Parent-Document Expansion（同文档 chunk 合并），与 Q1 同属 gating/证据构建轮，需一起验 | 质量轮 |
 | **Q4** 跨语言漏召（中文问→英文埋点例外） | 🟡 | 需双语 query 扩展 + 不污染单语盘面，须 live 验证 | 质量轮 |
 | **Q5** 诱饵代号拒答泄露（V086/V087/V092） | 🟡 | 需语义级核验，有误伤正常代号风险，须谨慎迭代 | 质量轮（谨慎） |
-| **Q6** OCR：图片/扫描件 0/4 不可检索 | 🟡 | 需集成 OCR 引擎 + 图像预处理 + 端到端索引，多日大功能 | 大功能（多轮） |
 | **E9/G3** 多租户 / 多资料库隔离（DB/索引/审计三层） | 🟢 | 需先定租户模型（产品决策），不是纯工程 | 待需求确认 |
 | **E10/G4** 增量索引进度推送（SSE/WebSocket） | 🟢 | 独立功能，需前后端协同设计 | 独立功能 |
 | **E11** shell-service 共享层（收敛 desktop/server 重复流程） | 🟢 | 大重构，收益是可维护性而非功能，低优先 | 重构（低优先） |
@@ -57,7 +57,7 @@ Overall Progress: 工程硬化批 (E1–E8 + 审计安全/CI/前端速赢) 全�
 ### 推荐推进顺序
 
 1. **质量轮（Q1+Q2 优先，Q4/Q5 同轮）** — 价值最高，Q3 judge 基础设施已就绪；红线"reject 不退"，每改一次 gating 跑 `--judge` 全量验"答案对↑ 且 拒答对不↓"。
-2. **Q6 OCR** — 覆盖面，独立大功能可单独成轮。
+2. **Q6 后续**：`V103–V108` 那 4 道图片/扫描题需在装有 tesseract 的环境**重跑**，才能把新能力写进基线数字；混合型 PDF、ppt/xlsx 内嵌图、CCITTFax/JPXDecode 仍是已知边界（见 `RETRIEVAL_BASELINE_V2.md`「OCR 接入与边界」）。
 3. **E9/E10/E11、P4 HNSW** — 需产品决策或规模到了再做。
 
 ## 2026-06-05 Live Regression Update
@@ -551,7 +551,7 @@ GPT 修复计划（泛化去噪 + 覆盖率门控，无实体硬编码）：
 - 产品化：OpenAPI 可用；管理接口限流；一条 request-id 串起整链路；有 50k 规模 P50/P95 数据与扩展决策。
 - 文档：README 能力状态可一眼分清"已验证 vs 设计中"。
 
-**不在本阶段**（记录留档，后续单独成轮）：A 类 gating 误拒放行、长文 Parent-Doc 扩展、跨语言 V119 双语扩展、OCR、作答层 LLM-judge 评测——详见 `RETRIEVAL_BASELINE_V2.md` 与 IMPROVEMENTS.md 末节。
+**不在本阶段**（记录留档，后续单独成轮）：A 类 gating 误拒放行、长文 Parent-Doc 扩展、跨语言 V119 双语扩展、作答层 LLM-judge 评测——详见 `RETRIEVAL_BASELINE_V2.md` 与 IMPROVEMENTS.md 末节。（**OCR 已落地**，见上方"已做"表；剩余边界见 `RETRIEVAL_BASELINE_V2.md`「OCR 接入与边界」。）
 
 ## Change Log
 变更日志已迁移至 `docs/planning/PLAN_CHANGELOG.md`，便于保持计划正文聚焦执行项。

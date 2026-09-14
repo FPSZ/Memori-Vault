@@ -271,6 +271,7 @@ document routing -> chunk retrieval -> RRF/gating -> evidence/citation
 - 图谱抽取与实体关系 API：已实现，图谱可视化 UI 仍有限。
 - 跨语言检索（中文问→英文文档）：基础覆盖，query 双语扩展未完整。
 - Source preview 与 Markdown export。
+- OCR（独立图片 / 无文本层扫描件 PDF / DOCX 内嵌图，**索引期** tesseract + `chi_sim`）：已接入，桌面「设置 → 模型」与服务端 `POST /api/settings/ocr-path` 均可配置路径；但**实体名容易被误读**（实测 `苍岭` → `苑岭/苔岭`），且混合型 PDF、`ppt`/`xlsx` 内嵌图、`CCITTFaxDecode`/`JPXDecode` 仍是边界；改配置后需重建索引才会对已入库文件生效。
 
 ### 📐 设计中/待实现
 
@@ -278,7 +279,6 @@ document routing -> chunk retrieval -> RRF/gating -> evidence/citation
 - 管理接口限流（防暴力登录/admin）、检索链路 request-id/trace。
 - OpenAPI / Swagger spec（memori-server）。
 - API key 接 OS keychain（当前明文存 settings.json）。
-- OCR（图片/扫描件目前不可检索）。
 - Memory heat score、conflict resolver、lifecycle classifier。
 - 50k 规模压测（P50/P95，大规模并发性能尚未验证）。
 - 多租户隔离（当前 OIDC 登录后共享同一库）。

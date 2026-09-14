@@ -123,6 +123,11 @@ jobs:
             libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
             "$WEBKIT_DEV_PKG"
 
+      # OCR 端到端测试需要真实的 tesseract + chi_sim 语言包（缺失时该测试会自动跳过）。
+      - name: Install tesseract for OCR end-to-end test (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y tesseract-ocr tesseract-ocr-chi-sim
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
