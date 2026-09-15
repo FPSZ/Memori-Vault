@@ -190,7 +190,7 @@ Desktop 现在与 server 保持同级策略边界。
 
 ## 私有化部署资产
 
-见 [`deploy/README.md`](../deploy/README.md)：
+见 [`deploy/README.md`](../../deploy/README.md)：
 
 - systemd 单元模板
 - 环境变量模板
