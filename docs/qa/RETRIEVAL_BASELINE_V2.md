@@ -191,7 +191,9 @@ bench：`cargo run -p memori-core --example graph_bench -- <files>`（对每个 
 - **重排：未接入**（rerank_applied_rate=0%）——v2 满配基线的 bge-reranker-v2-m3 在本机不可用
 - 图谱端点置为不可达（快速失败，本机显存 6GB 无法同时承载图谱/嵌入/作答）
 
-### 结果（`docs/qa/retrieval_regression_v2_judge_report.json`，126 题同一次跑）
+### 结果（本地 `--judge` 跑数，126 题同一次跑）
+
+> 逐题明细（每题的 judge 判分与理由）**不入库**：这类文件每跑一次基准就整体重写，进仓库只会带来 diff 噪声与体积膨胀。需要存档时以 CI artifact / 附件形式提供；仓库里只保留下面的汇总指标。
 
 | 层 | 指标 | 值 |
 | --- | --- | ---: |
