@@ -7,7 +7,9 @@ use tracing::{debug, info, warn};
 
 mod ocr;
 
-pub use ocr::{OCR_TESSERACT_PATH_ENV, extract_pdf_images, ocr_available, ocr_image_file};
+pub use ocr::{
+    OCR_TESSERACT_PATH_ENV, extract_pdf_images, for_each_pdf_image, ocr_available, ocr_image_file,
+};
 
 /// 单个文本块的数据结构。
 #[derive(Debug, Clone)]
@@ -591,7 +593,16 @@ fn extract_document_text_inner(path: &Path, allow_ocr: bool) -> Option<String> {
         // （清理旧索引 + 保留 catalog + 不写 last_error）。ask 期（allow_ocr=false）
         // 同样返回空串。
         "png" | "jpg" | "jpeg" => {
-            if allow_ocr && ocr::ocr_available() {
+            // 独立图片是把路径直接交给 tesseract（不像 PDF/DOCX 那样先自己缓冲），
+            // 但超大图仍会让 tesseract 吃满内存直到 30s 超时，所以先用文件大小挡一道，
+            // 与另外两条路径保持同一口径（上限见 MAX_OCR_IMAGE_BYTES）。
+            let too_large = std::fs::metadata(path)
+                .map(|meta| meta.len() > ocr::MAX_OCR_IMAGE_BYTES as u64)
+                .unwrap_or(false);
+            if too_large {
+                warn!(path = %path.display(), "图片文件过大，跳过 OCR");
+                Some(String::new())
+            } else if allow_ocr && ocr::ocr_available() {
                 Some(ocr::ocr_image_file(path).unwrap_or_default())
             } else {
                 Some(String::new())
@@ -776,12 +787,13 @@ fn extract_pdf_text(path: &Path, allow_ocr: bool) -> Option<String> {
     }
     // 索引期：OCR 每页图片并追加识别文本（结果落库，ask 期不再重复 OCR）。
     let mut ocr_texts = Vec::new();
-    for image_path in ocr::extract_pdf_images(path) {
-        if let Some(text) = ocr::ocr_image_file(&image_path) {
+    // 边解码边 OCR：临时文件在回调返回后立刻回收，不会把整份扫描件的图片都堆在临时目录里
+    // （张数与总字节上限见 `MAX_OCR_PDF_*`）。
+    ocr::for_each_pdf_image(path, |image_path| {
+        if let Some(text) = ocr::ocr_image_file(image_path) {
             ocr_texts.push(text);
         }
-        let _ = std::fs::remove_file(&image_path);
-    }
+    });
     if ocr_texts.is_empty() {
         return Some(cleaned);
     }

@@ -187,7 +187,13 @@ pub(crate) async fn read_file_preview(path: String) -> Result<FilePreviewDto, St
         "ps1", "log",
     ];
     let extracted_text_exts = ["docx", "pdf"];
-    if !plain_text_exts.contains(&ext.as_str()) && !extracted_text_exts.contains(&ext.as_str()) {
+    // 图片既不是纯文本、也不走"抽取文本"：单列一类，避免点开图片 citation 直接报
+    // "不支持预览的文件类型: .png"。
+    let image_exts = ["png", "jpg", "jpeg"];
+    if !plain_text_exts.contains(&ext.as_str())
+        && !extracted_text_exts.contains(&ext.as_str())
+        && !image_exts.contains(&ext.as_str())
+    {
         return Err(format!("不支持预览的文件类型: .{ext}"));
     }
 
@@ -197,7 +203,11 @@ pub(crate) async fn read_file_preview(path: String) -> Result<FilePreviewDto, St
         return Err("文件过大（超过 5MB）".to_string());
     }
 
-    let content = if extracted_text_exts.contains(&ext.as_str()) {
+    let content = if image_exts.contains(&ext.as_str()) {
+        // 以本地绝对路径返回，前端可据此用 Tauri 资源协议直接显示图片
+        // （完整图片渲染需要前端配合，参考评审意见）；此处先保证不再报错。
+        target.to_string_lossy().to_string()
+    } else if extracted_text_exts.contains(&ext.as_str()) {
         // 本命令是 async 的：绝不能在这里跑 OCR（扫描件逐页 OCR 会同步阻塞
         // 运行时数分钟，预览界面假死）。OCR 只在索引期做，结果落库后由检索使用。
         memori_parser::extract_document_text_without_ocr(&target)
@@ -208,6 +218,7 @@ pub(crate) async fn read_file_preview(path: String) -> Result<FilePreviewDto, St
     let format = match ext.as_str() {
         "md" => "markdown",
         "docx" | "pdf" => "document",
+        "png" | "jpg" | "jpeg" => "image",
         _ => "text",
     };
     Ok(FilePreviewDto {

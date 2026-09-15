@@ -523,7 +523,12 @@ fn build_component_schemas() -> serde_json::Value {
         "ScanLocalModelFilesRequest": { "type": "object", "properties": { "root": { "type": "string" } } },
         "ProbeProviderRequest": obj(),
         "PullModelRequest": obj(),
-        "SetWatchRootRequest": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] }
+        "SetWatchRootRequest": { "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] },
+        "SetOcrTesseractPathRequest": {
+            "type": "object",
+            "properties": { "path": { "type": ["string", "null"] } },
+            "description": "OCR(tesseract) 可执行文件路径；null/缺省表示清除，回退 PATH 自动探测"
+        }
     })
 }
 
@@ -554,6 +559,52 @@ mod tests {
         assert_eq!(spec["openapi"], "3.1.0");
         assert!(spec["paths"].as_object().unwrap().len() >= 25);
         assert!(spec["components"]["schemas"]["ErrorResponse"].is_object());
+    }
+
+    /// 守门：spec 里出现的每个 `$ref` 都必须能在 `components.schemas` 里解析到。
+    /// 之前只断言 paths 数量与 ErrorResponse 存在，抓不到"新增端点忘了登记 schema"这类
+    /// 悬空引用（Swagger UI 会渲染出坏引用）。这条测试把它固定住。
+    #[test]
+    fn every_ref_in_spec_resolves() {
+        let spec = build_openapi_spec();
+        let schemas = spec["components"]["schemas"]
+            .as_object()
+            .expect("components.schemas object");
+        let mut refs = Vec::new();
+        collect_refs(&spec, &mut refs);
+        assert!(!refs.is_empty(), "spec 里应至少含一个 $ref");
+        for reference in refs {
+            let name = reference
+                .strip_prefix("#/components/schemas/")
+                .unwrap_or_else(|| panic!("unexpected $ref form: {reference}"));
+            assert!(
+                schemas.contains_key(name),
+                "dangling $ref: {reference}（components.schemas 中没有 {name}）"
+            );
+        }
+    }
+
+    /// 递归收集 JSON 里的全部 `$ref` 字符串。
+    fn collect_refs(value: &serde_json::Value, out: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, item) in map {
+                    if key == "$ref" {
+                        if let Some(reference) = item.as_str() {
+                            out.push(reference.to_string());
+                        }
+                    } else {
+                        collect_refs(item, out);
+                    }
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    collect_refs(item, out);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// 守门：路由登记表条数必须等于 build_router 注册的 REST 路由方法数（不含 openapi 自身）。

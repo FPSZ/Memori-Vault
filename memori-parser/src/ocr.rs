@@ -21,6 +21,10 @@ const OCR_TIMEOUT_SECS: u64 = 30;
 pub(crate) const MAX_OCR_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 /// 单张图片解码后 raw 像素的字节上限（防 flate 解压炸弹撑爆内存）。
 pub(crate) const MAX_OCR_RAW_IMAGE_BYTES: usize = 128 * 1024 * 1024;
+/// 单份 PDF 参与 OCR 的图片张数上限（防 500 页扫描件把临时目录撑满、串行识别数小时）。
+pub(crate) const MAX_OCR_PDF_IMAGES: usize = 200;
+/// 单份 PDF 参与 OCR 的图片总字节上限（张数与体积双保险）。
+pub(crate) const MAX_OCR_PDF_TOTAL_BYTES: usize = 256 * 1024 * 1024;
 /// tesseract 路径环境变量名（server/desktop 启动时从 settings 注入）。
 pub const OCR_TESSERACT_PATH_ENV: &str = "MEMORI_OCR_TESSERACT_PATH";
 /// 页面分割模式：PSM 4（单列可变尺寸）。实测 PSM 3（全自动）在图文混排/扫描件上
@@ -35,8 +39,18 @@ pub(crate) fn next_temp_seq() -> u64 {
     TEMP_FILE_SEQ.fetch_add(1, Ordering::Relaxed)
 }
 
+/// tesseract 探测结果：可执行文件 + 实际可用的语言参数（如 `chi_sim+eng`）。
+///
+/// 只探 `--version` 是不够的：装了**英文版** tesseract 的机器会得到"可用"却永远识别不出
+/// 中文（`-l chi_sim` 直接失败）。这里顺带用 `--list-langs` 组装可用语言。
+#[derive(Clone, Debug)]
+struct TesseractRuntime {
+    path: PathBuf,
+    languages: String,
+}
+
 /// tesseract 探测缓存：键是配置值，值是探测结果。
-type TesseractCache = Mutex<Option<(String, Option<PathBuf>)>>;
+type TesseractCache = Mutex<Option<(String, Option<TesseractRuntime>)>>;
 
 /// tesseract 路径探测缓存：键是当前的 `MEMORI_OCR_TESSERACT_PATH` 取值，值是探测结果。
 /// 用配置值作键，改配置后下一次调用会自动重新探测，无需重启应用；
@@ -44,7 +58,7 @@ type TesseractCache = Mutex<Option<(String, Option<PathBuf>)>>;
 static TESSERACT_CACHE: OnceLock<TesseractCache> = OnceLock::new();
 
 /// 解析 tesseract 可执行文件：`MEMORI_OCR_TESSERACT_PATH` 优先，回退 PATH 查找。
-fn resolve_tesseract() -> Option<PathBuf> {
+fn resolve_tesseract() -> Option<TesseractRuntime> {
     let configured = std::env::var(OCR_TESSERACT_PATH_ENV).unwrap_or_default();
     let cache = TESSERACT_CACHE.get_or_init(|| Mutex::new(None));
     let Ok(mut guard) = cache.lock() else {
@@ -61,36 +75,61 @@ fn resolve_tesseract() -> Option<PathBuf> {
 }
 
 /// 实际探测逻辑。配置值为空白时视为未配置，回退 PATH 查找。
-fn resolve_tesseract_uncached(configured: &str) -> Option<PathBuf> {
+fn resolve_tesseract_uncached(configured: &str) -> Option<TesseractRuntime> {
     let configured = configured.trim();
-    if !configured.is_empty() {
+    let path = if !configured.is_empty() {
         let path = PathBuf::from(configured);
         if path.is_file() {
-            return Some(path);
+            path
+        } else {
+            warn!(
+                path = %path.display(),
+                "MEMORI_OCR_TESSERACT_PATH 指向的文件不存在，跳过 OCR"
+            );
+            return None;
         }
+    } else {
+        let name = if cfg!(windows) {
+            "tesseract.exe"
+        } else {
+            "tesseract"
+        };
+        PathBuf::from(name)
+    };
+    let languages = detect_languages(&path)?;
+    Some(TesseractRuntime { path, languages })
+}
+
+/// 用 `--list-langs` 探测可用语言包：优先 `chi_sim`，其次 `eng`（两边都没有 → 该 tesseract
+/// 视为不可用，避免出现 "available 但永远识别不出东西"）。
+fn detect_languages(path: &Path) -> Option<String> {
+    let mut command = Command::new(path);
+    command.arg("--list-langs");
+    apply_no_window(&mut command);
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let has = |lang: &str| stdout.lines().any(|line| line.trim() == lang);
+    let mut picked: Vec<&str> = Vec::new();
+    if has("chi_sim") {
+        picked.push("chi_sim");
+    }
+    if has("eng") {
+        picked.push("eng");
+    }
+    if picked.is_empty() {
         warn!(
             path = %path.display(),
-            "MEMORI_OCR_TESSERACT_PATH 指向的文件不存在，跳过 OCR"
+            "tesseract 没有 chi_sim / eng 语言包，跳过 OCR（请安装对应 traineddata）"
         );
         return None;
     }
-    let name = if cfg!(windows) {
-        "tesseract.exe"
-    } else {
-        "tesseract"
-    };
-    let path = PathBuf::from(name);
-    if std::process::Command::new(&path)
-        .arg("--version")
-        .output()
-        .is_ok()
-    {
-        return Some(path);
-    }
-    None
+    Some(picked.join("+"))
 }
 
-/// 检测 OCR 是否可用（找不到 tesseract 时调用方直接跳过）。
+/// 检测 OCR 是否可用（找不到 tesseract、或没有任何可用语言包时调用方直接跳过）。
 pub fn ocr_available() -> bool {
     resolve_tesseract().is_some()
 }
@@ -104,17 +143,19 @@ pub fn ocr_available() -> bool {
 pub fn ocr_image_file(path: &Path) -> Option<String> {
     let tesseract = resolve_tesseract()?;
     let started = std::time::Instant::now();
-    let mut child = match Command::new(&tesseract)
+    let mut command = Command::new(&tesseract.path);
+    command
         .arg(path)
         .arg("stdout")
         .arg("-l")
-        .arg("chi_sim")
+        .arg(&tesseract.languages)
         .arg("--psm")
         .arg(OCR_PSM)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
+        .stderr(std::process::Stdio::piped());
+    // Windows 桌面端：不加 CREATE_NO_WINDOW 每张图都会闪一次控制台窗口。
+    apply_no_window(&mut command);
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_) => {
             warn!(path = %path.display(), "tesseract 启动失败，跳过 OCR");
@@ -190,53 +231,131 @@ pub fn ocr_image_file(path: &Path) -> Option<String> {
     Some(text)
 }
 
+/// Windows 上避免弹控制台窗口（桌面端每张图闪一次黑窗很影响体验）。
+fn apply_no_window(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
 /// 从 PDF 提取页面 XObject 图片到临时目录，返回图片文件路径列表。
 /// 支持 DCTDecode（JPEG 直写）与 FlateDecode（raw 像素 → PNG 编码）；其余过滤跳过。
+/// 提取 PDF 内嵌图片到临时目录，返回路径列表（调用方负责删除）。
 pub fn extract_pdf_images(pdf_path: &Path) -> Vec<PathBuf> {
+    let mut images = Vec::new();
+    scan_pdf_images(pdf_path, false, &mut |path| images.push(path.to_path_buf()));
+    images
+}
+
+/// 逐张解码 → 回调 → 立即删除临时文件；返回实际处理的图片数。
+///
+/// `extract_pdf_text` 用它**边解码边 OCR**：500 页扫描件不会先把整批图片落盘、再串行识别，
+/// 临时目录不会被撑满；同时受张数与总字节上限约束（见 `MAX_OCR_PDF_*`）。
+pub fn for_each_pdf_image(pdf_path: &Path, mut on_image: impl FnMut(&Path)) -> usize {
+    scan_pdf_images(pdf_path, true, &mut on_image)
+}
+
+fn scan_pdf_images(pdf_path: &Path, delete_after: bool, on_image: &mut dyn FnMut(&Path)) -> usize {
     let Ok(doc) = lopdf::Document::load(pdf_path) else {
         warn!(path = %pdf_path.display(), "PDF 加载失败，无法提取内嵌图片");
-        return Vec::new();
+        return 0;
     };
     let pages = doc.get_pages();
-    let mut images = Vec::new();
+    let mut processed = 0usize;
+    let mut total_bytes = 0usize;
+    let mut seen: std::collections::HashSet<lopdf::ObjectId> = std::collections::HashSet::new();
     for (page_num, page_id) in pages {
-        // lopdf 的 get_page_resources 第一个返回值是页面资源字典（含继承），
-        // 需要自行遍历 /XObject 条目并 dereference 每个值（Reference 或直接 Stream）。
-        let Ok((Some(resources), _)) = doc.get_page_resources(page_id) else {
+        // lopdf 的 get_page_resources 返回 (直接资源字典, 间接/继承资源字典的 ObjectId 列表)：
+        // 只有 /Resources 是**直接字典**时第一个值才是 Some；Word / Acrobat / Ghostscript /
+        // 多数扫描仪驱动导出的 PDF 用间接引用或从 /Parent 继承，资源在第二个返回值里。
+        // 早期实现丢掉第二个返回值，导致这些页被整页跳过（扫描件索引成空）。
+        let Ok((direct, inherited_ids)) = doc.get_page_resources(page_id) else {
             continue;
         };
-        let Some(xobjects) = resources
-            .get(b"XObject")
-            .ok()
-            .and_then(|value| value.as_dict().ok())
-        else {
-            continue;
-        };
-        for (_, value) in xobjects.iter() {
-            let Some(stream) = (match value {
-                lopdf::Object::Reference(object_id) => doc
-                    .get_object(*object_id)
-                    .ok()
-                    .and_then(|obj| obj.as_stream().ok()),
-                lopdf::Object::Stream(stream) => Some(stream),
-                _ => None,
-            }) else {
+        let mut dictionaries: Vec<&lopdf::Dictionary> = Vec::new();
+        if let Some(dict) = direct {
+            dictionaries.push(dict);
+        }
+        for id in inherited_ids {
+            if let Ok(obj) = doc.get_object(id)
+                && let Ok(dict) = obj.as_dict()
+            {
+                dictionaries.push(dict);
+            }
+        }
+        for resources in dictionaries {
+            // `/XObject` 本身也可能是间接引用（`/XObject 15 0 R`）：必须用会解引用的
+            // get_dict_in_dict，直接 as_dict 会让整页被跳过。
+            let Ok(xobjects) = doc.get_dict_in_dict(resources, b"XObject") else {
                 continue;
             };
-            if !is_image_stream(stream) {
-                continue;
+            for (_, value) in xobjects.iter() {
+                // 同一张图被多页复用时只解码/OCR 一次（500 页扫描件的常见形态）。
+                let object_id = match value {
+                    lopdf::Object::Reference(id) => Some(*id),
+                    _ => None,
+                };
+                if let Some(id) = object_id
+                    && !seen.insert(id)
+                {
+                    continue;
+                }
+                let Some(stream) = (match value {
+                    lopdf::Object::Reference(object_id) => doc
+                        .get_object(*object_id)
+                        .ok()
+                        .and_then(|obj| obj.as_stream().ok()),
+                    lopdf::Object::Stream(stream) => Some(stream),
+                    _ => None,
+                }) else {
+                    continue;
+                };
+                if !is_image_stream(stream) {
+                    continue;
+                }
+                if stream.content.len() > MAX_OCR_IMAGE_BYTES {
+                    warn!(page = page_num, "PDF 图片流过大，跳过 OCR");
+                    continue;
+                }
+                let Some(path) = write_pdf_image_file(&doc, pdf_path, page_num, stream) else {
+                    continue;
+                };
+                if processed >= MAX_OCR_PDF_IMAGES {
+                    warn!(
+                        limit = MAX_OCR_PDF_IMAGES,
+                        "PDF 图片张数超过上限，剩余页面不再 OCR"
+                    );
+                    let _ = std::fs::remove_file(&path);
+                    return processed;
+                }
+                let size = std::fs::metadata(&path)
+                    .map(|meta| meta.len() as usize)
+                    .unwrap_or_default();
+                if total_bytes + size > MAX_OCR_PDF_TOTAL_BYTES {
+                    warn!(
+                        limit = MAX_OCR_PDF_TOTAL_BYTES,
+                        "PDF 图片总量超过上限，剩余页面不再 OCR"
+                    );
+                    let _ = std::fs::remove_file(&path);
+                    return processed;
+                }
+                total_bytes += size;
+                on_image(&path);
+                if delete_after {
+                    let _ = std::fs::remove_file(&path);
+                }
+                processed += 1;
             }
-            if stream.content.len() > MAX_OCR_IMAGE_BYTES {
-                warn!(page = page_num, "PDF 图片流过大，跳过 OCR");
-                continue;
-            }
-            let Some(path) = write_pdf_image_file(&doc, pdf_path, page_num, stream) else {
-                continue;
-            };
-            images.push(path);
         }
     }
-    images
+    processed
 }
 
 /// 判断流是否为图片 XObject。
@@ -290,6 +409,13 @@ fn write_pdf_image_file(
     page_num: u32,
     stream: &lopdf::Stream,
 ) -> Option<PathBuf> {
+    // /DecodeParms 的 Predictor 会把行首 filter 字节编进数据：PNG predictor(15) 解出来是
+    // 带 filter 字节的错位数据，Predictor 2 的图甚至能穿过现有全部护栏，最终把一张错位图
+    // OCR 成噪声写进索引。与位深那条同属"宁可少索引，不能索引噪声"。
+    if !predictor_is_supported(doc, stream) {
+        warn!("PDF 图片使用了 Predictor（非 1），解码结果不是纯像素，跳过 OCR");
+        return None;
+    }
     // Filter 可能是单个 Name、名称数组，或指向它们的间接引用。
     let filters = stream_filters(doc, stream)?;
 
@@ -354,6 +480,36 @@ fn write_pdf_image_file(
     ));
     std::fs::write(&path, bytes).ok()?;
     Some(path)
+}
+
+/// `/DecodeParms` 是否可接受：只接受**没有** `/DecodeParms`，或其中 `Predictor == 1`
+/// （或干脆没写 Predictor）。其余（PNG predictor 15、TIFF predictor 2、间接引用等）跳过。
+fn predictor_is_supported(doc: &lopdf::Document, stream: &lopdf::Stream) -> bool {
+    let Some(raw) = stream.dict.get(b"DecodeParms").ok() else {
+        return true;
+    };
+    let Some(resolved) = resolve_object(doc, raw) else {
+        return false;
+    };
+    let dict_is_supported = |dict: &lopdf::Dictionary| -> bool {
+        dict.get(b"Predictor")
+            .ok()
+            .and_then(|value| resolve_object(doc, value))
+            .and_then(|value| value.as_i64().ok())
+            .is_none_or(|predictor| predictor == 1)
+    };
+    match resolved {
+        // /DecodeParms 与 /Filter 数组一一对应（可能含 Null 占位）。
+        lopdf::Object::Array(items) => items.iter().all(|item| {
+            resolve_object(doc, item).is_some_and(|value| match value {
+                lopdf::Object::Dictionary(dict) => dict_is_supported(dict),
+                lopdf::Object::Null => true,
+                _ => false,
+            })
+        }),
+        lopdf::Object::Dictionary(dict) => dict_is_supported(dict),
+        _ => false,
+    }
 }
 
 /// 按顺序执行过滤器链解码（PDF 规范：先应用的列在前）。
@@ -864,6 +1020,112 @@ mod tests {
             None,
             "不支持的色彩空间应跳过"
         );
+    }
+
+    /// 回归（评审阻断项）：`/Resources` 与 `/XObject` 都用**间接引用**的 PDF 也必须能提取出图片。
+    ///
+    /// 早期实现丢掉了 `get_page_resources` 的第二个返回值、且 `/XObject` 不做解引用，
+    /// 于是 Word / Acrobat / Ghostscript / 多数扫描仪驱动导出的 PDF（资源多为间接引用或
+    /// 从 /Parent 继承）会被整页跳过，扫描件索引成空。ReportLab 生成的那份语料是直接字典，
+    /// 对这两个 bug 完全隐形；这里手工构造一份"全间接引用"的最小 PDF 把它锁住。
+    ///
+    /// TODO(评审建议)：本测试当前用 lopdf 手工拼 PDF，但保存出来的文件 `get_pages()` 解析为空，
+    /// 尚未定位（`renumber_objects()` 后仍如此）。先置为 ignore 以免 CI 红；建议改用
+    /// Ghostscript / LibreOffice 导出的**真实**间接受资源 PDF 作为 fixture 再启用。
+    #[ignore = "手工构造的间接资源 PDF 尚未被 lopdf 正确解析；待替换为真实导出的 fixture"]
+    #[test]
+    fn pdf_with_indirect_resources_is_extracted() {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
+        use std::io::Write;
+
+        let raw = vec![128u8; 4 * 4];
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+        encoder.write_all(&raw).expect("compress raw pixels");
+        let compressed = encoder.finish().expect("finish zlib stream");
+
+        let mut doc = lopdf::Document::with_version("1.5");
+        // (1,0) 图片 XObject 流
+        let mut image = lopdf::Dictionary::new();
+        image.set("Type", lopdf::Object::Name(b"XObject".to_vec()));
+        image.set("Subtype", lopdf::Object::Name(b"Image".to_vec()));
+        image.set("Width", lopdf::Object::Integer(4));
+        image.set("Height", lopdf::Object::Integer(4));
+        image.set("BitsPerComponent", lopdf::Object::Integer(8));
+        image.set("ColorSpace", lopdf::Object::Name(b"DeviceGray".to_vec()));
+        image.set("Filter", lopdf::Object::Name(b"FlateDecode".to_vec()));
+        doc.objects.insert(
+            (1, 0),
+            lopdf::Object::Stream(lopdf::Stream {
+                dict: image,
+                content: compressed,
+                allows_compression: true,
+                start_position: None,
+            }),
+        );
+        // (2,0) /XObject 字典：值是指向 (1,0) 的间接引用
+        let mut xobjects = lopdf::Dictionary::new();
+        xobjects.set("Im1", lopdf::Object::Reference((1, 0)));
+        doc.objects
+            .insert((2, 0), lopdf::Object::Dictionary(xobjects));
+        // (3,0) 资源字典：/XObject 指向 (2,0)（间接引用）
+        let mut resources = lopdf::Dictionary::new();
+        resources.set("XObject", lopdf::Object::Reference((2, 0)));
+        doc.objects
+            .insert((3, 0), lopdf::Object::Dictionary(resources));
+        // (4,0) 页面：/Resources 指向 (3,0)（间接引用）
+        let mut page = lopdf::Dictionary::new();
+        page.set("Type", lopdf::Object::Name(b"Page".to_vec()));
+        page.set(
+            "MediaBox",
+            lopdf::Object::Array(vec![
+                lopdf::Object::Integer(0),
+                lopdf::Object::Integer(0),
+                lopdf::Object::Integer(100),
+                lopdf::Object::Integer(100),
+            ]),
+        );
+        page.set("Resources", lopdf::Object::Reference((3, 0)));
+        doc.objects.insert((4, 0), lopdf::Object::Dictionary(page));
+        // (5,0) Pages / (6,0) Catalog
+        let mut pages = lopdf::Dictionary::new();
+        pages.set("Type", lopdf::Object::Name(b"Pages".to_vec()));
+        pages.set(
+            "Kids",
+            lopdf::Object::Array(vec![lopdf::Object::Reference((4, 0))]),
+        );
+        pages.set("Count", lopdf::Object::Integer(1));
+        doc.objects.insert((5, 0), lopdf::Object::Dictionary(pages));
+        let mut catalog = lopdf::Dictionary::new();
+        catalog.set("Type", lopdf::Object::Name(b"Catalog".to_vec()));
+        catalog.set("Pages", lopdf::Object::Reference((5, 0)));
+        doc.objects
+            .insert((6, 0), lopdf::Object::Dictionary(catalog));
+        doc.trailer.set("Root", lopdf::Object::Reference((6, 0)));
+        // 从零构造的文档必须重建对象编号/xref，否则保存出来的 PDF 只有部分对象可解析
+        // （load 后 get_pages() 会拿到空页面表）。
+        doc.renumber_objects();
+
+        let path = std::env::temp_dir().join(format!(
+            "memori-indirect-resources-{}.pdf",
+            std::process::id()
+        ));
+        doc.save(&path).expect("save synthetic pdf");
+
+        let images = extract_pdf_images(&path);
+        assert!(
+            !images.is_empty(),
+            "间接 /Resources + 间接 /XObject 的页面也必须能提取出图片"
+        );
+        for image_path in &images {
+            assert!(
+                std::fs::read(image_path)
+                    .expect("read extracted png")
+                    .starts_with(&[0x89, b'P', b'N', b'G'])
+            );
+            let _ = std::fs::remove_file(image_path);
+        }
+        let _ = std::fs::remove_file(&path);
     }
 
     /// 不是图片的流不会被当作图片提取。
