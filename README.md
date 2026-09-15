@@ -6,7 +6,7 @@
 
 **问你的文档，知道答案从哪里来。**
 
-[English](./README.en.md) | [贡献指南](./CONTRIBUTING.md) | [教程](./docs/TUTORIAL.zh-CN.md) | [Memory OS Lite 架构](./docs/architecture/MEMORY_OS_LITE.md)
+[English](./README.en.md) | [贡献指南](./CONTRIBUTING.md) | [教程](./docs/guides/TUTORIAL.zh-CN.md) | [Memory OS Lite 架构](./docs/architecture/MEMORY_OS_LITE.md)
 
 ---
 
