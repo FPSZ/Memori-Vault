@@ -24,14 +24,12 @@ Last Updated: 2026-03-12 UTC
 Audience: Internal AI/developer handoff
 
 ## 1. 文档分工（先看这个）
-- `docs/AI.md`: 当前状态、最近风险、下一步建议（会频繁变化）。
 - `docs/architecture/STRUCTURE.md`（本文件）: 稳定结构地图、职责边界、主要入口（相对稳定）。
-- `docs/planning/plan.md`: 阶段目标、验收 gate、变更日志（执行层面）。
+- `docs/planning/plan.md`: 阶段目标、验收 gate（执行层面）。
 
 ## 2. 建议阅读顺序
-1. `docs/AI.md`（先知道“现在卡在哪”）
-2. `docs/architecture/STRUCTURE.md`（再知道“该去哪改”）
-3. `docs/planning/plan.md`（最后看“按什么标准过线”）
+1. `docs/architecture/STRUCTURE.md`（先知道“该去哪改”）
+2. `docs/planning/plan.md`（再看“按什么标准过线”）
 
 ## 3. 仓库树状地图（顶层）
 ```text
