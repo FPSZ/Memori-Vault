@@ -98,7 +98,8 @@ curl http://localhost:18001/v1/models
 补充：
 - 这些脚本只是本地验证入口，不是产品协议的一部分。
 - `smoke-start.ps1` 现在支持跳过本地模型检查，便于单独验证 UI / server 流程。
-# Memory OS Lite 使用提示
+
+## Memory OS Lite 使用提示
 
 Memori-Vault 当前架构定位是 **Local-first Verifiable Memory OS Lite**，详细设计见 [MEMORY_OS_LITE.md](../architecture/MEMORY_OS_LITE.md)。
 

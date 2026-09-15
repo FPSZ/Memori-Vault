@@ -195,9 +195,13 @@ Desktop 现在与 server 保持同级策略边界。
 - systemd 单元模板
 - 环境变量模板
 - 备份/恢复脚本
-# Memory OS Lite 企业价值
+
+## Memory OS Lite 企业价值
+
 Memori-Vault 的企业路线是 **local-first verifiable memory**，不是云优先 RAG 服务。详细架构见 [MEMORY_OS_LITE.md](../architecture/MEMORY_OS_LITE.md)。
+
 企业侧应重点强调：
+
 - SQLite 继续作为默认存储内核，文档索引、记忆、生命周期日志、图谱元数据和审计信息默认留在本地。
 - Evidence Firewall 把文档 citation 与 conversation/project/preference memory 分开，避免长期记忆污染文档证据链。
 - MCP full-control 可以暴露查询、来源、索引、模型、设置、图谱和记忆工具，但 memory write 必须有来源、审计和可撤销路径。
