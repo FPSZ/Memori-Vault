@@ -133,11 +133,12 @@ bench：`cargo run -p memori-core --example graph_bench -- <files>`（对每个 
 
 ## 长文 / 图片 / 扫描件 的真实处理结论（专门样本实测）
 - **长文（3 万字）**：索引/分块正常（切成 ~35 个 ≤1000 字块），检索能把长文**召回到 doc rank 1**；但埋在深处的事实其片段只排到 rank 2–4，两道长文题（`V101/V102`）最终被 **gating 判拒**——长文通过"埋点深 + gating 保守"双重打击降低可答率。图谱构建则极贵（见上）。
-- **图片内容**：`extract_*` 只取文本，**图片一律忽略、全链路无 OCR**。实测：
+- **图片内容**（⚠️ 下面 4 条是**接入 OCR 之前**的实测，数字保留作对照）：当时 `extract_*` 只取文本，**图片一律忽略、全链路无 OCR**。实测：
   - 图说明/正文里的事实（`V103/V104`）→ 正常作答 ✓。
   - 事实只画在图里（`V105` 晨曦回滚阈值、`V108` 白川预算图）→ 片段 rank=None，作答被拒；纯图 docx（`V106` 暮山）→ 文档都召不回。
   - **扫描件 PDF**（`V107` 苍岭）→ lopdf 抽 0 字，文档完全不可见。
-  - 即这 4 道"图片/扫描"题 **0/4 可答**——坐实"图片/扫描内容不可检索"的能力缺口（如需可检索须接 OCR，单列大功能）。
+  - 即这 4 道"图片/扫描"题 **0/4 可答**——坐实**当时**"图片/扫描内容不可检索"的能力缺口。
+  - **后续已补齐**：现已接入索引期 OCR（tesseract + chi_sim，见本文件「OCR 接入与边界」）。上面这 4 题需在装有 tesseract（且带 `chi_sim` 语言包）的环境**重跑**，才会反映新能力。
 
 ## 索引护栏（本轮新增）
 `memori-core/src/indexing.rs`：
@@ -147,7 +148,7 @@ bench：`cargo run -p memori-core --example graph_bench -- <files>`（对每个 
 ## 失败分析（改进杠杆，非套件 bug）
 - **A. 答案题被误拒（检索正确、gating 过保守）**：`多格式抽取` 仅 1/6 作答、`长文检索` 0/2、`xlsx` 1 题——文档/片段命中 rank 1–2 但 gating 打分 < 阈值 55 走 `score_below_threshold`。集中在"单事实/低词法覆盖"证据，与 v1 同源（可由 coverage / rerank 置信度放行路径再调）。
 - **B. 拒答题被泄露作答（困难语料触发误放行）**：诱饵代号 / 不存在属性 / PII 越权触发 `identifier_grounded_release` / `rerank_confident_release` / 复合查询 `compound_partial_release`（gate=0 绕过）。**本轮已修 PII/注入/越权类（见文末"拒答安全硬化"）；诱饵代号类经查证为语料蓄意设计（诱饵码埋进带"无关"声明的干扰文档），需语义级核验，留待。**
-- **C. 图片/扫描（B 类预期 miss）**：非 bug，是无 OCR 的能力边界，已用 4 道题固定记录。
+- **C. 图片/扫描（B 类预期 miss）**：当时非 bug，是无 OCR 的能力边界，已用 4 道题固定记录。**现已接入索引期 OCR**；该边界只剩这些情况：未安装/未配置 tesseract、混合型 PDF（有文本层 + 扫描页）、`ppt`/`xlsx` 内嵌图、`CCITTFaxDecode`/`JPXDecode` 编码的图片（详见「OCR 接入与边界」）。
 
 ## 重排模型 A/B（本轮，同 embed/同语料/同代码，仅换 :18004 重排服务）
 - **bge-reranker-v2-m3（现默认）**：Top-1 文档 69.6% / Top-3 文档 91.3% / Top-1 chunk 75.0% / Top-5 chunk 95.7% / chunk MRR 0.8301 / 拒答 83.3% / 平均检索 ≈1.5s。平滑 logit（−7.5~8.0），与现有"裸分 min-max 融合 + gating 阈值"调校天然兼容。
@@ -180,6 +181,15 @@ bench：`cargo run -p memori-core --example graph_bench -- <files>`（对每个 
 ### 关于 top1 文档 0.696（非 bug，已用 `top_documents` 诊断坐实）
 给 harness 加了 `top_documents` 字段（每题最终证据去重后的有序文档路径）。据此查实：**20 道 top1-miss 里 19 道，排第 1 的都是目标的"同项目兄弟文档"**（检索每次都准确锁定项目，只是没挑中套件指定的那个体裁）。根因是套件"直问-散文事实/改写"题**故意含糊**（只点项目名/代号、不点具体事实，答案关键词不在 query 里），rerank 无法在同项目 7 份文档间区分。**这是 v2 相对 v1 的刻意难度，不是融合/排序 bug；top3 0.913 / top5 片段 0.957 / MRR 0.830 说明召回与答案 chunk 入选均正常。** 把 top1-文档硬拉到 v1 的 ~0.875 只能靠"让 query 重新点名具体事实"=把 v2 退化回 v1 的易，违背 v2 初衷。
 
+## OCR 接入与边界（本 PR 落地）
+
+- **能力**：索引期对三类来源做 OCR（tesseract + `chi_sim`）——独立图片（`png`/`jpg`/`jpeg`）、**无文本层**的扫描件 PDF、DOCX 内嵌图（`word/media/*`）。识别文本与正文一起入库，之后走正常分块/检索。
+- **不做 OCR 的时机**：ask 期构造引用摘要、桌面端文件预览都**不触发 OCR**；OCR 只在索引期发生（避免同步阻塞回答链路与 UI）。
+- **配置路径**：环境变量 `MEMORI_OCR_TESSERACT_PATH`（最高优先）> `settings.json` 的 `ocr_tesseract_path` > PATH 自动探测。桌面端入口在「设置 → 模型」；服务端入口 `POST /api/settings/ocr-path`（operator 角色）。
+- **改配置后需要重建索引**：路径变更或首次安装 tesseract 后，**已入库**的图片与扫描件不会自动重跑 OCR，需触发重建。
+- **实测**（本机 tesseract + `chi_sim`，样本 `Memory_Test_V2/special_005_扫描件_苍岭_对账.pdf`）：每页解码出 1 张图、单页约 0.8s，能识别出「…项目的对账窗口为每月 8 号…」等正文；但**实体名会被误读**（`苍岭` → `苑岭/苔岭`）。结论：OCR 文本可用于**召回辅助**，不宜当作精确匹配/精确引用口径。
+- **已知边界**：混合型 PDF（有文本层 + 扫描页）不对扫描页 OCR；`ppt`/`xlsx` 内嵌图未接入；`CCITTFaxDecode`（G4 传真压缩，黑白扫描件常见）与 `JPXDecode`（JPEG2000）暂不支持；单图解码后像素上限 128 MB；位深只接受 8 bit/通道（其余跳过，避免把解码噪声写进知识库）。
+- **自动化验证**：`memori-core` 有真实扫描件的 OCR 端到端测试（`scanned_pdf_is_indexed_through_ocr_when_available`，**无 tesseract 时自动跳过**）；CI 的 Linux job 安装 `tesseract-ocr` + `tesseract-ocr-chi-sim`，保证该测试真实执行。
 ## 作答层 LLM-judge 基线（2026-08-24 新增）
 
 此前"答案题正确"只用 top-k 命中当代理（见上表注），**从不看答案文本**。`--judge` 档补齐该闭环：对应答题走真实问答管线生成答案，再由 chat 模型对照 `target_clues` 判 correct/partial/incorrect（correct=1、partial=0.5、incorrect=0），逐题理由写入报告。judge 实现见 `memori-core/src/answer_judge.rs`，harness 入口 `--judge`。
@@ -217,6 +227,6 @@ judge 判分成功率 106/106（应答题全部产出判定，零失败）。平
 1. gating 对"单事实低词法覆盖"证据的放行（A 类）。
 2. 诱饵代号 / 不存在属性的拒答硬化（B 类残留，需语义级代号核验，见上节）。
 3. 长文：分块/gating 对深埋事实的处理（长文题 0/2）。
-4. OCR：图片/扫描件可检索（C 类，大功能，需接 tesseract 或视觉模型）。
+4. ~~OCR：图片/扫描件可检索~~ —— **已落地**（tesseract，索引期；见上面「OCR 接入与边界」）。剩余：在装有 tesseract 的环境重跑 `V103–V108`，把新能力写进基线数字。
 5. 重排已切到 bge-reranker-v2-m3（见上节 A/B）。若日后要上 Qwen3-Reranker，需先为其近二值分数重调融合权重 + 重标定 gating 阈值，再复测。
 6. 作答层：在满配环境重跑 `--judge` 建官方作答层基线（本机受限数字仅作下限参考）。

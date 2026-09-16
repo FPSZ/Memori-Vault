@@ -271,6 +271,7 @@ Graph, conversation memory, and project memory are explanation/context layers by
 - Graph extraction and entity-relationship API: working; graph visualization UI is limited.
 - Cross-language retrieval (Chinese query → English document): basic coverage; bilingual query expansion not complete.
 - Source preview and Markdown export.
+- OCR (standalone images / text-layer-free scanned PDFs / DOCX embedded images; runs at **index time** via tesseract + `chi_sim`): available, configurable from Settings → Models or `POST /api/settings/ocr-path`; but **entity names are easily misread** (measured: `苍岭` → `苑岭/苔岭`), and mixed PDFs, `ppt`/`xlsx` embedded images, and `CCITTFaxDecode`/`JPXDecode` remain out of scope. Re-index is required for already-indexed files after changing the path.
 
 ### 📐 Designed / Not Yet Implemented
 
@@ -278,7 +279,6 @@ Graph, conversation memory, and project memory are explanation/context layers by
 - Rate limiting for admin endpoints (brute-force protection), request-id/trace for retrieval pipeline.
 - OpenAPI / Swagger spec for memori-server.
 - API key storage via OS keychain (currently plain text in settings.json).
-- OCR (image and scanned-document files are not currently indexable).
 - Memory heat score, conflict resolver, lifecycle classifier.
 - 50k-scale load test (P50/P95 at scale not yet validated).
 - Multi-tenant isolation (currently all OIDC users share one vault).

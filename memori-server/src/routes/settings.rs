@@ -33,6 +33,44 @@ pub(crate) async fn set_memory_settings_handler(
     )))
 }
 
+/// 设置 OCR(tesseract) 可执行文件路径；传空表示清除，回退按 PATH 自动探测。
+///
+/// 保存后立刻把配置注入进程环境（parser 侧按配置值缓存探测结果），**无需重启服务**。
+/// 注意：**已入库**的图片/扫描件不会自动重跑 OCR，需要触发重建索引才会重新抽取。
+pub(crate) async fn set_ocr_tesseract_path_handler(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<SetOcrTesseractPathRequest>,
+) -> Result<Json<AppSettingsDto>, ApiError> {
+    let _ = require_session(&state, &headers, Role::Operator).await?;
+    let mut settings = load_app_settings().map_err(ApiError::internal)?;
+    match normalize_optional_text(payload.path) {
+        Some(raw) => {
+            let candidate = PathBuf::from(&raw);
+            if !candidate.is_file() {
+                return Err(ApiError::bad_request(format!(
+                    "tesseract executable not found: {}",
+                    candidate.display()
+                )));
+            }
+            settings.ocr_tesseract_path = Some(candidate.to_string_lossy().to_string());
+        }
+        None => {
+            settings.ocr_tesseract_path = None;
+        }
+    }
+    // 立刻生效：注入（或清除）进程环境变量。
+    memori_core::apply_ocr_path_to_env(settings.ocr_tesseract_path.as_deref());
+    save_app_settings(&settings).map_err(ApiError::internal)?;
+    let watch_root = resolve_watch_root_from_settings(&settings).map_err(ApiError::internal)?;
+    let indexing = resolve_indexing_config(&settings);
+    Ok(Json(AppSettingsDto::from_settings(
+        settings,
+        watch_root.to_string_lossy().to_string(),
+        indexing,
+    )))
+}
+
 fn apply_memory_settings(settings: &mut AppSettings, payload: MemorySettingsDto) {
     settings.conversation_memory_enabled = Some(payload.conversation_memory_enabled);
     settings.auto_memory_write = Some(normalize_auto_memory_write(&payload.auto_memory_write));

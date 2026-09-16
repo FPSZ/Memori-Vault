@@ -43,6 +43,7 @@ import type { VaultStats } from "./types";
 export interface UseAppInitDeps {
   setStats: React.Dispatch<React.SetStateAction<VaultStats>>;
   setWatchRoot: React.Dispatch<React.SetStateAction<string>>;
+  setOcrTesseractPath: React.Dispatch<React.SetStateAction<string>>;
   setIndexingMode: React.Dispatch<React.SetStateAction<IndexingMode>>;
   setResourceBudget: React.Dispatch<React.SetStateAction<ResourceBudget>>;
   setScheduleStart: React.Dispatch<React.SetStateAction<string>>;
@@ -65,6 +66,7 @@ export function useAppInit(deps: UseAppInitDeps) {
   const {
     setStats,
     setWatchRoot,
+    setOcrTesseractPath,
     setIndexingMode,
     setResourceBudget,
     setScheduleStart,
@@ -104,6 +106,7 @@ export function useAppInit(deps: UseAppInitDeps) {
         const settings = await getAppSettings();
         if (active) {
           setWatchRoot(settings.watch_root ?? "");
+          setOcrTesseractPath(settings.ocr_tesseract_path ?? "");
           setIndexingMode(normalizeIndexingMode(settings.indexing_mode));
           setResourceBudget(normalizeResourceBudget(settings.resource_budget));
           setScheduleStart(settings.schedule_start || "00:00");
@@ -310,6 +313,7 @@ export function useAppInit(deps: UseAppInitDeps) {
   }, [
     setStats,
     setWatchRoot,
+    setOcrTesseractPath,
     setIndexingMode,
     setResourceBudget,
     setScheduleStart,

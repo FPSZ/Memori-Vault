@@ -208,6 +208,8 @@ export type AppSettingsDto = {
   retrieval_gating_profile?: "strict" | "balanced" | "answer_first" | string;
   generation_refusal_mode?: "strict" | "balanced" | string;
   gating_retry_on_refusal?: boolean;
+  /** OCR(tesseract) 可执行文件路径；为空表示按 PATH 自动探测。 */
+  ocr_tesseract_path?: string | null;
 };
 
 export type SearchScopeItem = {

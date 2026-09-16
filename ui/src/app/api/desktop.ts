@@ -94,6 +94,10 @@ export function setIndexFilter(payload: IndexFilterConfigDto) {
   return invoke<AppSettingsDto>("set_index_filter", { payload });
 }
 
+export function setOcrTesseractPath(path: string | null) {
+  return invoke<AppSettingsDto>("set_ocr_tesseract_path", { path });
+}
+
 export function getModelSettings() {
   return invoke<ModelSettingsDto>("get_model_settings");
 }

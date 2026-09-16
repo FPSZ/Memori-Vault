@@ -194,6 +194,7 @@ pub fn run() {
             set_index_filter,
             get_app_settings,
             set_memory_settings,
+            set_ocr_tesseract_path,
             get_model_settings,
             get_enterprise_policy,
             set_enterprise_policy,

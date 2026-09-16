@@ -25,7 +25,7 @@ pub(crate) use settings::*;
 /// build_router 注册的、被 OpenAPI 路由表（openapi.rs `ROUTES`）覆盖的 REST 方法数。
 /// 不含 `/api/openapi.json` 自身。改路由须同步此常量与 `ROUTES`，否则单测失败。
 #[cfg(test)]
-pub(crate) const REST_ROUTE_METHOD_COUNT: usize = 33;
+pub(crate) const REST_ROUTE_METHOD_COUNT: usize = 34;
 
 pub(crate) fn build_router(app_state: ServerState) -> Router {
     Router::new()
@@ -86,6 +86,10 @@ pub(crate) fn build_router(app_state: ServerState) -> Router {
         )
         .route("/api/model-settings/pull", post(pull_model_handler))
         .route("/api/settings/watch-root", post(set_watch_root_handler))
+        .route(
+            "/api/settings/ocr-path",
+            post(set_ocr_tesseract_path_handler),
+        )
         .route("/api/settings/rank", post(rank_settings_query_handler))
         .route("/api/openapi.json", get(openapi_spec_handler))
         // Swagger UI 文档页与静态资源（构建期内置，离线可用）。

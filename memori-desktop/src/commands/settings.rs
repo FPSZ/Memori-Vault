@@ -30,6 +30,41 @@ pub(crate) async fn set_memory_settings(
     ))
 }
 
+/// 设置 OCR（tesseract）可执行文件路径；传 null / 空串表示清除，回退按 PATH 自动探测。
+///
+/// 保存后会**立刻**把配置注入进程环境（parser 侧按配置值缓存探测结果，配置变了会自动
+/// 重新探测），因此改路径不需要重启应用。
+#[tauri::command]
+pub(crate) async fn set_ocr_tesseract_path(path: Option<String>) -> Result<AppSettingsDto, String> {
+    info!(path = ?path, "[用户操作] 修改 OCR tesseract 路径");
+    let mut settings = load_app_settings()?;
+    match normalize_optional_text(path) {
+        Some(raw) => {
+            let candidate = PathBuf::from(&raw);
+            if !candidate.is_file() {
+                return Err(format!(
+                    "tesseract 可执行文件不存在: {}",
+                    candidate.display()
+                ));
+            }
+            settings.ocr_tesseract_path = Some(candidate.to_string_lossy().to_string());
+        }
+        None => {
+            settings.ocr_tesseract_path = None;
+        }
+    }
+    // 立刻生效：注入（或清除）进程环境变量。
+    memori_core::apply_ocr_path_to_env(settings.ocr_tesseract_path.as_deref());
+    save_app_settings(&settings)?;
+    let watch_root = resolve_watch_root_from_settings(&settings)?;
+    let indexing = resolve_indexing_config(&settings);
+    Ok(AppSettingsDto::from_settings(
+        settings,
+        watch_root.to_string_lossy().to_string(),
+        indexing,
+    ))
+}
+
 fn apply_memory_settings(settings: &mut AppSettings, payload: MemorySettingsDto) {
     settings.conversation_memory_enabled = Some(payload.conversation_memory_enabled);
     settings.auto_memory_write = Some(normalize_auto_memory_write(&payload.auto_memory_write));

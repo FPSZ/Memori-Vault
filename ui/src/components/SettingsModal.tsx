@@ -69,6 +69,9 @@ export function SettingsModal({
   onRestartLocalModel,
   onPickLocalModelsRoot,
   onClearLocalModelsRoot,
+  ocrTesseractPath,
+  onPickOcrTesseractPath,
+  onClearOcrTesseractPath,
   indexingMode,
   resourceBudget,
   scheduleStart,
@@ -658,6 +661,9 @@ export function SettingsModal({
                 onRestartLocalModel={onRestartLocalModel}
                 onPickLocalModelsRoot={onPickLocalModelsRoot}
                 onClearLocalModelsRoot={onClearLocalModelsRoot}
+                ocrTesseractPath={ocrTesseractPath}
+                onPickOcrTesseractPath={onPickOcrTesseractPath}
+                onClearOcrTesseractPath={onClearOcrTesseractPath}
               />
             ) : null}
 

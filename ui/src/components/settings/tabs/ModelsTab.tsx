@@ -5,6 +5,7 @@ import {
   Bot,
   ChevronDown,
   ChevronUp,
+  FileSearch,
   FolderOpen,
   LoaderCircle,
   RefreshCw,
@@ -68,6 +69,10 @@ type ModelsTabProps = {
   onRestartLocalModel: (role: ModelRoleKey) => Promise<void>;
   onPickLocalModelsRoot: () => Promise<void>;
   onClearLocalModelsRoot: () => void;
+  /** OCR(tesseract) 可执行文件路径；空串表示按 PATH 自动探测。 */
+  ocrTesseractPath: string;
+  onPickOcrTesseractPath: () => Promise<void>;
+  onClearOcrTesseractPath: () => Promise<void>;
 };
 
 function apiFormatToProtocol(format: RemoteApiFormat): RemoteProtocol {
@@ -91,7 +96,10 @@ export function ModelsTab({
   onStopLocalModel,
   onRestartLocalModel,
   onPickLocalModelsRoot,
-  onClearLocalModelsRoot
+  onClearLocalModelsRoot,
+  ocrTesseractPath,
+  onPickOcrTesseractPath,
+  onClearOcrTesseractPath
 }: ModelsTabProps) {
   const activeProvider = modelSettings.active_provider;
   const isLocal = activeProvider === "llama_cpp_local";
@@ -690,6 +698,37 @@ export function ModelsTab({
             </div>
           </div>
         ) : null}
+
+        {/* OCR 引擎路径与聊天模型 provider 无关（图片/扫描件检索都依赖它），因此始终显示。 */}
+        <div className="space-y-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-1)] px-4 py-3">
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-[var(--text-secondary)]">OCR 引擎（tesseract）</span>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void onPickOcrTesseractPath()}
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface-2)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-surface-1)] hover:text-[var(--text-primary)]"
+                >
+                  <FileSearch className="h-3 w-3" />
+                  选择可执行文件
+                </button>
+                {ocrTesseractPath ? (
+                  <button
+                    type="button"
+                    onClick={() => void onClearOcrTesseractPath()}
+                    className="rounded-md px-2 py-1 text-[11px] text-[var(--text-muted)] transition hover:text-red-400"
+                  >
+                    清除
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div className="truncate font-mono text-[11px] text-[var(--text-muted)]">
+              {ocrTesseractPath || "未设置：图片/扫描件 OCR 将按 PATH 自动探测 tesseract"}
+            </div>
+          </div>
+        </div>
 
         {!isLocal ? (
           <RemoteModelSettingsPanel

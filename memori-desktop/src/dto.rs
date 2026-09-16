@@ -110,6 +110,9 @@ pub(crate) struct AppSettings {
     pub(crate) gating_retry_on_refusal: Option<bool>,
     #[serde(default)]
     pub(crate) index_filter: Option<IndexFilterConfig>,
+    /// OCR tesseract 可执行文件路径（审计 Q6）；启动时注入 `MEMORI_OCR_TESSERACT_PATH`。
+    #[serde(default)]
+    pub(crate) ocr_tesseract_path: Option<String>,
     // legacy fields for backwards compatibility
     pub(crate) provider: Option<String>,
     pub(crate) endpoint: Option<String>,
@@ -137,6 +140,8 @@ pub(crate) struct AppSettingsDto {
     pub(crate) retrieval_gating_profile: String,
     pub(crate) generation_refusal_mode: String,
     pub(crate) gating_retry_on_refusal: bool,
+    /// OCR（tesseract）可执行文件路径；为空表示按 PATH 自动探测。
+    pub(crate) ocr_tesseract_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,6 +191,7 @@ impl AppSettingsDto {
                 .generation_refusal_mode
                 .unwrap_or_else(|| "balanced".to_string()),
             gating_retry_on_refusal: settings.gating_retry_on_refusal.unwrap_or(true),
+            ocr_tesseract_path: settings.ocr_tesseract_path,
         }
     }
 }

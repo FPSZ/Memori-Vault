@@ -124,6 +124,7 @@ export default function App() {
   const [fontScale, setFontScale] = useState<FontScale>(() => resolveInitialFontScale());
   const [retrieveTopK, setRetrieveTopK] = useState<number>(() => resolveInitialRetrieveTopK());
   const [watchRoot, setWatchRoot] = useState("");
+  const [ocrTesseractPath, setOcrTesseractPath] = useState("");
   const [isPickingWatchRoot, setIsPickingWatchRoot] = useState(false);
   const [fileMatches, setFileMatches] = useState<FileMatch[]>([]);
   const [fileMatchesOpen, setFileMatchesOpen] = useState(false);
@@ -350,6 +351,7 @@ export default function App() {
   useAppInit({
     setStats,
     setWatchRoot,
+    setOcrTesseractPath,
     setIndexingMode,
     setResourceBudget,
     setScheduleStart,
@@ -438,6 +440,8 @@ export default function App() {
     onSelectProvider,
     onPickLocalModelsRoot,
     onClearLocalModelsRoot,
+    onPickOcrTesseractPath,
+    onClearOcrTesseractPath,
     onSaveMcpSettings,
     onCopyMcpClientConfig,
     onSaveMemorySettings,
@@ -449,6 +453,8 @@ export default function App() {
     memorySettings,
     filterConfig,
     uiLang,
+    ocrTesseractPath,
+    setOcrTesseractPath,
     setEnterpriseBusy,
     setEnterprisePolicy,
     setModelAvailability,
@@ -731,6 +737,9 @@ export default function App() {
                 onRestartLocalModel={onRestartLocalModel}
                 onPickLocalModelsRoot={onPickLocalModelsRoot}
                 onClearLocalModelsRoot={onClearLocalModelsRoot}
+                ocrTesseractPath={ocrTesseractPath}
+                onPickOcrTesseractPath={onPickOcrTesseractPath}
+                onClearOcrTesseractPath={onClearOcrTesseractPath}
                 indexingMode={indexingMode}
                 resourceBudget={resourceBudget}
                 scheduleStart={scheduleStart}
