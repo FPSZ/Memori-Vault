@@ -2,7 +2,9 @@ name: Rust CI
 
 on:
   push:
-    branches: ["main"]
+    # collab 是本项目的开发分支，直接落在它上面的改动此前拿不到任何 CI 信号
+    # （只有 main 的 push 和 PR 会触发），必须靠人工本地跑。补上 collab。
+    branches: ["main", "collab"]
   pull_request:
 
 concurrency:
