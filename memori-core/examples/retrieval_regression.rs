@@ -602,14 +602,28 @@ async fn prepare_live_engine(
         });
     }
 
-    let embed_health = timeout(
-        Duration::from_secs(10),
-        engine
-            .state()
-            .embedding_client
-            .embed_text("memori regression health probe"),
-    )
-    .await;
+    // 探活带冷启动重试：本地模型服务冷载可能超过单次超时（实测 12s+），
+    // 单次 10s 探活会把"模型还没加载完"误判为服务不可用。
+    let mut embed_health = None;
+    for attempt in 1..=3 {
+        embed_health = Some(
+            timeout(
+                Duration::from_secs(20),
+                engine
+                    .state()
+                    .embedding_client
+                    .embed_text("memori regression health probe"),
+            )
+            .await,
+        );
+        if matches!(&embed_health, Some(Ok(Ok(embedding))) if !embedding.is_empty()) {
+            break;
+        }
+        if attempt < 3 {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }
+    let embed_health = embed_health.expect("probe loop runs at least once");
     match embed_health {
         Ok(Ok(embedding)) if !embedding.is_empty() => {}
         Ok(Ok(_)) => {

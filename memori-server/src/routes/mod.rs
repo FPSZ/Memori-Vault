@@ -11,6 +11,7 @@ mod indexing;
 mod models;
 mod openapi;
 mod settings;
+mod swagger_ui;
 
 pub(crate) use admin::*;
 pub(crate) use ask::*;
@@ -87,6 +88,14 @@ pub(crate) fn build_router(app_state: ServerState) -> Router {
         .route("/api/settings/watch-root", post(set_watch_root_handler))
         .route("/api/settings/rank", post(rank_settings_query_handler))
         .route("/api/openapi.json", get(openapi_spec_handler))
+        // Swagger UI 文档页与静态资源（构建期内置，离线可用）。
+        .route("/api/docs", get(swagger_ui::docs_page))
+        .route("/api/docs/swagger-ui.css", get(swagger_ui::docs_css))
+        .route("/api/docs/swagger-ui-bundle.js", get(swagger_ui::docs_js))
+        .route(
+            "/api/docs/swagger-ui-standalone-preset.js",
+            get(swagger_ui::docs_standalone_js),
+        )
         // 限流在路由内层（先于 handler，但在 CORS/request-id 之后），需 state 取限流器。
         .layer(axum::middleware::from_fn_with_state(
             app_state.clone(),

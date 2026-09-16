@@ -1,7 +1,8 @@
 //! HTTP 横切中间件：request-id/trace 可观测性 + 按 IP 的接口限流。
 //!
 //! - `request_id_trace_middleware`：为每个请求分配/透传 `x-request-id`，并以该 id
-//!   建立 tracing span，使检索链路日志可按请求聚合；响应回写同名头部便于端到端关联。
+//!   建立 tracing span，使检索链路日志可按请求聚合；响应回写同名头部便于端到端关联，
+//!   同时注入 `RequestId` 扩展供 handler 写入审计。
 //! - `rate_limit_middleware`：按客户端 IP 做固定窗口限流，登录/管理类路径用更严阈值，
 //!   防止暴力破解与管理面被刷。限流判定抽成纯函数 `RateLimiter::check`，便于单测。
 
@@ -23,8 +24,12 @@ use crate::{ApiError, ServerState};
 /// 请求关联 id 头部名（小写，HTTP/2 规范化后一致）。
 pub(crate) const REQUEST_ID_HEADER: &str = "x-request-id";
 
+/// 本次请求的关联 id：中间件生成/透传后注入 extensions，供 handler 读取（如写入审计）。
+#[derive(Debug, Clone)]
+pub(crate) struct RequestId(pub(crate) String);
+
 /// 透传/生成 request-id，并以其建立 tracing span 包裹后续处理。
-pub(crate) async fn request_id_trace_middleware(req: Request<Body>, next: Next) -> Response {
+pub(crate) async fn request_id_trace_middleware(mut req: Request<Body>, next: Next) -> Response {
     let request_id = req
         .headers()
         .get(REQUEST_ID_HEADER)
@@ -33,6 +38,9 @@ pub(crate) async fn request_id_trace_middleware(req: Request<Body>, next: Next) 
         .filter(|value| !value.is_empty() && value.len() <= 200 && value.is_ascii())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    // 注入 extensions：handler 侧无需重新解析头部即可拿到同一个 id。
+    req.extensions_mut().insert(RequestId(request_id.clone()));
 
     let method = req.method().clone();
     let path = req.uri().path().to_string();
