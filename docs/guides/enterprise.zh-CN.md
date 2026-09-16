@@ -1,31 +1,32 @@
-# Memori-Vault 浼佷笟鐗堥瑙堬紙鍗曠鎴风鏈夊寲锛?
+# Memori-Vault 企业版预览（单租户私有化）
 
-鏈枃妗ｆ弿杩板綋鍓嶉瑙堥樁娈电殑浼佷笟鍖栬兘鍔涳紝鐩爣鏄湇鍔′腑澶у瀷鐮斿彂缁勭粐鐨勫崟绉熸埛绉佹湁鍖栭儴缃插満鏅€?
+本文档描述当前预览阶段的企业化能力，目标是服务中大型研发组织的单租户私有化部署场景。
 
-## 鑼冨洿锛坴1锛?
+## 范围（v1）
 
-- 鍗曠鎴枫€佺鏈夊寲 Linux 閮ㄧ讲銆?
-- Desktop 浠嶆槸褰撳墠涓讳骇鍝佽繍琛屾椂銆?
-- `memori-server` 浠嶄互绉佹湁鍖?API 杩愯鏃堕瑙堝彛寰勬彁渚涖€?
-- API 绾?RBAC锛歚viewer`銆乣user`銆乣operator`銆乣admin`銆?
-- 妯″瀷娌荤悊榛樿鏈湴浼樺厛锛屽苟鐢辩粺涓€浼佷笟绛栫暐鎺у埗銆?
-- 璁よ瘉銆佺瓥鐣ャ€佺储寮曘€侀棶绛旂瓑鍏抽敭琛屼负鍐欏叆瀹¤鏃ュ織銆?
+- 单租户、私有化 Linux 部署。
+- Desktop 仍是当前主产品运行时。
+- `memori-server` 仍以私有化 API 运行时预览口径提供。
+- API 级 RBAC：`viewer`、`user`、`operator`、`admin`。
+- 模型治理默认本地优先，并由统一企业策略控制。
+- 认证、策略、索引、问答等关键行为写入审计日志。
 
-棰勮璇存槑锛?
+预览说明：
 
-- 褰撳墠璁よ瘉/浼氳瘽瀹炵幇涓昏闈㈠悜鍙楁帶鍐呴儴鐜銆?
-- 鏈枃妗ｇ敤浜庢弿杩?`v0.4.0` 鐨勪紒涓氳兘鍔涘熀绾匡紝涓嶄唬琛ㄥ凡缁忓畬鎴愬叏閮?GA 绾т紒涓氳韩浠藉畨鍏ㄥ姞鍥恒€?- 鏈枃妗ｅ彧瑕嗙洊杩愯鏃朵笌瀹夊叏绛栫暐鍙ｅ緞锛屼笉浠ｈ〃 mixed corpus 妫€绱㈣川閲忓凡缁忚揪鍒扮敓浜х骇楠岃瘉銆?
+- 当前认证/会话实现主要面向受控内部环境。
+- 本文档用于描述 `v0.4.0` 的企业能力基线，不代表已经完成全部 GA 级企业身份安全加固。
+- 本文档只覆盖运行时与安全策略口径，不代表 mixed corpus 检索质量已经达到生产级验证。
 
-## 璁よ瘉涓庝細璇?
+## 认证与会话
 
-褰撳墠瀹炵幇璇存槑锛?
+当前实现说明：
 
-- `POST /api/auth/oidc/login` 鏄綋鍓嶉瑙堟湇鍔＄杩愯鏃舵彁渚涚殑杞婚噺鎺ュ叆鍏ュ彛銆?
-- 鑻ヨ鐢ㄤ簬姝ｅ紡 GA 绾т紒涓氱幆澧冿紝浠嶅缓璁户缁ˉ寮?IdP 鏍￠獙銆佷細璇濇寔涔呭寲涓庢洿涓ユ牸鐨勫畨鍏ㄦ帶鍒躲€?
+- `POST /api/auth/oidc/login` 是当前预览服务端运行时提供的轻量接入入口。
+- 若要用于正式 GA 级企业环境，仍建议继续补强 IdP 校验、会话持久化与更严格的安全控制。
 
 ### `POST /api/auth/oidc/login`
 
-璇锋眰绀轰緥锛?
+请求示例：
 
 ```json
 {
@@ -34,7 +35,7 @@
 }
 ```
 
-杩斿洖绀轰緥锛?
+返回示例：
 
 ```json
 {
@@ -47,26 +48,26 @@
 
 ### `GET /api/auth/me`
 
-璇锋眰澶达細`Authorization: Bearer <session_token>`
+请求头：`Authorization: Bearer <session_token>`
 
-杩斿洖褰撳墠浼氳瘽涓讳綋銆佽鑹层€佽繃鏈熸椂闂淬€?
+返回当前会话主体、角色、过期时间。
 
-## 绠＄悊鎺ュ彛
+## 管理接口
 
-鎵€鏈夌鐞嗘帴鍙ｉ兘闇€瑕佹湁鏁堜細璇濅笌瑙掕壊鏉冮檺銆?
+所有管理接口都需要有效会话与角色权限。
 
-- `GET /api/admin/health`锛坄operator+`锛?
-- `GET /api/admin/metrics`锛坄operator+`锛?
-- `GET /api/admin/policy`锛坄operator+`锛?
-- `PUT /api/admin/policy`锛坄admin`锛?
-- `GET /api/admin/audit?page=1&page_size=50`锛坄operator+`锛?
-- `POST /api/admin/reindex`锛坄operator+`锛?
-- `POST /api/admin/indexing/pause`锛坄operator+`锛?
-- `POST /api/admin/indexing/resume`锛坄operator+`锛?
+- `GET /api/admin/health`（`operator+`）
+- `GET /api/admin/metrics`（`operator+`）
+- `GET /api/admin/policy`（`operator+`）
+- `PUT /api/admin/policy`（`admin`）
+- `GET /api/admin/audit?page=1&page_size=50`（`operator+`）
+- `POST /api/admin/reindex`（`operator+`）
+- `POST /api/admin/indexing/pause`（`operator+`）
+- `POST /api/admin/indexing/resume`（`operator+`）
 
-## 浼佷笟绛栫暐妯″瀷
+## 企业策略模型
 
-`EnterprisePolicyDto`锛?
+`EnterprisePolicyDto`：
 
 ```json
 {
@@ -84,46 +85,46 @@
 }
 ```
 
-绛栫暐璇箟锛?
+策略语义：
 
 - `egress_mode=local_only`
-  - 鍙湁 `llama_cpp_local` 鍙互浣滀负 active runtime銆?
-  - 杩滅 `openai_compatible` 浼氬湪淇濆瓨銆佹帰娴嬨€佸垪妯″瀷銆佹媺妯″瀷銆佸紩鎿庡惎鍔ㄣ€侀棶绛斿拰绱㈠紩鍑嗗鍓嶈缁熶竴鎷︽埅銆?
+  - 只有 `llama_cpp_local` 可以作为 active runtime。
+  - 远端 `openai_compatible` 会在保存、探测、列模型、拉模型、引擎启动、问答和索引准备前被统一拦截。
 - `egress_mode=allowlist`
-  - 杩滅 endpoint 蹇呴』鍛戒腑 `allowed_model_endpoints`銆?
-  - 鑻?`allowed_models` 闈炵┖锛屽垯 chat / graph / embed 涓夌被妯″瀷鍚嶉兘蹇呴』鍛戒腑鐧藉悕鍗曘€?
+  - 远端 endpoint 必须命中 `allowed_model_endpoints`。
+  - 若 `allowed_models` 非空，则 chat / graph / embed 三类模型名都必须命中白名单。
 
-endpoint 瑙勮寖鍖栬鍒欙細
+endpoint 规范化规则：
 
-- 鍘绘帀棣栧熬绌虹櫧
-- host 缁熶竴灏忓啓
-- 鍘绘帀灏鹃儴 `/`
-- 浠ヨ鑼冨寲鍚庣殑 `scheme://host[:port]/path` 姣旇緝
+- 去掉首尾空白
+- host 统一小写
+- 去掉尾部 `/`
+- 以规范化后的 `scheme://host[:port]/path` 比较
 
-## 杩愯鏃舵敹鍙ｆā鍨?
+## 运行时收口模型
 
-褰撳墠瀹炵幇宸插湪 core銆乨esktop銆乻erver 涓夊眰缁熶竴锛?
+当前实现已在 core、desktop、server 三层统一：
 
-- 鍏变韩绛栫暐鏍￠獙閫昏緫浣嶄簬 `memori-core`銆?
-- server 涓?desktop 鍦ㄤ娇鐢ㄦā鍨嬭缃墠閮戒細璋冪敤鍚屼竴濂?runtime 鏍￠獙鍑芥暟銆?
-- UI 浠嶅彲灞曠ず鍜岀紪杈戣繙绔?provider 閰嶇疆锛屼絾鏄惁鑳界敓鏁堢敱绛栫暐瑁佸喅銆?
-- 琚瓥鐣ラ樆鏂椂涓嶄細鑷姩闈欓粯鍥為€€鍒板埆鐨?provider銆?
+- 共享策略校验逻辑位于 `memori-core`。
+- server 与 desktop 在使用模型设置前都会调用同一套 runtime 校验函数。
+- UI 仍可展示和编辑远端 provider 配置，但是否能生效由策略裁决。
+- 被策略阻断时不会自动静默回退到别的 provider。
 
-杩愯鏃朵紭鍏堢骇锛?
+运行时优先级：
 
-1. 鍏堣В鏋愮幆澧冨彉閲忥紝褰㈡垚 runtime candidate
-2. 鍐嶇敱宸蹭繚瀛?settings 琛ヨ冻缂哄け瀛楁
-3. 鍐嶇敤榛樿鍊煎厹搴?
-4. 鏈€缁?runtime candidate 蹇呴』閫氳繃 enterprise policy 鏍￠獙锛屾墠鍏佽鍚姩鎴栬繍琛?
+1. 先解析环境变量，形成 runtime candidate
+2. 再由已保存 settings 补足缺失字段
+3. 再用默认值兜底
+4. 最终 runtime candidate 必须通过 enterprise policy 校验，才允许启动或运行。
 
-鍏抽敭杈圭晫锛?
+关键边界：
 
-- 鐜鍙橀噺鍙互鎶婇厤缃敹绱э紝鎴栬€呮妸杩愯鏃跺垏鍥炴湰鍦般€?
-- 鐜鍙橀噺涓嶈兘缁曡繃 `local_only` 鎴?`allowlist`銆?
+- 环境变量可以把配置收紧，或者把运行时切回本地。
+- 环境变量不能绕过 `local_only` 或 `allowlist`。
 
-## Server 渚х瓥鐣ユ墽琛岄潰
+## Server 侧策略执行面
 
-褰撳墠瀹炵幇涓紝浠ヤ笅 server 璺緞閮藉彈绛栫暐绾︽潫锛?
+当前实现中，以下 server 路径都受策略约束：
 
 - `POST /api/model-settings`
 - `GET /api/model-settings/validate`
@@ -132,17 +133,17 @@ endpoint 瑙勮寖鍖栬鍒欙細
 - `POST /api/model-settings/pull`
 - `POST /api/ask`
 
-琛屼负璇存槑锛?
+行为说明：
 
-- 绛栫暐澶辫触杩斿洖鏄庣‘鐨?forbidden / policy message锛岃€屼笉鏄吉瑁呮垚鏅€氱綉缁滈敊璇€?
-- 鏇存柊 enterprise policy 鍚庝細瑙﹀彂 engine replacement锛屼笉浼氱户缁部鐢ㄦ棫 runtime銆?
-- 鑻?runtime 鍦ㄥ惎鍔ㄥ墠鍗宠绛栫暐鎷掔粷锛宻erver 浼氭毚闇插垵濮嬪寲閿欒锛岃€屼笉鏄吉瑁呮垚鍋ュ悍杩愯銆?
+- 策略失败返回明确的 forbidden / policy message，而不是伪装成普通网络错误。
+- 更新 enterprise policy 后会触发 engine replacement，不会继续沿用旧 runtime。
+- 若 runtime 在启动前即被策略拒绝，server 会暴露初始化错误，而不是伪装成健康运行。
 
-## Desktop 渚х瓥鐣ユ墽琛岄潰
+## Desktop 侧策略执行面
 
-Desktop 鐜板湪涓?server 淇濇寔鍚岀骇绛栫暐杈圭晫銆?
+Desktop 现在与 server 保持同级策略边界。
 
-瑕嗙洊鍛戒护涓庤矾寰勶細
+覆盖命令与路径：
 
 - `get_enterprise_policy`
 - `set_enterprise_policy`
@@ -150,34 +151,34 @@ Desktop 鐜板湪涓?server 淇濇寔鍚岀骇绛栫暐杈圭晫銆?
 - `list_provider_models`
 - `probe_model_provider`
 - `pull_model`
-- 寮曟搸鏇挎崲 / 鍚姩鏃舵牎楠?
+- 引擎替换 / 启动时校验
 - `ask_vault_structured`
 
-琛屼负璇存槑锛?
+行为说明：
 
-- 杩滅閰嶇疆浠嶅彲鍦ㄨ缃〉缂栬緫銆?
-- 鍦?`local_only` 涓嬶紝闈炴硶杩滅 runtime 涓嶈兘鎴愪负 active runtime銆?
-- 鑻ヤ繚瀛橀厤缃垨鐜鍙橀噺瀵艰嚧褰撳墠 runtime 杩濆弽绛栫暐锛宒esktop 浼氳繘鍏?policy-error / not-ready 鐘舵€侊紝鑰屼笉鏄潤榛樼户缁伐浣溿€?
+- 远端配置仍可在设置页编辑。
+- 在 `local_only` 下，非法远端 runtime 不能成为 active runtime。
+- 若保存配置或环境变量导致当前 runtime 违反策略，desktop 会进入 policy-error / not-ready 状态，而不是静默继续工作。
 
-## 瀹¤鏃ュ織
+## 审计日志
 
-- 璺緞锛歚${CONFIG_DIR}/Memori-Vault/audit.log.jsonl`
-- 鏍煎紡锛氭瘡琛屼竴涓?JSON 浜嬩欢
-- 甯歌鍔ㄤ綔锛?
+- 路径：`${CONFIG_DIR}/Memori-Vault/audit.log.jsonl`
+- 格式：每行一个 JSON 事件
+- 常见动作：
   - `auth.login`
   - `policy.update`
   - `indexing.reindex`
   - `query.ask`
   - `policy_violation`
 
-瀹¤瑙勫垯锛?
+审计规则：
 
-- `policy_violation` 浼氳褰?provider銆乪ndpoint銆乤ction銆乺esult 涓庨敊璇俊鎭笂涓嬫枃銆?
-- 瀹¤涓笉寰楁硠闇?API key 鏄庢枃銆?
+- `policy_violation` 会记录 provider、endpoint、action、result 与错误信息上下文。
+- 审计中不得泄露 API key 明文。
 
-## 杩愮淮鎸囨爣
+## 运维指标
 
-`GET /api/admin/metrics` 鎻愪緵锛?
+`GET /api/admin/metrics` 提供：
 
 - `total_requests`
 - `failed_requests`
@@ -185,16 +186,24 @@ Desktop 鐜板湪涓?server 淇濇寔鍚岀骇绛栫暐杈圭晫銆?
 - `ask_failed`
 - `ask_latency_avg_ms`
 
-鍙敱缃戝叧鎴?exporter 姹囧叆 Prometheus / Grafana銆?
+可由网关或 exporter 汇入 Prometheus / Grafana。
 
-## 绉佹湁鍖栭儴缃茶祫浜?
+## 私有化部署资产
 
-瑙?[`deploy/README.md`](../deploy/README.md)锛?
+见 [`deploy/README.md`](../../deploy/README.md)：
 
-- systemd 鍗曞厓妯℃澘
-- 鐜鍙橀噺妯℃澘
-- 澶囦唤/鎭㈠鑴氭湰
-# Memory OS Lite 浼佷笟浠峰€?
-Memori-Vault 鐨勪紒涓氳矾绾挎槸 **local-first verifiable memory**锛屼笉鏄簯浼樺厛 RAG 鏈嶅姟銆傝缁嗘灦鏋勮 [MEMORY_OS_LITE.md](../architecture/MEMORY_OS_LITE.md)銆?
-浼佷笟渚у簲閲嶇偣寮鸿皟锛?
-- SQLite 缁х画浣滀负榛樿瀛樺偍鍐呮牳锛屾枃妗ｇ储寮曘€佽蹇嗐€佺敓鍛藉懆鏈熸棩蹇椼€佸浘璋卞厓鏁版嵁鍜屽璁′俊鎭粯璁ょ暀鍦ㄦ湰鍦般€?- Evidence Firewall 鎶婃枃妗?citation 涓?conversation/project/preference memory 鍒嗗紑锛岄伩鍏嶉暱鏈熻蹇嗘薄鏌撴枃妗ｈ瘉鎹摼銆?- MCP full-control 鍙互鏆撮湶鏌ヨ銆佹潵婧愩€佺储寮曘€佹ā鍨嬨€佽缃€佸浘璋卞拰璁板繂宸ュ叿锛屼絾 memory write 蹇呴』鏈夋潵婧愩€佸璁″拰鍙挙閿€璺緞銆?- `answer_source_mix`銆乣memory_context`銆乣source_groups`銆乣failure_class`銆乣context_budget_report` 鍙互甯姪瀹¤绛旀鏉ユ簮鍜屽け璐ュ師鍥犮€?- 妯″瀷 egress policy 鏄不鐞嗚竟鐣岋紝鏈湴閮ㄧ讲涓嶅簲闈欓粯鍥為€€鍒拌繙绋?provider銆?
+- systemd 单元模板
+- 环境变量模板
+- 备份/恢复脚本
+
+## Memory OS Lite 企业价值
+
+Memori-Vault 的企业路线是 **local-first verifiable memory**，不是云优先 RAG 服务。详细架构见 [MEMORY_OS_LITE.md](../architecture/MEMORY_OS_LITE.md)。
+
+企业侧应重点强调：
+
+- SQLite 继续作为默认存储内核，文档索引、记忆、生命周期日志、图谱元数据和审计信息默认留在本地。
+- Evidence Firewall 把文档 citation 与 conversation/project/preference memory 分开，避免长期记忆污染文档证据链。
+- MCP full-control 可以暴露查询、来源、索引、模型、设置、图谱和记忆工具，但 memory write 必须有来源、审计和可撤销路径。
+- `answer_source_mix`、`memory_context`、`source_groups`、`failure_class`、`context_budget_report` 可以帮助审计答案来源和失败原因。
+- 模型 egress policy 是治理边界，本地部署不应静默回退到远程 provider。

@@ -10,9 +10,7 @@ English version: [CONTRIBUTING.en.md](./CONTRIBUTING.en.md)
 ## 1. 先读文档
 
 - 产品概览：`README.md`
-- 英文概览：`README.zh-CN.md`
-- 工程规则：`AI.md`
-- UI 基线：`UI.md`
+- 英文概览：`README.en.md`
 
 ## 2. 仓库结构
 
@@ -66,10 +64,8 @@ pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 ## 7. 文档同步规则
 
 只要行为或接口变更，必须同 PR 更新：
-- `README.md` + `README.zh-CN.md`
-- `CONTRIBUTING.md` + `CONTRIBUTING.zh-CN.md`
-- `AI.md`（工程规则）
-- `UI.md`（视觉交互基线变化时）
+- `README.md` + `README.en.md`
+- `CONTRIBUTING.md` + `CONTRIBUTING.en.md`
 
 ## 8. PR 检查清单
 

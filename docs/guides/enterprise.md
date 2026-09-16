@@ -202,7 +202,7 @@ These can be scraped by your gateway/exporter and bridged to Prometheus/Grafana.
 
 ## Deployment Assets
 
-See [`deploy/README.md`](../deploy/README.md):
+See [`deploy/README.md`](../../deploy/README.md):
 
 - systemd unit template
 - env template
