@@ -627,7 +627,11 @@ fn extract_docx_text(path: &Path, allow_ocr: bool) -> Option<String> {
     std::io::Read::read_to_end(&mut xml_reader, &mut buf).ok()?;
 
     let mut reader = quick_xml::Reader::from_reader(&buf[..]);
-    reader.config_mut().trim_text(true);
+    // 不开 trim_text：quick-xml 0.41 把实体引用拆成独立事件后，trim 会把被实体
+    // 切开的片段各自去空白，导致 `A &amp; B` 抽成 `A&B`（英文语料尤其伤分词）。
+    // 各处理器都只在叶子内容元素内取文本，XML 缩进空白落在这些元素之外、被门控
+    // 丢弃，所以关掉 trim 不会引入缩进噪声；需要去空白的地方在落盘处显式 trim。
+    reader.config_mut().trim_text(false);
     let mut out = String::new();
     let mut in_text = false;
     let mut buf = Vec::new();
@@ -665,7 +669,12 @@ fn extract_docx_text(path: &Path, allow_ocr: bool) -> Option<String> {
                 }
             }
             Ok(quick_xml::events::Event::Text(e)) => {
-                if in_text && let Ok(t) = e.unescape() {
+                if in_text && let Some(t) = xml_text_content(&e) {
+                    out.push_str(&t);
+                }
+            }
+            Ok(quick_xml::events::Event::GeneralRef(e)) => {
+                if in_text && let Some(t) = xml_entity_text(&e) {
                     out.push_str(&t);
                 }
             }
@@ -1111,7 +1120,11 @@ fn extract_pptx_text(path: &Path) -> Option<String> {
 /// Parse a single pptx slide XML buffer, appending its `<a:t>` text to `out`.
 fn extract_pptx_slide(xml: &[u8], out: &mut String) {
     let mut reader = quick_xml::Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
+    // 不开 trim_text：quick-xml 0.41 把实体引用拆成独立事件后，trim 会把被实体
+    // 切开的片段各自去空白，导致 `A &amp; B` 抽成 `A&B`（英文语料尤其伤分词）。
+    // 各处理器都只在叶子内容元素内取文本，XML 缩进空白落在这些元素之外、被门控
+    // 丢弃，所以关掉 trim 不会引入缩进噪声；需要去空白的地方在落盘处显式 trim。
+    reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
     let mut in_text = false;
 
@@ -1131,7 +1144,12 @@ fn extract_pptx_slide(xml: &[u8], out: &mut String) {
                 }
             }
             Ok(quick_xml::events::Event::Text(e)) => {
-                if in_text && let Ok(t) = e.unescape() {
+                if in_text && let Some(t) = xml_text_content(&e) {
+                    out.push_str(&t);
+                }
+            }
+            Ok(quick_xml::events::Event::GeneralRef(e)) => {
+                if in_text && let Some(t) = xml_entity_text(&e) {
                     out.push_str(&t);
                 }
             }
@@ -1192,7 +1210,11 @@ fn read_xlsx_shared_strings(archive: &mut zip::ZipArchive<std::fs::File>) -> Vec
     }
 
     let mut reader = quick_xml::Reader::from_reader(&buf[..]);
-    reader.config_mut().trim_text(true);
+    // 不开 trim_text：quick-xml 0.41 把实体引用拆成独立事件后，trim 会把被实体
+    // 切开的片段各自去空白，导致 `A &amp; B` 抽成 `A&B`（英文语料尤其伤分词）。
+    // 各处理器都只在叶子内容元素内取文本，XML 缩进空白落在这些元素之外、被门控
+    // 丢弃，所以关掉 trim 不会引入缩进噪声；需要去空白的地方在落盘处显式 trim。
+    reader.config_mut().trim_text(false);
     let mut xbuf = Vec::new();
     let mut current = String::new();
     let mut in_si = false;
@@ -1219,7 +1241,15 @@ fn read_xlsx_shared_strings(archive: &mut zip::ZipArchive<std::fs::File>) -> Vec
             Ok(quick_xml::events::Event::Text(e)) => {
                 if in_si
                     && in_text
-                    && let Ok(t) = e.unescape()
+                    && let Some(t) = xml_text_content(&e)
+                {
+                    current.push_str(&t);
+                }
+            }
+            Ok(quick_xml::events::Event::GeneralRef(e)) => {
+                if in_si
+                    && in_text
+                    && let Some(t) = xml_entity_text(&e)
                 {
                     current.push_str(&t);
                 }
@@ -1238,13 +1268,21 @@ fn read_xlsx_shared_strings(archive: &mut zip::ZipArchive<std::fs::File>) -> Vec
 /// appending tab-separated rows to `out`.
 fn extract_xlsx_sheet(xml: &[u8], shared: &[String], out: &mut String) {
     let mut reader = quick_xml::Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
+    // 不开 trim_text：quick-xml 0.41 把实体引用拆成独立事件后，trim 会把被实体
+    // 切开的片段各自去空白，导致 `A &amp; B` 抽成 `A&B`（英文语料尤其伤分词）。
+    // 各处理器都只在叶子内容元素内取文本，XML 缩进空白落在这些元素之外、被门控
+    // 丢弃，所以关掉 trim 不会引入缩进噪声；需要去空白的地方在落盘处显式 trim。
+    reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
     let mut cell_is_shared = false;
     let mut in_value = false;
     let mut in_inline_text = false;
     let mut first_in_row = true;
     let mut row_has_cell = false;
+    // 单元格文本缓冲：quick-xml 0.41 起实体引用单独成 GeneralRef 事件，一个
+    // <v>/<t> 会被拆成多个 Text + GeneralRef。若沿用"每个 Text 事件推一个单元格"，
+    // 含 & < > 的单元格会被拆成好几个。改为累积、在闭合标签处一次性落盘。
+    let mut cell_buf = String::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -1254,35 +1292,55 @@ fn extract_xlsx_sheet(xml: &[u8], shared: &[String], out: &mut String) {
                     row_has_cell = false;
                 }
                 b"c" => cell_is_shared = xlsx_cell_is_shared(&e),
-                b"v" => in_value = true,
-                b"t" => in_inline_text = true,
+                b"v" => {
+                    in_value = true;
+                    cell_buf.clear();
+                }
+                b"t" => {
+                    in_inline_text = true;
+                    cell_buf.clear();
+                }
                 _ => {}
             },
             Ok(quick_xml::events::Event::End(e)) => match e.name().as_ref() {
-                b"v" => in_value = false,
-                b"t" => in_inline_text = false,
+                b"v" => {
+                    in_value = false;
+                    let value = if cell_is_shared {
+                        cell_buf
+                            .trim()
+                            .parse::<usize>()
+                            .ok()
+                            .and_then(|i| shared.get(i))
+                            .cloned()
+                            .unwrap_or_default()
+                    } else {
+                        cell_buf.clone()
+                    };
+                    push_xlsx_cell(out, &value, &mut first_in_row, &mut row_has_cell);
+                    cell_buf.clear();
+                }
+                b"t" => {
+                    in_inline_text = false;
+                    push_xlsx_cell(out, cell_buf.trim(), &mut first_in_row, &mut row_has_cell);
+                    cell_buf.clear();
+                }
                 b"row" if row_has_cell => {
                     push_newline_if_needed(out, 1);
                 }
                 _ => {}
             },
             Ok(quick_xml::events::Event::Text(e)) => {
-                if let Ok(raw) = e.unescape() {
-                    if in_value {
-                        let value = if cell_is_shared {
-                            raw.trim()
-                                .parse::<usize>()
-                                .ok()
-                                .and_then(|i| shared.get(i))
-                                .cloned()
-                                .unwrap_or_default()
-                        } else {
-                            raw.to_string()
-                        };
-                        push_xlsx_cell(out, &value, &mut first_in_row, &mut row_has_cell);
-                    } else if in_inline_text {
-                        push_xlsx_cell(out, &raw, &mut first_in_row, &mut row_has_cell);
-                    }
+                if (in_value || in_inline_text)
+                    && let Some(t) = xml_text_content(&e)
+                {
+                    cell_buf.push_str(&t);
+                }
+            }
+            Ok(quick_xml::events::Event::GeneralRef(e)) => {
+                if (in_value || in_inline_text)
+                    && let Some(t) = xml_entity_text(&e)
+                {
+                    cell_buf.push_str(&t);
                 }
             }
             Ok(quick_xml::events::Event::Eof) => break,
@@ -1318,6 +1376,25 @@ fn openxml_part_order(name: &str, prefix: &str) -> u32 {
         .and_then(|rest| rest.strip_suffix(".xml"))
         .and_then(|digits| digits.parse().ok())
         .unwrap_or(u32::MAX)
+}
+
+/// 取 XML 文本事件的内容（仅解码；实体不在 Text 事件里，见 `xml_entity_text`）。
+fn xml_text_content(e: &quick_xml::events::BytesText<'_>) -> Option<String> {
+    e.xml10_content().ok().map(|c| c.into_owned())
+}
+
+/// 解析实体引用事件（`&amp;` / `&lt;` / `&#39;` …）为其字符。
+///
+/// quick-xml 0.41 起实体引用**不再包含在 `Event::Text` 里**，而是单独发
+/// `Event::GeneralRef`（同时移除了 `BytesText::unescape()`）。若只处理 Text，
+/// OOXML 正文里的 `&amp;` / `&lt;` 会被静默丢掉——抽取结果看着正常、实际缺字，
+/// 索引与引用都会被污染。这里把实体还原成 `&name;` 交给 `escape::unescape`，
+/// 命名实体与数字实体（`&#39;` / `&#x27;`）走同一条路径。
+fn xml_entity_text(e: &quick_xml::events::BytesRef<'_>) -> Option<String> {
+    let name = e.decode().ok()?;
+    quick_xml::escape::unescape(&format!("&{name};"))
+        .ok()
+        .map(|c| c.into_owned())
 }
 
 fn push_newline_if_needed(out: &mut String, target_count: usize) {
@@ -1482,6 +1559,40 @@ mod tests {
         assert!(
             text.contains("每月第二个周四22:10"),
             "inline string missing: {text}"
+        );
+    }
+    /// quick-xml 0.41 把解码与实体反转义拆开（`BytesText::unescape()` 被移除，
+    /// `xml10_content()` 只解码，实体处理在 `escape::unescape()`）。迁移时若只调
+    /// `xml10_content()`，抽取文本会留下字面 `&amp;` / `&lt;` / `&#39;` 并写进索引，
+    /// 污染检索与引用。这里用真实 OOXML 实体把两步都锁住。
+    #[test]
+    fn ooxml_text_entities_are_unescaped() {
+        let shared = concat!(
+            r#"<?xml version="1.0"?><sst><si><t>"#,
+            r#"A&amp;B &lt;阈值&gt; &quot;窗口&quot; &#39;已锁&#39;"#,
+            r#"</t></si></sst>"#
+        );
+        let sheet = r#"<?xml version="1.0"?><worksheet><sheetData>
+<row r="1"><c r="A1" t="s"><v>0</v></c></row>
+</sheetData></worksheet>"#;
+        let path = unique_temp("entities.xlsx");
+        build_zip(
+            &path,
+            &[
+                ("xl/sharedStrings.xml", shared),
+                ("xl/worksheets/sheet1.xml", sheet),
+            ],
+        );
+        let text = super::extract_document_text(&path).expect("extract xlsx");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            text.contains(r#"A&B <阈值> "窗口" '已锁'"#),
+            "实体未被反转义，got: {text}"
+        );
+        assert!(
+            !text.contains("&amp;") && !text.contains("&lt;") && !text.contains("&#39;"),
+            "残留字面实体，got: {text}"
         );
     }
 }

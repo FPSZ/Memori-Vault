@@ -6,6 +6,19 @@
 version = 2
 # yanked 的 crate 视为错误（已被上游撤回）
 yanked = "deny"
+# 漏洞（vulnerability）一律阻断，不在此放行——下面只放行 unmaintained 类。
+#
+# unmaintained 只看本 workspace 的直接依赖：传递依赖用什么库不由我们决定，
+# 上游不换我们换不掉，全量检查只会制造无法处理的红灯、让人开始忽略 CI 信号。
+unmaintained = "workspace"
+ignore = [
+    # bincode 1.x 已不再维护，继任者是 2.x。但这里序列化的是**持久化在 SQLite
+    # 里的向量 blob**（memori-storage document_index.rs / store.rs），而 bincode 2
+    # 默认 wire format 与 1.x 不兼容——直接升级会让所有既有库读不出向量。
+    # 迁移需要走 bincode 2 的 legacy() 配置并对既有库做读写回归验证，
+    # 属于独立任务，不随依赖升级顺手做。
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1.x 不再维护；升 2.x 涉及已落库向量的 wire format 兼容，需单独迁移验证" },
+]
 
 [bans]
 # 同一 crate 多版本只警告，不阻断 CI
