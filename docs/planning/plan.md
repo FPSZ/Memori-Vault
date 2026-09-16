@@ -554,7 +554,7 @@ GPT 修复计划（泛化去噪 + 覆盖率门控，无实体硬编码）：
 **不在本阶段**（记录留档，后续单独成轮）：A 类 gating 误拒放行、长文 Parent-Doc 扩展、跨语言 V119 双语扩展、作答层 LLM-judge 评测——详见 `RETRIEVAL_BASELINE_V2.md` 与 IMPROVEMENTS.md 末节。（**OCR 已落地**，见上方"已做"表；剩余边界见 `RETRIEVAL_BASELINE_V2.md`「OCR 接入与边界」。）
 
 ## Change Log
-变更日志已迁移至 `docs/planning/PLAN_CHANGELOG.md`，便于保持计划正文聚焦执行项。
+计划级变更日志已不再单独维护（原 `docs/planning/PLAN_CHANGELOG.md` 已随仓库整理移除），历史变更请查 git 提交记录。
 
 ## Architecture Overlay: Memory OS Lite
 

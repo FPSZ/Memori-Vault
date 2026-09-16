@@ -1,0 +1,73 @@
+name: Perf Scale
+
+# 50k 规模压测 CI 复跑：手动触发（可调参）+ 每周日定时全量 50k。
+# 结论阈值：并发 P50 / 顺序 P50（争用系数）不得超过 2.0，超标即本 run 失败。
+# 报告 JSON 作为 artifact 上传：perf-scale-report-<docs>/perf_scale_ci_report.json
+# 本地复跑命令见 docs/qa/PERF_SCALE_50K.md。
+
+on:
+  workflow_dispatch:
+    inputs:
+      docs:
+        description: '文档数（默认 50000 全量；排查时可跑 10000/1000 快档）'
+        required: false
+        default: '50000'
+      queries:
+        description: '查询数'
+        required: false
+        default: '300'
+      max_contention_factor:
+        description: '争用系数门槛（默认 2.0）'
+        required: false
+        default: '2.0'
+  schedule:
+    - cron: '34 2 * * 0' # 每周日 02:34 UTC（避开整点洪峰）
+
+concurrency:
+  group: perf-scale
+  # false：手动触发与周日定时 50k 并行时排队等待，而不是取消进行中的 2.5h 运行
+  # （与 desktop-release.yml 的发布型 job 先例一致）。
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  perf-scale:
+    name: perf-scale (docs=${{ github.event.inputs.docs || '50000' }})
+    runs-on: ubuntu-latest
+    # 50k 实测 ~2.5h（含建索引），留足编译与调度余量
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Disk space check (50k DB 约 11GB，注意 runner 14GB 上限)
+        run: df -h .
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run perf scale (offline deterministic, no rerank)
+        shell: bash
+        run: |
+          cargo run --release -p memori-core --example perf_scale -- \
+            --docs "${{ github.event.inputs.docs || '50000' }}" \
+            --sections 50 \
+            --queries "${{ github.event.inputs.queries || '300' }}" \
+            --concurrency 8 \
+            --report target/perf_scale_ci_report.json \
+            --max-contention-factor "${{ github.event.inputs.max_contention_factor || '2.0' }}"
+
+      - name: Upload report artifact
+        # 断言失败时才是最需要看报告的时候：必须 always()，否则恰好在 run FAIL 时丢掉 artifact。
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-scale-report-${{ github.event.inputs.docs || '50000' }}
+          path: target/perf_scale_ci_report.json
+          if-no-files-found: error

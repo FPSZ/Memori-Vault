@@ -90,6 +90,11 @@ pub fn build_openai_url(endpoint: &str, tail: &str) -> String {
     if host.ends_with('/') {
         return format!("{host}{tail}");
     }
+    // 防御：endpoint 已显式带 /v1（无尾斜杠）时不再重复追加，
+    // 避免拼成 /v1/v1/... 导致 404（对大小写不敏感）。
+    if host.to_ascii_lowercase().ends_with("/v1") {
+        return format!("{host}/{tail}");
+    }
     format!("{}/v1/{}", host.trim_end_matches('/'), tail)
 }
 
@@ -456,6 +461,19 @@ mod tests {
         assert_eq!(
             build_openai_url("https://api.example.com/custom/", "models"),
             "https://api.example.com/custom/models"
+        );
+    }
+
+    /// endpoint 显式带 /v1 但**无尾斜杠**时不应再追加一层 /v1（曾实测拼成 /v1/v1 导致 404）。
+    #[test]
+    fn build_openai_url_does_not_double_v1_suffix() {
+        assert_eq!(
+            build_openai_url("https://api.example.com/v1", "chat/completions"),
+            "https://api.example.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_openai_url("http://localhost:11434/v1", "embeddings"),
+            "http://localhost:11434/v1/embeddings"
         );
     }
 

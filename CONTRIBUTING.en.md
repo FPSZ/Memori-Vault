@@ -10,9 +10,7 @@ When in doubt, prioritize correctness, observability, and first-answer speed.
 ## 1. Read First
 
 - Product overview: `README.md`
-- Chinese overview: `README.zh-CN.md`
-- Engineering rules: `AI.md`
-- UI baseline: `UI.md`
+- Chinese overview: `README.md`
 
 ## 2. Repository Layout
 
@@ -67,10 +65,8 @@ pnpm --dir ui run dev -- --host 127.0.0.1 --port 1420 --strictPort
 ## 7. Documentation Rule
 
 If behavior or interface changes, update docs in the same PR:
-- `README.md` + `README.zh-CN.md`
-- `CONTRIBUTING.md` + `CONTRIBUTING.zh-CN.md`
-- `AI.md` (engineering rules)
-- `UI.md` (if visual/interaction baseline changed)
+- `README.md` + `README.en.md`
+- `CONTRIBUTING.md` + `CONTRIBUTING.en.md`
 
 ## 8. PR Checklist
 

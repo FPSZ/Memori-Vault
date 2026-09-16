@@ -75,6 +75,8 @@ pub(crate) struct AppSettings {
     /// OCR tesseract 可执行文件路径（审计 Q6）；启动时注入 `MEMORI_OCR_TESSERACT_PATH`。
     #[serde(default)]
     pub(crate) ocr_tesseract_path: Option<String>,
+    #[serde(default)]
+    pub(crate) index_filter: Option<memori_core::IndexFilterConfig>,
     // legacy fields for backwards compatibility
     pub(crate) provider: Option<String>,
     pub(crate) endpoint: Option<String>,
@@ -541,5 +543,49 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 服务器侧此前会静默丢弃 settings.json 里的 index_filter（字段缺失）；
+    /// 该测试固定反序列化行为，防止服务器模式再次忽略索引筛选配置。
+    #[test]
+    fn app_settings_parses_index_filter() {
+        let json = r#"{
+            "watch_root": "C:/vault",
+            "index_filter": {
+                "enabled": true,
+                "include_extensions": ["md", "txt"],
+                "exclude_extensions": ["log"],
+                "exclude_paths": ["ui/node_modules/**", "target/**"],
+                "include_paths": [],
+                "min_mtime": null,
+                "max_mtime": null,
+                "min_size": null,
+                "max_size": null
+            }
+        }"#;
+        let settings: AppSettings = serde_json::from_str(json).expect("settings 反序列化失败");
+        let filter = settings
+            .index_filter
+            .expect("index_filter 应被解析而非丢弃");
+        assert!(filter.enabled);
+        assert_eq!(filter.include_extensions, vec!["md", "txt"]);
+        assert_eq!(filter.exclude_extensions, vec!["log"]);
+        assert_eq!(
+            filter.exclude_paths,
+            vec!["ui/node_modules/**", "target/**"]
+        );
+    }
+
+    /// 未配置 index_filter 时保持 None（默认放行所有支持格式）。
+    #[test]
+    fn app_settings_without_index_filter_defaults_to_none() {
+        let json = r#"{ "watch_root": "C:/vault" }"#;
+        let settings: AppSettings = serde_json::from_str(json).expect("settings 反序列化失败");
+        assert!(settings.index_filter.is_none());
     }
 }

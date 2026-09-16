@@ -18,7 +18,6 @@ This directory is organized by document purpose. Keep new files in the matching 
 ## Planning
 
 - [Plan](./planning/plan.md): roadmap, phases, acceptance gates.
-- [Plan changelog](./planning/PLAN_CHANGELOG.md): plan-level history and major decision log.
 
 ## QA
 

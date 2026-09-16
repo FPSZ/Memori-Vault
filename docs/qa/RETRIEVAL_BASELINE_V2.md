@@ -190,6 +190,38 @@ bench：`cargo run -p memori-core --example graph_bench -- <files>`（对每个 
 - **实测**（本机 tesseract + `chi_sim`，样本 `Memory_Test_V2/special_005_扫描件_苍岭_对账.pdf`）：每页解码出 1 张图、单页约 0.8s，能识别出「…项目的对账窗口为每月 8 号…」等正文；但**实体名会被误读**（`苍岭` → `苑岭/苔岭`）。结论：OCR 文本可用于**召回辅助**，不宜当作精确匹配/精确引用口径。
 - **已知边界**：混合型 PDF（有文本层 + 扫描页）不对扫描页 OCR；`ppt`/`xlsx` 内嵌图未接入；`CCITTFaxDecode`（G4 传真压缩，黑白扫描件常见）与 `JPXDecode`（JPEG2000）暂不支持；单图解码后像素上限 128 MB；位深只接受 8 bit/通道（其余跳过，避免把解码噪声写进知识库）。
 - **自动化验证**：`memori-core` 有真实扫描件的 OCR 端到端测试（`scanned_pdf_is_indexed_through_ocr_when_available`，**无 tesseract 时自动跳过**）；CI 的 Linux job 安装 `tesseract-ocr` + `tesseract-ocr-chi-sim`，保证该测试真实执行。
+## 作答层 LLM-judge 基线（2026-08-24 新增）
+
+此前"答案题正确"只用 top-k 命中当代理（见上表注），**从不看答案文本**。`--judge` 档补齐该闭环：对应答题走真实问答管线生成答案，再由 chat 模型对照 `target_clues` 判 correct/partial/incorrect（correct=1、partial=0.5、incorrect=0），逐题理由写入报告。judge 实现见 `memori-core/src/answer_judge.rs`，harness 入口 `--judge`。
+
+### 首跑环境（本机受限配置，非官方满配）
+
+- 嵌入：`qwen3-embedding:0.6b`（Ollama @ 11434）
+- 作答 + judge：`deepseek-r1:1.5b`（最小可用档，替代满配的 7B+）
+- **重排：未接入**（rerank_applied_rate=0%）——v2 满配基线的 bge-reranker-v2-m3 在本机不可用
+- 图谱端点置为不可达（快速失败，本机显存 6GB 无法同时承载图谱/嵌入/作答）
+
+### 结果（本地 `--judge` 跑数，126 题同一次跑）
+
+> 逐题明细（每题的 judge 判分与理由）**不入库**：这类文件每跑一次基准就整体重写，进仓库只会带来 diff 噪声与体积膨胀。需要存档时以 CI artifact / 附件形式提供；仓库里只保留下面的汇总指标。
+
+| 层 | 指标 | 值 |
+| --- | --- | ---: |
+| 检索层 | top1 文档命中 | 0.642 |
+| 检索层 | top3 文档召回 | **0.877** |
+| 检索层 | chunk MRR | 0.717 |
+| 检索层 | 引用有效率 | 1.000 |
+| 检索层 | 拒答正确率 | 0.635 |
+| **作答层** | **answer_correct_rate** | **0.401** |
+| **作答层** | 判定分布 correct/partial/incorrect | **35 / 15 / 56** |
+
+judge 判分成功率 106/106（应答题全部产出判定，零失败）。平均每题 1.48s（检索+判答，不含答案生成）。
+
+### 解读
+
+- **检索召回 ≠ 答案正确**：top3 文档召回 0.877 的同时，答案正确率仅 0.401；**47 题"top3 已命中但答案判 incorrect"**——检索层指标无法暴露的作答盲区被 judge 精确量化。
+- 本跑与官方 v2 满配基线（reject 0.881、rerank 应用率 0.905）的差距主要来自两个环境缺口：**无 rerank**（gating 的 rerank 置信度放行失效，拒答正确率 0.635 显著低于满配）与 **1.5B 小模型作答**（正确率上限低）。故本数字是**受限配置的作答层下限基线**，不作为产品能力口径。
+- 复跑口径：满配环境（7B+ 作答、bge-reranker）下重跑 `--judge`，预期 answer_correct_rate 显著上升；两次跑可直接对比作答层真实增益。
 
 ## 下一步杠杆（仅记录，不在本轮）
 1. gating 对"单事实低词法覆盖"证据的放行（A 类）。
@@ -197,3 +229,4 @@ bench：`cargo run -p memori-core --example graph_bench -- <files>`（对每个 
 3. 长文：分块/gating 对深埋事实的处理（长文题 0/2）。
 4. ~~OCR：图片/扫描件可检索~~ —— **已落地**（tesseract，索引期；见上面「OCR 接入与边界」）。剩余：在装有 tesseract 的环境重跑 `V103–V108`，把新能力写进基线数字。
 5. 重排已切到 bge-reranker-v2-m3（见上节 A/B）。若日后要上 Qwen3-Reranker，需先为其近二值分数重调融合权重 + 重标定 gating 阈值，再复测。
+6. 作答层：在满配环境重跑 `--judge` 建官方作答层基线（本机受限数字仅作下限参考）。

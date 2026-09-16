@@ -1029,10 +1029,6 @@ mod tests {
     /// 从 /Parent 继承）会被整页跳过，扫描件索引成空。ReportLab 生成的那份语料是直接字典，
     /// 对这两个 bug 完全隐形；这里手工构造一份"全间接引用"的最小 PDF 把它锁住。
     ///
-    /// TODO(评审建议)：本测试当前用 lopdf 手工拼 PDF，但保存出来的文件 `get_pages()` 解析为空，
-    /// 尚未定位（`renumber_objects()` 后仍如此）。先置为 ignore 以免 CI 红；建议改用
-    /// Ghostscript / LibreOffice 导出的**真实**间接受资源 PDF 作为 fixture 再启用。
-    #[ignore = "手工构造的间接资源 PDF 尚未被 lopdf 正确解析；待替换为真实导出的 fixture"]
     #[test]
     fn pdf_with_indirect_resources_is_extracted() {
         use flate2::Compression;
@@ -1054,14 +1050,11 @@ mod tests {
         image.set("BitsPerComponent", lopdf::Object::Integer(8));
         image.set("ColorSpace", lopdf::Object::Name(b"DeviceGray".to_vec()));
         image.set("Filter", lopdf::Object::Name(b"FlateDecode".to_vec()));
+        // 必须用 Stream::new：它会写入 /Length（object.rs:602）。结构体字面量绕过这一步，
+        // 存盘后流长度为 0、load 回来 content 为空，解码拿不到像素，测试会假失败。
         doc.objects.insert(
             (1, 0),
-            lopdf::Object::Stream(lopdf::Stream {
-                dict: image,
-                content: compressed,
-                allows_compression: true,
-                start_position: None,
-            }),
+            lopdf::Object::Stream(lopdf::Stream::new(image, compressed)),
         );
         // (2,0) /XObject 字典：值是指向 (1,0) 的间接引用
         let mut xobjects = lopdf::Dictionary::new();

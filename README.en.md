@@ -6,7 +6,7 @@
 
 **Ask your documents. Know exactly where the answer came from.**
 
-[中文](./README.md) | [Contributing](./CONTRIBUTING.en.md) | [Tutorial](./docs/TUTORIAL.md) | [Memory OS Lite Architecture](./docs/architecture/MEMORY_OS_LITE.md)
+[中文](./README.md) | [Contributing](./CONTRIBUTING.en.md) | [Tutorial](./docs/guides/TUTORIAL.md) | [Memory OS Lite Architecture](./docs/architecture/MEMORY_OS_LITE.md)
 
 ---
 

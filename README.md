@@ -6,7 +6,7 @@
 
 **问你的文档，知道答案从哪里来。**
 
-[English](./README.en.md) | [贡献指南](./CONTRIBUTING.md) | [教程](./docs/TUTORIAL.zh-CN.md) | [Memory OS Lite 架构](./docs/architecture/MEMORY_OS_LITE.md)
+[English](./README.en.md) | [贡献指南](./CONTRIBUTING.md) | [教程](./docs/guides/TUTORIAL.zh-CN.md) | [Memory OS Lite 架构](./docs/architecture/MEMORY_OS_LITE.md)
 
 ---
 
@@ -272,6 +272,7 @@ document routing -> chunk retrieval -> RRF/gating -> evidence/citation
 - 跨语言检索（中文问→英文文档）：基础覆盖，query 双语扩展未完整。
 - Source preview 与 Markdown export。
 - OCR（独立图片 / 无文本层扫描件 PDF / DOCX 内嵌图，**索引期** tesseract + `chi_sim`）：已接入，桌面「设置 → 模型」与服务端 `POST /api/settings/ocr-path` 均可配置路径；但**实体名容易被误读**（实测 `苍岭` → `苑岭/苔岭`），且混合型 PDF、`ppt`/`xlsx` 内嵌图、`CCITTFaxDecode`/`JPXDecode` 仍是边界；改配置后需重建索引才会对已入库文件生效。
+- 50k 规模压测：harness 与验证已完成（顺序/并发 P50/P95/P99，争用系数 1.91× 达标 <2×，数据与结论见 `docs/qa/PERF_SCALE_50K.md`）；但 50k 下**单查询绝对延迟仍高**（顺序 P50 ≈ 9.8s，`doc_recall` 占约 81%），文档级召回优化还在路上。
 
 ### 📐 设计中/待实现
 
@@ -280,7 +281,6 @@ document routing -> chunk retrieval -> RRF/gating -> evidence/citation
 - OpenAPI / Swagger spec（memori-server）。
 - API key 接 OS keychain（当前明文存 settings.json）。
 - Memory heat score、conflict resolver、lifecycle classifier。
-- 50k 规模压测（P50/P95，大规模并发性能尚未验证）。
 - 多租户隔离（当前 OIDC 登录后共享同一库）。
 
 ---
